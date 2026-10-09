@@ -16,6 +16,7 @@ namespace Kevsoft.MigrateMongo.IntegrationTests;
 /// Overrides (useful on CI or when iterating locally):
 /// <list type="bullet">
 /// <item><c>MIGRATE_MONGO_TEST_MONGODB_URL</c> – use this MongoDB instead of starting a container (needs a replica set for transactions).</item>
+/// <item><c>MIGRATE_MONGO_TEST_IMAGE</c> – container image to start instead of <c>mongodb/mongodb-atlas-local:8.0</c>.</item>
 /// <item><c>MIGRATE_MONGO_PACKAGE_VERSION</c> + <c>MIGRATE_MONGO_PACKAGE_FEED</c> – use already packed packages instead of packing.</item>
 /// </list>
 /// </remarks>
@@ -71,7 +72,8 @@ public sealed class IntegrationEnvironment : IAsyncLifetime
         var url = Environment.GetEnvironmentVariable("MIGRATE_MONGO_TEST_MONGODB_URL");
         if (string.IsNullOrEmpty(url))
         {
-            _container = new ContainerBuilder(AtlasLocalImage)
+            var image = Environment.GetEnvironmentVariable("MIGRATE_MONGO_TEST_IMAGE") is { Length: > 0 } custom ? custom : AtlasLocalImage;
+            _container = new ContainerBuilder(image)
                 .WithPortBinding(27017, assignRandomHostPort: true)
                 .WithWaitStrategy(Wait.ForUnixContainer().UntilContainerIsHealthy())
                 .Build();

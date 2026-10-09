@@ -38,8 +38,7 @@ $ migrate-mongo init --project src/MyApp.Migrations
 Created migrate-mongo.yaml
 Created src/MyApp.Migrations/MyApp.Migrations.csproj
 Created src/MyApp.Migrations/Program.cs
-Created src/MyApp.Migrations/Migrations/M20261009144500_Initial.cs
-Next: set MONGODB_URL, then run `migrate-mongo status`
+Next: set MONGODB_URL, then run `migrate-mongo create <Name>` and `migrate-mongo status`.
 ```
 
 What gets generated:

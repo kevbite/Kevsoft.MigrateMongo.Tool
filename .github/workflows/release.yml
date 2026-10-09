@@ -1,0 +1,96 @@
+name: Release
+
+# Push a tag like v1.2.0 (or v1.2.0-beta.1 for a prerelease). MinVer turns the tag into the package version.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      packages: write # only used by CI's preview publishing on main, which is skipped for tags
+
+  nuget:
+    name: Publish to NuGet
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      id-token: write # NuGet Trusted Publishing (OIDC); no long-lived API key
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: packages
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: packages/*.nupkg
+
+      - name: NuGet login
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push
+        run: >
+          dotnet nuget push "packages/*.nupkg"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+  github-release:
+    name: GitHub release
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: aot-*
+          path: aot
+
+      - name: Archive binaries
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir release
+          for dir in aot/aot-*; do
+            rid="${dir#aot/aot-}"
+            name="migrate-mongo-${version}-${rid}"
+            if [[ "$rid" == win-* ]]; then
+              (cd "$dir" && zip -q "../../release/${name}.zip" migrate-mongo.exe)
+            else
+              chmod +x "$dir/migrate-mongo"
+              tar -czf "release/${name}.tar.gz" -C "$dir" migrate-mongo
+            fi
+          done
+          (cd release && sha256sum * > SHA256SUMS)
+          ls -la release
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/migrate-mongo-*
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes $prerelease

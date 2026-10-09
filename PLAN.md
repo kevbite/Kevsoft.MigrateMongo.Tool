@@ -8,6 +8,18 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
   user's project uses a different version of our library or of the MongoDB driver.
 * Works well on **build servers** (CI/CD), including through **SSH tunnels / bastions**.
 
+> **Implementation status (v1 build).** Implemented: Abstractions + source generator, engine, MongoDB
+> adapter, Runner, the `migrate-mongo` tool (all commands in §5), unit tests, Atlas Local integration tests
+> (`tests/Kevsoft.MigrateMongo.IntegrationTests`, fixtures in `tests/fixtures`) and GitHub Actions
+> (`ci.yml`, `release.yml`, `nightly.yml`). Where the build differs from this plan:
+> * The tool ships as **one framework-dependent `net8.0` tool package with `RollForward=LatestMajor`** (runs on
+>   any installed runtime ≥ 8), plus **standalone Native AOT binaries** on GitHub Releases. RID-specific AOT tool
+>   packages are deferred.
+> * Spectre.Console isn't used; the tool has a small hand-written renderer, so AOT has no third-party risk.
+> * `IMigrationSource.GetMigrations()` is synchronous; `init` doesn't scaffold an initial migration.
+> * `create` only reads `project` from the config, so it works without connection variables set.
+> * Deferred: tunnels (§6), bundles, Hosting/run-on-startup, Templates, scripting loaders, Docker images.
+
 ---
 
 ## 1. Research summary

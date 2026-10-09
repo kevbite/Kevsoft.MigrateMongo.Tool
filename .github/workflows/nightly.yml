@@ -1,0 +1,55 @@
+name: Nightly
+
+# Catches breaks from upstream (newest Atlas Local image, newest SDK/runtime) before users hit them.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  integration-latest:
+    name: Integration tests (Atlas Local latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Integration tests
+        env:
+          MIGRATE_MONGO_TEST_IMAGE: mongodb/mongodb-atlas-local:latest
+        run: dotnet test --project tests/Kevsoft.MigrateMongo.IntegrationTests -c Release
+
+  report:
+    name: Report failure
+    needs: integration-latest
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the canary issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label canary --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "Nightly failed again: $RUN_URL"
+          else
+            gh label create canary --repo "$GITHUB_REPOSITORY" --color B60205 --description "Nightly upstream compatibility failures" 2>/dev/null || true
+            gh issue create --repo "$GITHUB_REPOSITORY" --label canary --title "Nightly integration tests failing" --body "Nightly failed: $RUN_URL"
+          fi

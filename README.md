@@ -365,9 +365,9 @@ builder.Services
 The [tests/fixtures](tests/fixtures/) folder contains small migrations projects used by the integration tests. They
 also show the setup working end to end:
 
-- **BasicMigrations** creates a collection with a validator, adds a unique index and seeds data.
-- **FailingMigrations** shows how failed migrations are recorded and recovered.
-- **SlowMigrations** shows locking and cancellation.
+- **BasicMigrations** (`net8.0`) creates a collection with a validator, adds a unique index and seeds data using a
+  service injected from `Program.cs`.
+- **FailingMigrations** (`net10.0`) shows that a failed transactional migration is rolled back and recorded.
 
 ## Contributing
 
@@ -376,14 +376,16 @@ also show the setup working end to end:
 1. Hack!
 1. Pull Request
 
-You'll need the .NET SDK pinned in [global.json](global.json) and [Docker](https://www.docker.com/). The
-integration tests use [Testcontainers](https://dotnet.testcontainers.org/) to start MongoDB Atlas Local
-automatically:
+You'll need the .NET 8 and 10 SDKs ([global.json](global.json) pins the one used to build) and
+[Docker](https://www.docker.com/). The integration tests pack the repo into a local NuGet feed, install the tool
+from it, and use [Testcontainers](https://dotnet.testcontainers.org/) to start MongoDB Atlas Local automatically:
 
 ```bash
 dotnet build
-dotnet test --filter "Category!=Integration"   # unit tests
-dotnet test --filter "Category=Integration"    # full tool tests against MongoDB in Docker
+dotnet test --project tests/Kevsoft.MigrateMongo.Tests               # unit tests
+dotnet test --project tests/Kevsoft.MigrateMongo.IntegrationTests    # full tool tests against MongoDB in Docker
 ```
 
-To use your own MongoDB instead of a container, set `MIGRATE_MONGO_TEST_MONGODB_URL`.
+To use your own MongoDB instead of a container, set `MIGRATE_MONGO_TEST_MONGODB_URL` (it must be a replica set
+so transactions work). To test packages you've already packed, set `MIGRATE_MONGO_PACKAGE_VERSION` and
+`MIGRATE_MONGO_PACKAGE_FEED`.

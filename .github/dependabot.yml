@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      test-dependencies:
+        patterns: ['xunit*', 'Shouldly', 'Testcontainers*', 'Microsoft.NET.Test.Sdk']
+    ignore:
+      # MongoDB.Driver in Directory.Packages.props is the deliberate minimum supported version.
+      - dependency-name: MongoDB.Driver
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
