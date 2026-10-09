@@ -121,7 +121,7 @@ internal sealed class ToolCommands(string workingDirectory)
     {
         var className = Scaffolding.ToClassName(invocation.Name ?? "")
                         ?? throw new ToolException(ExitCodes.Failure, $"'{invocation.Name}' isn't a valid migration name; use something like AddEmailIndexToUsers.");
-        var (configPath, config) = LoadConfig(invocation);
+        var (configPath, config) = LoadConfig(invocation, projectOnly: true);
         var projectFile = ResolveProjectFile(configPath, config);
         var migrationsDirectory = Path.Combine(Path.GetDirectoryName(projectFile)!, "Migrations");
         Directory.CreateDirectory(migrationsDirectory);
@@ -385,11 +385,11 @@ internal sealed class ToolCommands(string workingDirectory)
         return "net8.0";
     }
 
-    private (string Path, ResolvedConfig Config) LoadConfig(CliInvocation invocation)
+    private (string Path, ResolvedConfig Config) LoadConfig(CliInvocation invocation, bool projectOnly = false)
     {
         var path = ConfigLoader.Find(invocation.ConfigFile, workingDirectory)
                    ?? throw new ConfigException($"No {ConfigLoader.DefaultFileName} found in {workingDirectory}. Run `migrate-mongo init` to create one, or pass --file.");
-        return (path, ConfigLoader.LoadFile(path, invocation.Environment));
+        return (path, ConfigLoader.LoadFile(path, invocation.Environment, projectOnly: projectOnly));
     }
 
     private static string ResolveProjectFile(string configPath, ResolvedConfig config)

@@ -31,9 +31,10 @@ public static class ConfigLoader
         return AlternativeFileNames.Select(n => Path.Combine(directory, n)).FirstOrDefault(File.Exists);
     }
 
-    public static ResolvedConfig LoadFile(string path, string? environment, Func<string, string?>? getEnvironmentVariable = null)
+    /// <param name="projectOnly">Only resolve <c>project</c>, so commands that don't connect (like <c>create</c>) work without connection variables.</param>
+    public static ResolvedConfig LoadFile(string path, string? environment, Func<string, string?>? getEnvironmentVariable = null, bool projectOnly = false)
     {
-        var resolved = Load(File.ReadAllText(path), environment, getEnvironmentVariable);
+        var resolved = Load(File.ReadAllText(path), environment, getEnvironmentVariable, projectOnly);
         if (resolved.Project is not null)
         {
             resolved.Project = Path.GetFullPath(resolved.Project, Path.GetDirectoryName(path)!);
@@ -42,7 +43,7 @@ public static class ConfigLoader
         return resolved;
     }
 
-    public static ResolvedConfig Load(string yaml, string? environment, Func<string, string?>? getEnvironmentVariable = null)
+    public static ResolvedConfig Load(string yaml, string? environment, Func<string, string?>? getEnvironmentVariable = null, bool projectOnly = false)
     {
         getEnvironmentVariable ??= System.Environment.GetEnvironmentVariable;
 
@@ -70,6 +71,10 @@ public static class ConfigLoader
 
         var config = new ResolvedConfig { Environment = string.IsNullOrEmpty(environment) ? null : environment };
         config.Project = OptionalString(root, "project", getEnvironmentVariable);
+        if (projectOnly)
+        {
+            return config;
+        }
 
         if (root.GetValueOrDefault("mongodb") is Dictionary<string, object?> mongo)
         {

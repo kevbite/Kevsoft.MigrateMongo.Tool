@@ -76,6 +76,14 @@ public sealed class ConfigLoaderTests
     }
 
     [Fact]
+    public void Project_only_loading_does_not_need_connection_variables()
+    {
+        var config = ConfigLoader.Load(Yaml, null, _ => null, projectOnly: true);
+
+        config.Project.ShouldBe("src/MyApp.Migrations");
+    }
+
+    [Fact]
     public void Default_value_is_used_when_the_variable_is_not_set()
     {
         var config = ConfigLoader.Load("mongodb:\n  url: ${NOPE:-mongodb://fallback}\n  databaseName: db\n", null, _ => null);

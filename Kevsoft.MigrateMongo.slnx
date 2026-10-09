@@ -9,6 +9,7 @@
     <Project Path="src/Kevsoft.MigrateMongo/Kevsoft.MigrateMongo.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Kevsoft.MigrateMongo.IntegrationTests/Kevsoft.MigrateMongo.IntegrationTests.csproj" />
     <Project Path="tests/Kevsoft.MigrateMongo.Tests/Kevsoft.MigrateMongo.Tests.csproj" />
   </Folder>
 </Solution>
