@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <Description>MongoDB C# driver adapter for the Kevsoft.MigrateMongo engine. This is the only Kevsoft.MigrateMongo assembly that calls MongoDB driver members, and it sticks to long-standing, non-obsolete APIs so it keeps working on newer driver versions.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kevsoft.MigrateMongo\Kevsoft.MigrateMongo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" />
+  </ItemGroup>
+
+</Project>

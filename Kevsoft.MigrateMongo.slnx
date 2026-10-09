@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kevsoft.MigrateMongo.Abstractions/Kevsoft.MigrateMongo.Abstractions.csproj" />
+    <Project Path="src/Kevsoft.MigrateMongo.Contracts/Kevsoft.MigrateMongo.Contracts.csproj" />
+    <Project Path="src/Kevsoft.MigrateMongo.MongoDriver/Kevsoft.MigrateMongo.MongoDriver.csproj" />
+    <Project Path="src/Kevsoft.MigrateMongo.Runner/Kevsoft.MigrateMongo.Runner.csproj" />
+    <Project Path="src/Kevsoft.MigrateMongo.SourceGenerator/Kevsoft.MigrateMongo.SourceGenerator.csproj" />
+    <Project Path="src/Kevsoft.MigrateMongo.Tool/Kevsoft.MigrateMongo.Tool.csproj" />
+    <Project Path="src/Kevsoft.MigrateMongo/Kevsoft.MigrateMongo.csproj" />
+  </Folder>
+</Solution>

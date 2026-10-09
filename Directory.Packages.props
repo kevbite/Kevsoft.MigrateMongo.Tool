@@ -1,0 +1,30 @@
+<Project>
+  <PropertyGroup>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Libraries -->
+    <PackageVersion Include="MongoDB.Driver" Version="$(MongoDriverVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.12" />
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+
+    <!-- Source generator (must not exceed the Roslyn version shipped with the lowest supported SDK) -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
+
+    <!-- Tool -->
+    <PackageVersion Include="Spectre.Console" Version="0.57.2" />
+
+    <!-- Build -->
+    <PackageVersion Include="MinVer" Version="8.0.0" />
+
+    <!-- Tests -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="Testcontainers" Version="4.16.0" />
+  </ItemGroup>
+</Project>

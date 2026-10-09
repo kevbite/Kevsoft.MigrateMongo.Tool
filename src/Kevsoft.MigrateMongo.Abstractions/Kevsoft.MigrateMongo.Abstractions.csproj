@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Kevsoft.MigrateMongo</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Contracts for writing MongoDB migrations in C# with Kevsoft.MigrateMongo (IMigration, [Migration], MigrationContext). Includes the source generator that discovers migrations at compile time.</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.SourceGenerator\Kevsoft.MigrateMongo.SourceGenerator.csproj"
+                      ReferenceOutputAssembly="false" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Ship the generator inside this package so anyone referencing Abstractions (directly or transitively) gets it. -->
+  <Target Name="PackSourceGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Kevsoft.MigrateMongo.SourceGenerator\Kevsoft.MigrateMongo.SourceGenerator.csproj"
+             Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_GeneratorAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_GeneratorAssembly)" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>

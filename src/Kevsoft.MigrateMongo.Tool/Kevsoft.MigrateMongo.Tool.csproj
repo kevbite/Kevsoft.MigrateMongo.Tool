@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>migrate-mongo</AssemblyName>
+    <RootNamespace>Kevsoft.MigrateMongo.Tool</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>Kevsoft.MigrateMongo.Tool</PackageId>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>migrate-mongo</ToolCommandName>
+    <!-- Run on whatever .NET is installed (8 or any later major); the tool never loads user code. -->
+    <RollForward>LatestMajor</RollForward>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Description>The migrate-mongo command line tool for Kevsoft.MigrateMongo: create, apply and roll back MongoDB migrations written in C#. Works with any .NET runtime (8+) and any supported MongoDB driver version because your migrations run in your own project.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

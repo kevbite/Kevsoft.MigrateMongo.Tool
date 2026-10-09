@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>The Kevsoft.MigrateMongo migration engine: planning, locking, state tracking, checksums and history. Talks to MongoDB through a pluggable store/executor (see Kevsoft.MigrateMongo.MongoDriver).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Abstractions\Kevsoft.MigrateMongo.Abstractions.csproj" />
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
