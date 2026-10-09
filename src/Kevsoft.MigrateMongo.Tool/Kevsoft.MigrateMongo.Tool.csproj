@@ -20,4 +20,8 @@
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
+  </ItemGroup>
+
 </Project>

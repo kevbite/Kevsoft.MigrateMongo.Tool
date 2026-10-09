@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The libraries compile against the oldest supported MongoDB.Driver, whose transitive packages have advisories;
+         consumers pick their own (newer) driver version. -->
+    <NuGetAuditMode>direct</NuGetAuditMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo\Kevsoft.MigrateMongo.csproj" />
+    <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.SourceGenerator\Kevsoft.MigrateMongo.SourceGenerator.csproj" />
+    <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Tool\Kevsoft.MigrateMongo.Tool.csproj" />
+  </ItemGroup>
+
+</Project>
