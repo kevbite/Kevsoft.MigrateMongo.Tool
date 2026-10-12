@@ -27,8 +27,8 @@ internal static class ProcessRunner
             info.ArgumentList.Add(argument);
         }
 
-        info.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] ??= "1";
-        info.Environment["DOTNET_NOLOGO"] ??= "1";
+        info.Environment.TryAdd("DOTNET_CLI_TELEMETRY_OPTOUT", "1");
+        info.Environment.TryAdd("DOTNET_NOLOGO", "1");
         return info;
     }
 

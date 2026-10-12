@@ -116,12 +116,13 @@ public sealed class IntegrationEnvironment : IAsyncLifetime
         ToolPath = Path.Combine(toolDirectory, OperatingSystem.IsWindows() ? "migrate-mongo.exe" : "migrate-mongo");
     }
 
-    /// <summary>Environment variables for every process the tests start.</summary>
+    /// <summary>Environment variables for every process the tests start; <c>null</c> removes an inherited variable.</summary>
     public IReadOnlyDictionary<string, string?> ProcessEnvironment => new Dictionary<string, string?>
     {
         ["NUGET_PACKAGES"] = NuGetPackages,
-        ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
-        ["DOTNET_NOLOGO"] = "1",
+        // Removed (not set) so the tool runs as it would on a machine where users haven't set them (CI sets them).
+        ["DOTNET_CLI_TELEMETRY_OPTOUT"] = null,
+        ["DOTNET_NOLOGO"] = null,
         ["MSBUILDDISABLENODEREUSE"] = "1",
         ["NO_COLOR"] = "1",
     };
@@ -192,7 +193,14 @@ internal static class ProcessHelper
 
         foreach (var (key, value) in environment ?? new Dictionary<string, string?>())
         {
-            info.Environment[key] = value;
+            if (value is null)
+            {
+                info.Environment.Remove(key);
+            }
+            else
+            {
+                info.Environment[key] = value;
+            }
         }
 
         using var process = Process.Start(info)!;
