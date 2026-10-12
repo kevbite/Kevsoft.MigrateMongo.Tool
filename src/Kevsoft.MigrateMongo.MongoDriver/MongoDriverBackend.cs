@@ -34,9 +34,14 @@ public sealed class MongoDriverBackend
     {
         var settings = MongoClientSettings.FromConnectionString(config.MongoUrl);
         settings.ApplicationName ??= "Kevsoft.MigrateMongo";
-        var client = new MongoClient(settings);
-        var database = client.GetDatabase(config.DatabaseName);
-        var store = new MongoMigrationStore(database, config.StateCollection);
+        return Create(new MongoClient(settings), config.DatabaseName, config.StateCollection, services, loggerFactory);
+    }
+
+    /// <summary>Uses an existing client (e.g. the application's own); the caller owns its lifetime.</summary>
+    public static MongoDriverBackend Create(IMongoClient client, string databaseName, string stateCollection, IServiceProvider services, ILoggerFactory loggerFactory)
+    {
+        var database = client.GetDatabase(databaseName);
+        var store = new MongoMigrationStore(database, stateCollection);
         var executor = new MongoMigrationExecutor(client, database, services, loggerFactory);
         return new MongoDriverBackend(client, database, store, executor);
     }

@@ -32,10 +32,14 @@ public sealed class Workspace : IAsyncDisposable
     public static Workspace FromFixture(IntegrationEnvironment environment, string fixture, int lockWaitTimeout = 5, IMongoClient? client = null)
     {
         var workspace = Empty(environment, client);
-        CopyDirectory(Path.Combine(environment.RepositoryRoot, "tests", "fixtures", fixture), Path.Combine(workspace.Directory, fixture));
+        workspace.AddFixture(fixture);
         workspace.WriteConfig(fixture, lockWaitTimeout);
         return workspace;
     }
+
+    /// <summary>Copies another fixture (e.g. one that references the first) into the workspace.</summary>
+    public void AddFixture(string fixture) =>
+        CopyDirectory(Path.Combine(_environment.RepositoryRoot, "tests", "fixtures", fixture), Path.Combine(Directory, fixture));
 
     /// <summary>An empty workspace with only the NuGet/SDK plumbing, for testing <c>init</c>.</summary>
     public static Workspace Empty(IntegrationEnvironment environment, IMongoClient? client = null)

@@ -31,6 +31,7 @@ public sealed class IntegrationEnvironment : IAsyncLifetime
         "Kevsoft.MigrateMongo",
         "Kevsoft.MigrateMongo.MongoDriver",
         "Kevsoft.MigrateMongo.Runner",
+        "Kevsoft.MigrateMongo.Hosting",
         "Kevsoft.MigrateMongo.Tool",
     ];
 

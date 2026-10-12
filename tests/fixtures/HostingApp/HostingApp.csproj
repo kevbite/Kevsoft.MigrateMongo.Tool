@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Integration test fixture: an app that references the BasicMigrations project and applies it on startup.
+       $(MigrateMongoVersion) is supplied by the Directory.Build.props the tests generate. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Kevsoft.MigrateMongo.Hosting" Version="$(MigrateMongoVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BasicMigrations\BasicMigrations.csproj" />
+  </ItemGroup>
+
+</Project>

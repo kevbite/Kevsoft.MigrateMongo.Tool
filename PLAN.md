@@ -18,9 +18,9 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * Spectre.Console isn't used; the tool has a small hand-written renderer, so AOT has no third-party risk.
 > * `IMigrationSource.GetMigrations()` is synchronous; `init` doesn't scaffold an initial migration.
 > * `create` only reads `project` from the config, so it works without connection variables set.
-> * Done since v0.1.1: SSH tunnels (§6, SOCKS + local forward, in the tool only) and automatic retry of transient
->   transaction errors (`transactionRetryTimeout`).
-> * Deferred: bundles, Hosting/run-on-startup, Templates, scripting loaders, Docker images, the
+> * Done since v0.1.1: SSH tunnels (§6, SOCKS + local forward, in the tool only), automatic retry of transient
+>   transaction errors (`transactionRetryTimeout`), and `Kevsoft.MigrateMongo.Hosting` (§4.5).
+> * Deferred: bundles, Templates, scripting loaders, Docker images, the
 >   `Kevsoft.MigrateMongo.Tunnel` package for bundles/hosting.
 
 ---
@@ -283,9 +283,11 @@ public interface IMigrationSource
 ### 4.5 Running in-app
 
 `Kevsoft.MigrateMongo.Hosting`:
-`services.AddMongoMigrations(o => ...).FromAssemblyContaining<AddEmailIndex>()` plus either an
-`IHostedService` that migrates on startup, or `IMigrationRunner` for explicit control. It uses the same
-engine, state collections and lock, so CLI and app runs coordinate safely.
+`services.AddMongoMigrations(o => ...).FromAssemblyContaining<AddEmailIndex>()` plus either `RunOnStartup()`
+(an `IHostedLifecycleService` that migrates in `StartingAsync`, before any hosted service such as the web server
+starts, and fails host startup on error), or `IMongoMigrationRunner` for explicit control. It uses the same
+engine, state collections and lock, so CLI and app runs coordinate safely. The connection comes from
+`ConnectionString` or the app's registered `IMongoClient`; each run gets a DI scope for migration dependencies.
 
 ---
 

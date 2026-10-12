@@ -80,6 +80,7 @@ dotnet add package MongoDB.Driver   # any version >= 3.5, your choice
 | `Kevsoft.MigrateMongo.Abstractions` | `IMigration`, `[Migration]`, `MigrationContext` and the source generator. Reference it directly to keep migrations in a class library. |
 | `Kevsoft.MigrateMongo` | The migration engine: planning, locking, state and checksums. |
 | `Kevsoft.MigrateMongo.MongoDriver` | Engine adapter for the MongoDB C# driver. |
+| `Kevsoft.MigrateMongo.Hosting` | Run migrations from your own app on startup, or on demand with `IMongoMigrationRunner`. |
 
 ### Creating Your First Project
 
@@ -375,21 +376,47 @@ migrate-mongo bundle -r linux-x64 -o out/migrations
 ./out/migrations up --env staging
 ```
 
-### Running on Application Startup 🚧
+### Running on Application Startup
 
-Reference your migrations project from your app and run migrations as a hosted service. App instances and CLI
-runs share the same state and lock, so it's safe when many pods start together:
+Reference your migrations project (or a class library with your migrations) from your app, add the hosting package,
+and apply migrations when the app starts:
+
+```bash
+dotnet add package Kevsoft.MigrateMongo.Hosting
+```
 
 ```csharp
 builder.Services
     .AddMongoMigrations(o =>
     {
-        o.ConnectionString = builder.Configuration.GetConnectionString("Mongo")!;
+        o.ConnectionString = builder.Configuration.GetConnectionString("Mongo"); // or omit to use your registered IMongoClient
         o.DatabaseName = "myapp";
     })
     .FromAssemblyContaining<AddEmailIndexToUsers>()
     .RunOnStartup();
 ```
+
+`RunOnStartup()` applies pending migrations before any hosted service starts, so ASP.NET Core doesn't serve requests
+against an out-of-date database. If a migration fails, or the lock can't be acquired within `LockWaitTimeout`, the
+host fails to start with a `MongoMigrationException`. Migration progress goes to your app's `ILogger`, and migrations
+can take your app's services (including scoped ones) as constructor dependencies.
+
+App instances and CLI runs share the same state collections and lock, so it's safe when many pods start together:
+one applies the migrations, the others wait for the lock and then find nothing to do. Keep the options the same as
+your `migrate-mongo.yaml` (`DatabaseName`, `StateCollection`, `Transaction`, `OnChecksumMismatch`, ...). The
+defaults match the config file's defaults. The state records each app run with `appliedBy.tool` set to
+`app/<application name>`.
+
+To run migrations yourself instead (e.g. from an admin endpoint or a `--migrate` switch), skip `RunOnStartup()` and
+use `IMongoMigrationRunner`:
+
+```csharp
+var runner = app.Services.GetRequiredService<IMongoMigrationRunner>();
+var result = await runner.UpAsync();          // also StatusAsync, PlanAsync, ValidateAsync and ExecuteAsync("down", ...)
+if (result.ExitCode != 0) { /* result.Message says why */ }
+```
+
+SSH tunnels aren't available in-app; use a direct connection or a SOCKS5 proxy in the connection string.
 
 ## Samples
 
@@ -399,6 +426,7 @@ also show the setup working end to end:
 - **BasicMigrations** (`net8.0`) creates a collection with a validator, adds a unique index and seeds data using a
   service injected from `Program.cs`.
 - **FailingMigrations** (`net10.0`) shows that a failed transactional migration is rolled back and recorded.
+- **HostingApp** (`net8.0`) references BasicMigrations and applies them on startup with `Kevsoft.MigrateMongo.Hosting`.
 
 ## Contributing
 

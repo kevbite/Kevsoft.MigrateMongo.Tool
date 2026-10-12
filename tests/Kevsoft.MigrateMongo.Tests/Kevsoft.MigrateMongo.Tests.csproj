@@ -14,12 +14,14 @@
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <Using Include="Xunit" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo\Kevsoft.MigrateMongo.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Hosting\Kevsoft.MigrateMongo.Hosting.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.SourceGenerator\Kevsoft.MigrateMongo.SourceGenerator.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Tool\Kevsoft.MigrateMongo.Tool.csproj" />
   </ItemGroup>

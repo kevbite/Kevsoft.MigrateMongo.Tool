@@ -393,18 +393,19 @@ emits GitHub annotations pointing at the offending file.
 
 ## 9. Running on application startup (optional)
 
-The same migrations project can be referenced from your app instead of, or as well as, the CLI:
+The same migrations project can be referenced from your app instead of, or as well as, the CLI
+(`dotnet add package Kevsoft.MigrateMongo.Hosting`):
 
 ```csharp
 // Program.cs of MyApp.Api
 builder.Services
     .AddMongoMigrations(o =>
     {
-        o.ConnectionString = builder.Configuration.GetConnectionString("Mongo")!;
+        o.ConnectionString = builder.Configuration.GetConnectionString("Mongo"); // or omit to use your IMongoClient
         o.DatabaseName = "myapp";
     })
     .FromAssemblyContaining<MyApp.Migrations.Migrations.AddEmailIndexToUsers>()
-    .RunOnStartup();          // IHostedService; blocks startup until migrations complete
+    .RunOnStartup();          // runs before any hosted service (incl. the web server) starts; failure stops the app
 ```
 
 App instances and CLI runs share the same `_migrations` state and `_migrations.lock` lock. If five pods
