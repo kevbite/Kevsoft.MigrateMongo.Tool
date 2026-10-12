@@ -28,11 +28,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # MinVer needs the history and tags
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x
@@ -50,7 +50,7 @@ jobs:
 
       - name: Upload packages
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages
           path: artifacts/packages
@@ -65,11 +65,11 @@ jobs:
         # The floor the libraries are compiled against, and the newest version we've verified.
         driver: ['3.5.0', '3.12.0']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x
@@ -92,11 +92,11 @@ jobs:
           - { rid: osx-x64, os: macos-15-intel }
           - { rid: osx-arm64, os: macos-latest }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -113,7 +113,7 @@ jobs:
           ./artifacts/aot/${{ matrix.rid }}/migrate-mongo --help
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aot-${{ matrix.rid }}
           path: |
@@ -127,17 +127,17 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x
             10.0.x
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: artifacts/packages
@@ -163,11 +163,11 @@ jobs:
         # The tool targets net8.0 with RollForward=LatestMajor, so it must run on whatever runtime is installed.
         dotnet: ['8.0.x', '10.0.x']
     steps:
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ matrix.dotnet }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: packages
@@ -191,12 +191,12 @@ jobs:
     permissions:
       packages: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: packages
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 

@@ -10,8 +10,17 @@ updates:
     ignore:
       # MongoDB.Driver in Directory.Packages.props is the deliberate minimum supported version.
       - dependency-name: MongoDB.Driver
+      # Shipped libraries target net8.0; a newer major would force it onto every user's project.
+      - dependency-name: Microsoft.Extensions.*
+        update-types: ['version-update:semver-major']
+      # Roslyn version = minimum compiler/SDK that can load the source generator.
+      - dependency-name: Microsoft.CodeAnalysis.*
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']
