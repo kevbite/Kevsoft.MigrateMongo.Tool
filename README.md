@@ -24,7 +24,7 @@ with ideas borrowed from [Mongock](https://mongock.io/), [Flyway](https://flyway
   written before each migration runs, migrations can run in transactions, and checksums detect migrations
   edited after they were applied.
 - **It's built for build servers.** Exit codes are meaningful, `--json` gives machine-readable output, there
-  are per-environment configs and `${ENV_VAR}` secrets, and SSH tunnelling 🚧 reaches databases behind a bastion.
+  are per-environment configs and `${ENV_VAR}` secrets, and built-in SSH tunnelling reaches databases behind a bastion.
 - **Mistakes are caught at compile time.** A source generator discovers migrations without reflection and
   reports duplicate or malformed ids as build errors.
 
@@ -122,6 +122,7 @@ lockTtl: 300                         # seconds; the lock is renewed while runnin
 lockWaitTimeout: 60                  # seconds to wait for another run to finish
 onChecksumMismatch: fail             # fail | warn | ignore
 transaction: auto                    # auto | always | never
+transactionRetryTimeout: 120         # seconds to keep retrying transient transaction errors (0 = off)
 environments:
   prod:
     mongodb:
@@ -215,6 +216,12 @@ public sealed class SplitFullName : IMigration
 
 Some operations, such as building indexes on existing collections, can't run in a transaction. Use
 `TransactionMode.Never` for those. `TransactionMode.Always` fails the migration if transactions aren't available.
+
+If the server reports a `TransientTransactionError` (e.g. a write conflict or a primary election), the whole
+transaction is aborted and the migration runs again from the start. An `UnknownTransactionCommitResult` retries
+just the commit. Retries back off from 100ms up to 5s and stop after `transactionRetryTimeout` seconds
+(default `120`, `0` disables retries). This means **a transactional migration's `UpAsync`/`DownAsync` can run
+more than once**, so keep any side effects outside the database (HTTP calls, files) idempotent.
 
 ### Dependency Injection
 
@@ -316,24 +323,48 @@ jobs:
           PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
 ```
 
-### Tunnelling Through a Bastion 🚧
+### Tunnelling Through a Bastion
 
 If the database is only reachable through a jump host, add a `tunnel:` to the environment. The tool opens an SSH
-connection, verifies the host key, and gives the driver a local SOCKS5 proxy, so every replica set member is
-reachable:
+connection (in-process, no `ssh` binary needed), verifies the host key, and gives the driver a local SOCKS5 proxy,
+so every replica set member is reachable by the hostnames in your connection string:
 
 ```yaml
 environments:
   prod:
     mongodb:
-      url: ${PROD_MONGODB_URL}
+      url: ${PROD_MONGODB_URL}       # e.g. mongodb://db1.internal,db2.internal/?replicaSet=rs0
     tunnel:
-      type: ssh
       host: bastion.example.com
       user: deploy
       privateKey: ${BASTION_SSH_KEY}
       hostKeyFingerprint: SHA256:x9Yb...
 ```
+
+| Setting | Meaning |
+|---|---|
+| `host` / `port` | The SSH server (`port` defaults to `22`). Required: `host`. |
+| `user` | The SSH user. Required. |
+| `password` | Password authentication (also answers keyboard-interactive prompts). |
+| `privateKey` | The private key's contents, e.g. from a CI secret. Literal `\n` sequences are turned into new lines. |
+| `privateKeyPath` | Path to a private key file. `~/` and paths relative to the config file are supported. |
+| `passphrase` | Passphrase for an encrypted private key. |
+| `hostKeyFingerprint` | The server's `SHA256:...` host key fingerprint, as printed by `ssh-keygen -lf`. |
+| `knownHostsPath` | A `known_hosts` file to verify the host key against. Defaults to `~/.ssh/known_hosts`. |
+| `mode` | `socks` (default) or `local`. |
+
+You need `password`, `privateKey` or `privateKeyPath` (not both key settings). The host key is always verified,
+using `hostKeyFingerprint` if set or the `known_hosts` file otherwise. If verification fails, the error shows the
+server's fingerprint so you can pin it. `--insecure-skip-host-key-check` turns verification off; avoid it outside
+throwaway environments.
+
+`socks` mode needs `MongoDB.Driver` 3.12 or later in your migrations project, because that's the first version
+with SOCKS5 proxy support. `local` mode works with any driver version: it forwards a local port to the first host
+in the connection string and connects with `directConnection=true`. It can't use `mongodb+srv://` URLs, and TLS
+host name validation will fail unless the certificate also covers `127.0.0.1`.
+
+Tunnels are a feature of the `migrate-mongo` tool. The standalone runner (`dotnet run` on the migrations project)
+rejects configs with a `tunnel:`.
 
 ### Bundles 🚧
 

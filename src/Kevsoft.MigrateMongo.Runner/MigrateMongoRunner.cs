@@ -162,6 +162,11 @@ public static class MigrateMongoRunner
                                ?? ConfigLoader.Find(null, AppContext.BaseDirectory)
                                ?? throw new ConfigException($"No {ConfigLoader.DefaultFileName} found in the current directory.");
                     var config = ConfigLoader.LoadFile(path, invocation.Environment);
+                    if (config.Tunnel is not null)
+                    {
+                        throw new ConfigException("The config has a 'tunnel', which the standalone runner doesn't support; run it with the migrate-mongo tool (e.g. `migrate-mongo up --runner <this runner>`).");
+                    }
+
                     result = await ExecuteAsync(invocation.Command, invocation.Arguments, config, null, options, entryAssembly, sink, ct);
                 }
                 catch (ConfigException e)
@@ -238,6 +243,7 @@ public static class MigrateMongoRunner
         OnChecksumMismatch = config.OnChecksumMismatch,
         Transaction = config.Transaction,
         AllowOutOfOrder = config.AllowOutOfOrder,
+        TransactionRetryTimeout = TimeSpan.FromSeconds(config.TransactionRetryTimeoutSeconds),
         Environment = config.Environment,
         Provenance = new Provenance
         {

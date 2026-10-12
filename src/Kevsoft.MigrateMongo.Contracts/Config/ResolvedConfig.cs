@@ -25,5 +25,48 @@ public sealed class ResolvedConfig
 
     public bool AllowOutOfOrder { get; set; }
 
+    /// <summary>Seconds a transactional migration keeps retrying transient transaction errors (0 disables retries).</summary>
+    public int TransactionRetryTimeoutSeconds { get; set; } = 120;
+
     public string? Environment { get; set; }
+
+    /// <summary>
+    /// SSH tunnel the tool opens before connecting. Never serialised: the tool handles the tunnel and only passes the
+    /// rewritten <see cref="MongoUrl"/> to the runner, so SSH credentials never leave the tool process.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public TunnelConfig? Tunnel { get; set; }
+}
+
+/// <summary>The <c>tunnel</c> section of the config file.</summary>
+public sealed class TunnelConfig
+{
+    public const string SocksMode = "socks";
+    public const string LocalMode = "local";
+
+    public string Host { get; set; } = "";
+
+    public int Port { get; set; } = 22;
+
+    public string User { get; set; } = "";
+
+    public string? Password { get; set; }
+
+    /// <summary>The private key itself (PEM/OpenSSH text), e.g. from a CI secret.</summary>
+    public string? PrivateKey { get; set; }
+
+    public string? PrivateKeyPath { get; set; }
+
+    public string? Passphrase { get; set; }
+
+    /// <summary>Expected server host key fingerprint, as printed by <c>ssh-keygen -lf</c> (<c>SHA256:...</c>).</summary>
+    public string? HostKeyFingerprint { get; set; }
+
+    public string? KnownHostsPath { get; set; }
+
+    /// <summary>
+    /// <c>socks</c> (default): a SOCKS5 proxy the driver connects through, so replica sets and SRV work (needs
+    /// MongoDB.Driver 3.12+). <c>local</c>: forwards a local port to the first host with <c>directConnection=true</c>.
+    /// </summary>
+    public string Mode { get; set; } = SocksMode;
 }

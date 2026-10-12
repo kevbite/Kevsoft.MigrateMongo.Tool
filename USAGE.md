@@ -59,7 +59,6 @@ environments:
     mongodb:
       url: ${PROD_MONGODB_URL}
     tunnel:
-      type: ssh
       host: bastion.example.com
       user: deploy
       privateKey: ${BASTION_SSH_KEY}
@@ -336,6 +335,9 @@ Because `prod` has a `tunnel:` section, the tool:
 3. launches the runner with the proxy settings, so the driver reaches every replica set member
    (`db1.internal`, `db2.internal`, …) through the bastion;
 4. closes the tunnel when the command finishes.
+
+SOCKS mode needs `MongoDB.Driver` 3.12+ in the migrations project. See the README's "Tunnelling Through a Bastion"
+section for every `tunnel:` setting, `mode: local`, and host key verification.
 
 ### Option B: build once, deploy many (bundles)
 

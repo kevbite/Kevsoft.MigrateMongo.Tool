@@ -11,10 +11,12 @@ namespace Kevsoft.MigrateMongo.IntegrationTests;
 public sealed class Workspace : IAsyncDisposable
 {
     private readonly IntegrationEnvironment _environment;
+    private readonly IMongoClient _client;
 
-    private Workspace(IntegrationEnvironment environment, string directory, string databaseName)
+    private Workspace(IntegrationEnvironment environment, IMongoClient client, string directory, string databaseName)
     {
         _environment = environment;
+        _client = client;
         Directory = directory;
         DatabaseName = databaseName;
     }
@@ -23,23 +25,24 @@ public sealed class Workspace : IAsyncDisposable
 
     public string DatabaseName { get; }
 
-    public IMongoDatabase Database => _environment.Database(DatabaseName);
+    public IMongoDatabase Database => _client.GetDatabase(DatabaseName);
 
     /// <summary>Copies <c>tests/fixtures/{fixture}</c> into a new workspace with a migrate-mongo.yaml for it.</summary>
-    public static Workspace FromFixture(IntegrationEnvironment environment, string fixture, int lockWaitTimeout = 5)
+    /// <param name="client">Client for asserting on and cleaning up the database (default: the shared container).</param>
+    public static Workspace FromFixture(IntegrationEnvironment environment, string fixture, int lockWaitTimeout = 5, IMongoClient? client = null)
     {
-        var workspace = Empty(environment);
+        var workspace = Empty(environment, client);
         CopyDirectory(Path.Combine(environment.RepositoryRoot, "tests", "fixtures", fixture), Path.Combine(workspace.Directory, fixture));
         workspace.WriteConfig(fixture, lockWaitTimeout);
         return workspace;
     }
 
     /// <summary>An empty workspace with only the NuGet/SDK plumbing, for testing <c>init</c>.</summary>
-    public static Workspace Empty(IntegrationEnvironment environment)
+    public static Workspace Empty(IntegrationEnvironment environment, IMongoClient? client = null)
     {
         var directory = Path.Combine(Path.GetTempPath(), "migrate-mongo-it", Guid.NewGuid().ToString("N")[..12]);
         System.IO.Directory.CreateDirectory(directory);
-        var workspace = new Workspace(environment, directory, "it_" + Guid.NewGuid().ToString("N")[..16]);
+        var workspace = new Workspace(environment, client ?? environment.Client, directory, "it_" + Guid.NewGuid().ToString("N")[..16]);
 
         File.WriteAllText(Path.Combine(directory, "nuget.config"), $"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -66,13 +69,15 @@ public sealed class Workspace : IAsyncDisposable
     public string ConfigPath => Path.Combine(Directory, "migrate-mongo.yaml");
 
     public void WriteConfig(string project, int lockWaitTimeout) =>
-        File.WriteAllText(ConfigPath, $"""
+        WriteConfigFile($"""
             project: {project}
             mongodb:
               url: {_environment.MongoUrl}
               databaseName: {DatabaseName}
             lockWaitTimeout: {lockWaitTimeout}
             """);
+
+    public void WriteConfigFile(string yaml) => File.WriteAllText(ConfigPath, yaml);
 
     public string PathOf(params string[] parts) => Path.Combine([Directory, .. parts]);
 
@@ -113,7 +118,7 @@ public sealed class Workspace : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _environment.Client.DropDatabaseAsync(DatabaseName);
+        await _client.DropDatabaseAsync(DatabaseName);
         try
         {
             System.IO.Directory.Delete(Directory, recursive: true);

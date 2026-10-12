@@ -15,6 +15,7 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
 
     <!-- Tool -->
+    <PackageVersion Include="SSH.NET" Version="2026.0.0" />
 
     <!-- Build -->
     <PackageVersion Include="MinVer" Version="8.0.0" />

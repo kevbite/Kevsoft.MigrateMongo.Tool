@@ -4,6 +4,7 @@ using System.Text.Json;
 using Kevsoft.MigrateMongo.Cli;
 using Kevsoft.MigrateMongo.Config;
 using Kevsoft.MigrateMongo.Protocol;
+using Kevsoft.MigrateMongo.Tool.Tunnel;
 
 namespace Kevsoft.MigrateMongo.Tool;
 
@@ -199,6 +200,20 @@ internal sealed class ToolCommands(string workingDirectory)
         }
 
         _progress.Muted($"Runner: Kevsoft.MigrateMongo {handshake.Library} · MongoDB.Driver {handshake.Driver} · .NET {handshake.Runtime} · protocol {protocol}");
+
+        using var tunnel = config.Tunnel is null
+            ? null
+            : await SshTunnel.OpenAsync(config.Tunnel, config.MongoUrl, handshake.Driver, invocation.InsecureSkipHostKeyCheck, _progress.Warning, cancellationToken);
+        if (tunnel is not null)
+        {
+            if (invocation.InsecureSkipHostKeyCheck)
+            {
+                _progress.Warning("The SSH server's host key was not verified (--insecure-skip-host-key-check).");
+            }
+
+            _progress.Muted($"Tunnel: {tunnel.Description}");
+            config.MongoUrl = tunnel.MongoUrl;
+        }
 
         var request = new RunnerRequest
         {

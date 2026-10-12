@@ -18,7 +18,10 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * Spectre.Console isn't used; the tool has a small hand-written renderer, so AOT has no third-party risk.
 > * `IMigrationSource.GetMigrations()` is synchronous; `init` doesn't scaffold an initial migration.
 > * `create` only reads `project` from the config, so it works without connection variables set.
-> * Deferred: tunnels (§6), bundles, Hosting/run-on-startup, Templates, scripting loaders, Docker images.
+> * Done since v0.1.1: SSH tunnels (§6, SOCKS + local forward, in the tool only) and automatic retry of transient
+>   transaction errors (`transactionRetryTimeout`).
+> * Deferred: bundles, Hosting/run-on-startup, Templates, scripting loaders, Docker images, the
+>   `Kevsoft.MigrateMongo.Tunnel` package for bundles/hosting.
 
 ---
 
@@ -58,7 +61,7 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
   longer has. User migration code is compiled against whichever driver they reference, so it's never
   mismatched with itself.
 * SOCKS5 proxy support (`MongoClientSettings.Socks5ProxySettings`, `proxyHost`/`proxyPort` URI options)
-  exists from driver **3.5**.
+  exists from driver **3.12** (verified while building the tunnel; the plan originally said 3.5).
 
 ### 1.4 Connectivity findings
 
@@ -415,14 +418,15 @@ expiresAt, heartbeatAt }`.
 ## 6. Connectivity for build servers
 
 The SSH tunnel runs **in the AOT tool**. It opens an SSH.NET `ForwardedPortDynamic` on `127.0.0.1:<random>`
-and passes it to the runner as SOCKS5 proxy settings, which driver 3.5+ supports. This keeps SSH.NET out
-of the user's dependency graph. Bundles and in-app hosting can opt into the same tunnel via the optional
-`Kevsoft.MigrateMongo.Tunnel` package.
+and passes it to the runner as SOCKS5 proxy URL options, which driver 3.12+ supports (older drivers fail fast
+with a message to upgrade or use `mode: local`). This keeps SSH.NET out of the user's dependency graph.
+Bundles and in-app hosting could later opt into the same tunnel via an optional `Kevsoft.MigrateMongo.Tunnel`
+package; for now the standalone runner rejects `tunnel:` configs.
 
 | Mode | Config | Use case |
 |------|--------|----------|
 | Direct | `mongodb.url` | CI can reach the cluster (Atlas IP allow-list, self-hosted agent in VPC) |
-| **SSH tunnel – SOCKS (default when `tunnel` set)** | `tunnel: { type: ssh, host, port, user, privateKey \| privateKeyPath \| password, passphrase, knownHosts \| hostKeyFingerprint }` | Replica sets / sharded clusters behind a bastion; topology discovery works through the proxy |
+| **SSH tunnel – SOCKS (default when `tunnel` set)** | `tunnel: { host, port, user, password \| privateKey \| privateKeyPath, passphrase, hostKeyFingerprint \| knownHostsPath }` | Replica sets / sharded clusters behind a bastion; topology discovery works through the proxy |
 | SSH tunnel – local forward | `tunnel: { mode: local, ... }` | Rewrites to `directConnection=true` and warns that it reaches only one node |
 | External SOCKS5 proxy | `mongodb.options.proxyHost/proxyPort/...` | Corporate proxies, `ssh -D` started by the pipeline, Teleport/Boundary |
 | Cloud auth | `authMechanism=MONGODB-AWS` (IAM role on agent), X.509 cert path, OIDC (Azure/GCP workload identity) | Secretless CI |

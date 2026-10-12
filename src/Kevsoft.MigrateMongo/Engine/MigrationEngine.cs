@@ -532,13 +532,14 @@ public sealed class MigrationEngine
 
         try
         {
-            await using var scope = await _executor.BeginAsync(transactional, cancellationToken);
-            await _executor.ExecuteAsync(scope, migration, run, cancellationToken);
-            var state = NewState(migration, MigrationStates.Applied, batch, transactional);
-            state.DurationMs = stopwatch.ElapsedMilliseconds;
-            await _store.SaveStateAsync(state, scope, cancellationToken);
-            await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null), scope, cancellationToken);
-            await scope.CommitAsync(cancellationToken);
+            await RunInScopeAsync(migration, transactional, async scope =>
+            {
+                await _executor.ExecuteAsync(scope, migration, run, cancellationToken);
+                var state = NewState(migration, MigrationStates.Applied, batch, transactional);
+                state.DurationMs = stopwatch.ElapsedMilliseconds;
+                await _store.SaveStateAsync(state, scope, cancellationToken);
+                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null), scope, cancellationToken);
+            }, cancellationToken);
         }
         catch (Exception e)
         {
@@ -589,11 +590,12 @@ public sealed class MigrationEngine
 
         try
         {
-            await using var scope = await _executor.BeginAsync(transactional, cancellationToken);
-            await _executor.ExecuteAsync(scope, migration, run, cancellationToken);
-            await _store.DeleteStateAsync(migration.Id, scope, cancellationToken);
-            await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null), scope, cancellationToken);
-            await scope.CommitAsync(cancellationToken);
+            await RunInScopeAsync(migration, transactional, async scope =>
+            {
+                await _executor.ExecuteAsync(scope, migration, run, cancellationToken);
+                await _store.DeleteStateAsync(migration.Id, scope, cancellationToken);
+                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null), scope, cancellationToken);
+            }, cancellationToken);
         }
         catch (Exception e)
         {
@@ -614,6 +616,67 @@ public sealed class MigrationEngine
         Emit(EventTypes.MigrationCompleted, migration, "down", transactional, stopwatch.ElapsedMilliseconds, null);
         return null;
     }
+
+    /// <summary>
+    /// Runs <paramref name="body"/> in a new scope and commits it. Transactions are retried like the driver's
+    /// <c>WithTransaction</c>: the whole transaction on <c>TransientTransactionError</c>, and just the commit on
+    /// <c>UnknownTransactionCommitResult</c>, until <see cref="EngineOptions.TransactionRetryTimeout"/> has elapsed.
+    /// </summary>
+    private async Task RunInScopeAsync(MigrationDescriptor migration, bool transactional, Func<IExecutionScope, Task> body, CancellationToken cancellationToken)
+    {
+        var started = _time.GetTimestamp();
+        for (var attempt = 1; ; attempt++)
+        {
+            // The scope is disposed (aborting a failed transaction) before waiting to retry.
+            await using (var scope = await _executor.BeginAsync(transactional, cancellationToken))
+            {
+                try
+                {
+                    await body(scope);
+                    await CommitAsync(scope, migration, started, cancellationToken);
+                    return;
+                }
+                catch (Exception e) when (transactional && CanRetry(e, TransactionErrorKind.Transient, started, cancellationToken))
+                {
+                    Log("warning", $"Migration {migration.Id} {migration.Name} hit a transient transaction error (attempt {attempt}); retrying the transaction. {e.Message}");
+                }
+            }
+
+            await DelayBeforeRetryAsync(attempt, cancellationToken);
+        }
+    }
+
+    private async Task CommitAsync(IExecutionScope scope, MigrationDescriptor migration, long started, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await scope.CommitAsync(cancellationToken);
+                return;
+            }
+            catch (Exception e) when (scope.Transactional && CanRetry(e, TransactionErrorKind.UnknownCommitResult, started, cancellationToken))
+            {
+                Log("warning", $"Migration {migration.Id} {migration.Name}: the commit result is unknown (attempt {attempt}); retrying the commit. {e.Message}");
+            }
+
+            await DelayBeforeRetryAsync(attempt, cancellationToken);
+        }
+    }
+
+    private bool CanRetry(Exception exception, TransactionErrorKind kind, long started, CancellationToken cancellationToken) =>
+        !cancellationToken.IsCancellationRequested &&
+        _executor.ClassifyTransactionError(exception) == kind &&
+        _time.GetElapsedTime(started) < _options.TransactionRetryTimeout;
+
+    private Task DelayBeforeRetryAsync(int attempt, CancellationToken cancellationToken)
+    {
+        var delay = TimeSpan.FromTicks(Math.Min(_options.TransactionRetryDelay.Ticks * (1L << Math.Min(attempt - 1, 16)), TimeSpan.FromSeconds(5).Ticks));
+        return delay > TimeSpan.Zero ? Task.Delay(delay, _time, cancellationToken) : Task.CompletedTask;
+    }
+
+    private void Log(string level, string message) =>
+        _events.OnEvent(new RunnerEvent { Type = EventTypes.Log, Level = level, Message = message });
 
     private async Task<CommandResult> WithLockAsync(Func<CancellationToken, Task<CommandResult>> action, CancellationToken cancellationToken)
     {

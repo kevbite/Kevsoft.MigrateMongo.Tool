@@ -16,7 +16,12 @@ public static class ConfigLoader
     private static readonly HashSet<string> KnownKeys =
     [
         "project", "mongodb", "stateCollection", "lockTtl", "lockWaitTimeout", "onChecksumMismatch",
-        "transaction", "allowOutOfOrder", "environments", "tunnel",
+        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel",
+    ];
+
+    private static readonly HashSet<string> TunnelKeys =
+    [
+        "host", "port", "user", "password", "privateKey", "privateKeyPath", "passphrase", "hostKeyFingerprint", "knownHostsPath", "mode",
     ];
 
     /// <summary>Finds the config file: an explicit path, or the default file names in <paramref name="directory"/>.</summary>
@@ -35,12 +40,35 @@ public static class ConfigLoader
     public static ResolvedConfig LoadFile(string path, string? environment, Func<string, string?>? getEnvironmentVariable = null, bool projectOnly = false)
     {
         var resolved = Load(File.ReadAllText(path), environment, getEnvironmentVariable, projectOnly);
+        var directory = Path.GetDirectoryName(path)!;
         if (resolved.Project is not null)
         {
-            resolved.Project = Path.GetFullPath(resolved.Project, Path.GetDirectoryName(path)!);
+            resolved.Project = Path.GetFullPath(resolved.Project, directory);
+        }
+
+        if (resolved.Tunnel is { } tunnel)
+        {
+            tunnel.PrivateKeyPath = ResolvePath(tunnel.PrivateKeyPath, directory);
+            tunnel.KnownHostsPath = ResolvePath(tunnel.KnownHostsPath, directory);
         }
 
         return resolved;
+    }
+
+    /// <summary>Resolves <c>~/</c> to the home directory and relative paths against the config file's directory.</summary>
+    private static string? ResolvePath(string? path, string directory)
+    {
+        if (path is null)
+        {
+            return null;
+        }
+
+        if (path == "~" || path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            path = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), path.Length > 2 ? path[2..] : "");
+        }
+
+        return Path.GetFullPath(path, directory);
     }
 
     public static ResolvedConfig Load(string yaml, string? environment, Func<string, string?>? getEnvironmentVariable = null, bool projectOnly = false)
@@ -64,11 +92,6 @@ public static class ConfigLoader
 
         root.Remove("environments");
 
-        if (root.ContainsKey("tunnel"))
-        {
-            throw new ConfigException("'tunnel' is not supported yet in this version of Kevsoft.MigrateMongo.");
-        }
-
         var config = new ResolvedConfig { Environment = string.IsNullOrEmpty(environment) ? null : environment };
         config.Project = OptionalString(root, "project", getEnvironmentVariable);
         if (projectOnly)
@@ -87,10 +110,68 @@ public static class ConfigLoader
         config.LockWaitTimeoutSeconds = OptionalInt(root, "lockWaitTimeout", getEnvironmentVariable) ?? config.LockWaitTimeoutSeconds;
         config.OnChecksumMismatch = OneOf(root, "onChecksumMismatch", ["fail", "warn", "ignore"], getEnvironmentVariable) ?? config.OnChecksumMismatch;
         config.Transaction = OneOf(root, "transaction", ["auto", "always", "never"], getEnvironmentVariable) ?? config.Transaction;
+        config.TransactionRetryTimeoutSeconds = OptionalInt(root, "transactionRetryTimeout", getEnvironmentVariable) ?? config.TransactionRetryTimeoutSeconds;
         config.AllowOutOfOrder = OptionalBool(root, "allowOutOfOrder", getEnvironmentVariable) ?? false;
+        config.Tunnel = root.GetValueOrDefault("tunnel") switch
+        {
+            null => null,
+            Dictionary<string, object?> tunnel => LoadTunnel(tunnel, getEnvironmentVariable),
+            _ => throw new ConfigException("Config setting 'tunnel' must be a mapping."),
+        };
 
         return config;
     }
+
+    private static TunnelConfig LoadTunnel(Dictionary<string, object?> map, Func<string, string?> env)
+    {
+        var tunnel = new TunnelConfig
+        {
+            Host = OptionalString(map, "host", env) ?? "",
+            Port = OptionalInt(map, "port", env) ?? 22,
+            User = OptionalString(map, "user", env) ?? "",
+            Password = NullIfEmpty(OptionalString(map, "password", env)),
+            PrivateKey = NullIfEmpty(OptionalString(map, "privateKey", env)),
+            PrivateKeyPath = NullIfEmpty(OptionalString(map, "privateKeyPath", env)),
+            Passphrase = NullIfEmpty(OptionalString(map, "passphrase", env)),
+            HostKeyFingerprint = NullIfEmpty(OptionalString(map, "hostKeyFingerprint", env)),
+            KnownHostsPath = NullIfEmpty(OptionalString(map, "knownHostsPath", env)),
+            Mode = OneOf(map, "mode", [TunnelConfig.SocksMode, TunnelConfig.LocalMode], env) ?? TunnelConfig.SocksMode,
+        };
+
+        if (string.IsNullOrWhiteSpace(tunnel.Host))
+        {
+            throw new ConfigException("'tunnel.host' is not set in the config file.");
+        }
+
+        if (string.IsNullOrWhiteSpace(tunnel.User))
+        {
+            throw new ConfigException("'tunnel.user' is not set in the config file.");
+        }
+
+        if (tunnel.Port is < 1 or > 65535)
+        {
+            throw new ConfigException("'tunnel.port' must be between 1 and 65535.");
+        }
+
+        if (tunnel.Password is null && tunnel.PrivateKey is null && tunnel.PrivateKeyPath is null)
+        {
+            throw new ConfigException("'tunnel' needs one of 'password', 'privateKey' or 'privateKeyPath'.");
+        }
+
+        if (tunnel.PrivateKey is not null && tunnel.PrivateKeyPath is not null)
+        {
+            throw new ConfigException("'tunnel' can't have both 'privateKey' and 'privateKeyPath'.");
+        }
+
+        if (tunnel.HostKeyFingerprint is { } fingerprint && !fingerprint.StartsWith("SHA256:", StringComparison.Ordinal))
+        {
+            throw new ConfigException("'tunnel.hostKeyFingerprint' must be a SHA256 fingerprint as printed by 'ssh-keygen -lf', e.g. 'SHA256:abc...'.");
+        }
+
+        return tunnel;
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     /// <summary>Checks the settings needed to connect are present.</summary>
     public static void EnsureConnectable(ResolvedConfig config)
@@ -113,6 +194,11 @@ public static class ConfigLoader
         if (config.LockWaitTimeoutSeconds < 0)
         {
             throw new ConfigException("'lockWaitTimeout' must not be negative.");
+        }
+
+        if (config.TransactionRetryTimeoutSeconds < 0)
+        {
+            throw new ConfigException("'transactionRetryTimeout' must not be negative.");
         }
     }
 
@@ -214,6 +300,14 @@ public static class ConfigLoader
             foreach (var key in mongo.Keys.Where(k => k is not ("url" or "databaseName")))
             {
                 throw new ConfigException($"Unknown config setting '{prefix}mongodb.{key}'.");
+            }
+        }
+
+        if (map.GetValueOrDefault("tunnel") is Dictionary<string, object?> tunnel)
+        {
+            foreach (var key in tunnel.Keys.Where(k => !TunnelKeys.Contains(k)))
+            {
+                throw new ConfigException($"Unknown config setting '{prefix}tunnel.{key}'.");
             }
         }
     }

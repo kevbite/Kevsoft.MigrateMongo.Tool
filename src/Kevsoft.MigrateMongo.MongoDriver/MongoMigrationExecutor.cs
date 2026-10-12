@@ -31,6 +31,33 @@ public sealed class MongoMigrationExecutor(
         return new MongoExecutionScope(session);
     }
 
+    public TransactionErrorKind ClassifyTransactionError(Exception exception)
+    {
+        // Migrations may wrap driver exceptions, so look through inner exceptions too.
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is MongoException mongo)
+            {
+                if (mongo.HasErrorLabel("TransientTransactionError"))
+                {
+                    return TransactionErrorKind.Transient;
+                }
+
+                if (mongo.HasErrorLabel("UnknownTransactionCommitResult"))
+                {
+                    return TransactionErrorKind.UnknownCommitResult;
+                }
+            }
+
+            if (current is AggregateException { InnerExceptions.Count: 1 } aggregate)
+            {
+                return ClassifyTransactionError(aggregate.InnerExceptions[0]);
+            }
+        }
+
+        return TransactionErrorKind.None;
+    }
+
     public Task ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, CancellationToken cancellationToken)
     {
         var session = ((MongoExecutionScope)scope).Session;

@@ -121,6 +121,8 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
 
     public void Muted(string message) => WriteLine(Paint(message, Dim));
 
+    public void Warning(string message) => WriteLine(Paint($"⚠ {message}", Yellow));
+
     private void WriteTable(string[] headers, List<string[]> rows, Func<string[], string?> rowColour)
     {
         var widths = headers.Select((h, i) => Math.Max(h.Length, rows.Count == 0 ? 0 : rows.Max(r => r[i].Length))).ToArray();

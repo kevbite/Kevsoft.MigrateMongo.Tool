@@ -115,6 +115,19 @@ public interface IExecutionScope : IAsyncDisposable
     Task CommitAsync(CancellationToken cancellationToken);
 }
 
+/// <summary>How an exception thrown while running or committing a transaction should be handled.</summary>
+public enum TransactionErrorKind
+{
+    /// <summary>Not retryable.</summary>
+    None,
+
+    /// <summary>The whole transaction can be retried (MongoDB's <c>TransientTransactionError</c> label).</summary>
+    Transient,
+
+    /// <summary>The commit outcome is unknown; the commit can be retried (<c>UnknownTransactionCommitResult</c> label).</summary>
+    UnknownCommitResult,
+}
+
 /// <summary>Runs migration code against the database.</summary>
 public interface IMigrationExecutor
 {
@@ -123,6 +136,8 @@ public interface IMigrationExecutor
     Task<IExecutionScope> BeginAsync(bool transactional, CancellationToken cancellationToken);
 
     Task ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, CancellationToken cancellationToken);
+
+    TransactionErrorKind ClassifyTransactionError(Exception exception);
 }
 
 public interface IMigrationEventSink
@@ -145,6 +160,12 @@ public sealed class EngineOptions
     public string Transaction { get; set; } = "auto";
 
     public bool AllowOutOfOrder { get; set; }
+
+    /// <summary>How long a transactional migration keeps retrying transient transaction errors (the driver's default is 120s).</summary>
+    public TimeSpan TransactionRetryTimeout { get; set; } = TimeSpan.FromSeconds(120);
+
+    /// <summary>Delay before the first retry; doubles on each attempt up to 5 seconds.</summary>
+    public TimeSpan TransactionRetryDelay { get; set; } = TimeSpan.FromMilliseconds(100);
 
     public string? Environment { get; set; }
 

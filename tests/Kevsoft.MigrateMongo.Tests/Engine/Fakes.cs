@@ -107,14 +107,21 @@ internal sealed class FakeStore : IMigrationStore
     };
 }
 
-internal sealed class FakeScope(bool transactional) : IExecutionScope
+internal sealed class FakeScope(bool transactional, Func<Exception?>? commitFailure = null) : IExecutionScope
 {
     public bool Transactional { get; } = transactional;
 
     public List<Action> Pending { get; } = [];
 
+    public bool Aborted { get; private set; }
+
     public Task CommitAsync(CancellationToken cancellationToken)
     {
+        if (commitFailure?.Invoke() is { } failure)
+        {
+            throw failure;
+        }
+
         foreach (var write in Pending)
         {
             write();
@@ -126,19 +133,38 @@ internal sealed class FakeScope(bool transactional) : IExecutionScope
 
     public ValueTask DisposeAsync()
     {
+        Aborted = Pending.Count > 0;
         Pending.Clear();
         return ValueTask.CompletedTask;
     }
+}
+
+/// <summary>An error the fake executor classifies by <see cref="Kind"/>, standing in for a labelled MongoDB error.</summary>
+internal sealed class FakeTransactionException(TransactionErrorKind kind) : Exception($"Fake {kind} error.")
+{
+    public TransactionErrorKind Kind { get; } = kind;
 }
 
 internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigrationExecutor
 {
     public List<string> Calls { get; } = [];
 
+    public List<FakeScope> Scopes { get; } = [];
+
+    /// <summary>Called on each commit; return an exception to make that commit fail.</summary>
+    public Func<Exception?>? CommitFailure { get; set; }
+
     public Task<bool> SupportsTransactionsAsync(CancellationToken cancellationToken) => Task.FromResult(supportsTransactions);
 
-    public Task<IExecutionScope> BeginAsync(bool transactional, CancellationToken cancellationToken) =>
-        Task.FromResult<IExecutionScope>(new FakeScope(transactional));
+    public Task<IExecutionScope> BeginAsync(bool transactional, CancellationToken cancellationToken)
+    {
+        var scope = new FakeScope(transactional, CommitFailure);
+        Scopes.Add(scope);
+        return Task.FromResult<IExecutionScope>(scope);
+    }
+
+    public TransactionErrorKind ClassifyTransactionError(Exception exception) =>
+        exception is FakeTransactionException fake ? fake.Kind : TransactionErrorKind.None;
 
     public async Task ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, CancellationToken cancellationToken)
     {

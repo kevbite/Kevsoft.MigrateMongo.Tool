@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
+    <PackageReference Include="SSH.NET" />
   </ItemGroup>
 
   <ItemGroup>

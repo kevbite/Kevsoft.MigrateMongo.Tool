@@ -20,6 +20,9 @@ public sealed class CliInvocation
 
     public string? Runner { get; init; }
 
+    /// <summary>Connect through <c>tunnel</c> without verifying the SSH server's host key (tool only).</summary>
+    public bool InsecureSkipHostKeyCheck { get; init; }
+
     /// <summary><c>init --project</c> path.</summary>
     public string? Project { get; init; }
 
@@ -49,6 +52,7 @@ public static class MigrateMongoCli
         var json = new Option<bool>("--json") { Description = "Write machine-readable JSON lines instead of text.", Recursive = true };
         var noBuild = new Option<bool>("--no-build") { Description = "Don't build the migrations project first.", Recursive = true };
         var runner = new Option<string?>("--runner") { Description = "Run a pre-built runner (a .dll or a bundle executable) instead of building the project.", Recursive = true };
+        var insecure = new Option<bool>("--insecure-skip-host-key-check") { Description = "Don't verify the SSH tunnel server's host key (not recommended).", Recursive = true };
 
         var root = new RootCommand(description);
         root.Options.Add(file);
@@ -58,6 +62,7 @@ public static class MigrateMongoCli
         {
             root.Options.Add(noBuild);
             root.Options.Add(runner);
+            root.Options.Add(insecure);
         }
 
         CliInvocation Common(ParseResult p, string command, CommandArguments? arguments = null) => new()
@@ -69,6 +74,7 @@ public static class MigrateMongoCli
             Json = p.GetValue(json),
             NoBuild = includeToolCommands && p.GetValue(noBuild),
             Runner = includeToolCommands ? p.GetValue(runner) : null,
+            InsecureSkipHostKeyCheck = includeToolCommands && p.GetValue(insecure),
         };
 
         void Add(Command command, Func<ParseResult, CliInvocation> build)

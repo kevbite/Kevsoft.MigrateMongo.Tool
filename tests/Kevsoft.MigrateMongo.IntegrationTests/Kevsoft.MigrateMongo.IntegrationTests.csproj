@@ -18,4 +18,8 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Tunnel\Dockerfile" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
