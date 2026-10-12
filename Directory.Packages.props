@@ -20,7 +20,7 @@
     <PackageVersion Include="MinVer" Version="8.0.0" />
 
     <!-- Tests -->
-    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.2" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="Testcontainers" Version="4.16.0" />
   </ItemGroup>
