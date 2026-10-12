@@ -34,6 +34,8 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Attest build provenance
+        # Attestations aren't available for private user-owned repositories.
+        if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: packages/*.nupkg
@@ -83,6 +85,7 @@ jobs:
           ls -la release
 
       - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: release/migrate-mongo-*
