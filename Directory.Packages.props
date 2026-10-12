@@ -11,8 +11,8 @@
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
 
     <!-- Source generator (must not exceed the Roslyn version shipped with the lowest supported SDK) -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0-1.26328.17" />
 
     <!-- Tool -->
 
