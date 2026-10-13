@@ -79,7 +79,6 @@ public sealed class MigrateMongoCliTests
 
     [Theory]
     [InlineData("status", "--no-build")]
-    [InlineData("up", "--insecure-skip-host-key-check")]
     [InlineData("bundle")]
     public async Task Standalone_runner_rejects_tool_only_options(params string[] args)
     {
@@ -87,6 +86,16 @@ public sealed class MigrateMongoCliTests
 
         exitCode.ShouldNotBe(0);
         invocation.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Standalone_runner_accepts_insecure_skip_host_key_check()
+    {
+        var (exitCode, invocation) = await Parse(false, "up", "--insecure-skip-host-key-check");
+
+        exitCode.ShouldBe(0);
+        invocation.ShouldNotBeNull();
+        invocation.InsecureSkipHostKeyCheck.ShouldBeTrue();
     }
 
     [Fact]

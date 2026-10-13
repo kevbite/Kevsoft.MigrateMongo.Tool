@@ -1,6 +1,5 @@
 using Kevsoft.MigrateMongo.Config;
-using Kevsoft.MigrateMongo.Tool;
-using Kevsoft.MigrateMongo.Tool.Tunnel;
+using Kevsoft.MigrateMongo.Tunnel;
 using Shouldly;
 
 namespace Kevsoft.MigrateMongo.Tests.Tunnel;
@@ -14,7 +13,7 @@ public sealed class SshTunnelTests
     {
         var config = new TunnelConfig { Host = "bastion.invalid", User = "u", Password = "p", Mode = "socks" };
 
-        var error = await Should.ThrowAsync<ToolException>(() =>
+        var error = await Should.ThrowAsync<ConfigException>(() =>
             SshTunnel.OpenAsync(config, "mongodb://db", driver, false, _ => { }, CancellationToken.None));
 
         error.Message.ShouldContain($"MongoDB.Driver 3.12.0 or later in the migrations project (it has {driver})");

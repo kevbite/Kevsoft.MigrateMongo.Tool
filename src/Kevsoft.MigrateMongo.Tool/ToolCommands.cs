@@ -5,7 +5,7 @@ using System.Text.Json;
 using Kevsoft.MigrateMongo.Cli;
 using Kevsoft.MigrateMongo.Config;
 using Kevsoft.MigrateMongo.Protocol;
-using Kevsoft.MigrateMongo.Tool.Tunnel;
+using Kevsoft.MigrateMongo.Tunnel;
 
 namespace Kevsoft.MigrateMongo.Tool;
 
@@ -36,6 +36,10 @@ internal sealed class ToolCommands(string workingDirectory)
             };
         }
         catch (ConfigException e)
+        {
+            return Fail(invocation, ExitCodes.Failure, e.Message);
+        }
+        catch (MongoTunnelException e)
         {
             return Fail(invocation, ExitCodes.Failure, e.Message);
         }
@@ -267,7 +271,11 @@ internal sealed class ToolCommands(string workingDirectory)
 
         using var tunnel = config.Tunnel is null
             ? null
-            : await SshTunnel.OpenAsync(config.Tunnel, config.MongoUrl, handshake.Driver, invocation.InsecureSkipHostKeyCheck, _progress.Warning, cancellationToken);
+            : await new SshTunnelProvider().OpenAsync(
+                config.Tunnel,
+                config.MongoUrl,
+                new MongoTunnelOptions { DriverVersion = handshake.Driver, SkipHostKeyCheck = invocation.InsecureSkipHostKeyCheck, Warn = _progress.Warning },
+                cancellationToken);
         if (tunnel is not null)
         {
             if (invocation.InsecureSkipHostKeyCheck)

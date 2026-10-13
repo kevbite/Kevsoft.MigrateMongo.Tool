@@ -21,7 +21,7 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * Spectre.Console isn't used; the tool has a small hand-written renderer, so AOT has no third-party risk.
 > * `IMigrationSource.GetMigrations()` is synchronous; `init` doesn't scaffold an initial migration.
 > * `create` only reads `project` from the config, so it works without connection variables set.
-> * Also done: SSH tunnels (§6, SOCKS + local forward, in the tool only), automatic retry of transient
+> * Also done: SSH tunnels (§6, SOCKS + local forward), automatic retry of transient
 >   transaction errors (`transactionRetryTimeout`), and `Kevsoft.MigrateMongo.Hosting` (§4.5).
 > * `up --dry-run` / `down --dry-run` are done. They don't run migration code (so there's no
 >   `MigrationRunInfo.DryRun`), take the lock or write anything, and return the exit code a real run would.
@@ -37,8 +37,10 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 >   into `-o` (default `bundle/`), copies the config next to the executable and handshakes with it when the RID is
 >   the current one. Not trimmed (the driver isn't trim-safe). Integration tests run a bundle directly, through
 >   `--runner`, and a cross-built `linux-*` bundle in `runtime-deps:8.0` (no .NET).
-> * Deferred: scripting loaders, Docker images, the
->   `Kevsoft.MigrateMongo.Tunnel` package for bundles/hosting.
+> * `Kevsoft.MigrateMongo.Tunnel` is done: the SSH code moved out of the tool behind `IMongoTunnelProvider`
+>   (Contracts). The standalone runner, bundles and hosting tunnel when `TunnelProvider = new SshTunnelProvider()`
+>   is set; without it they reject `tunnel:` configs with a hint. In protocol mode the tool still opens the tunnel.
+> * Deferred: scripting loaders, Docker images.
 
 ---
 
@@ -439,8 +441,9 @@ expiresAt, heartbeatAt }`.
 The SSH tunnel runs **in the AOT tool**. It opens an SSH.NET `ForwardedPortDynamic` on `127.0.0.1:<random>`
 and passes it to the runner as SOCKS5 proxy URL options, which driver 3.12+ supports (older drivers fail fast
 with a message to upgrade or use `mode: local`). This keeps SSH.NET out of the user's dependency graph.
-Bundles and in-app hosting could later opt into the same tunnel via an optional `Kevsoft.MigrateMongo.Tunnel`
-package; for now the standalone runner rejects `tunnel:` configs.
+The tunnel code lives in `Kevsoft.MigrateMongo.Tunnel` behind `IMongoTunnelProvider` (in Contracts). The
+standalone runner, bundles and in-app hosting opt in by referencing the package and setting `TunnelProvider`;
+otherwise they reject `tunnel:` configs.
 
 | Mode | Config | Use case |
 |------|--------|----------|
@@ -470,7 +473,7 @@ src/
   Kevsoft.MigrateMongo.MongoDriver/      # ONLY project calling MongoDB.Driver members (state/history/lock/tx)
   Kevsoft.MigrateMongo.Runner/           # MigrateMongoRunner.RunAsync(args): commands, protocol, NDJSON events
   Kevsoft.MigrateMongo.Hosting/          # DI + IHostedService for in-app execution
-  Kevsoft.MigrateMongo.Tunnel/           # SSH.NET tunnel (used by the tool; optional for bundles/hosting)
+  Kevsoft.MigrateMongo.Tunnel/           # SSH.NET tunnel (used by the tool; opt-in for runner/bundles/hosting)
   Kevsoft.MigrateMongo.Tool/             # AOT global tool: launcher, scaffolding, build, tunnel, rendering
   Kevsoft.MigrateMongo.Templates/        # dotnet new templates (project + migration)
   (later) Kevsoft.MigrateMongo.Scripting/  # JS (Jint) + JSON command IMigrationSource implementations

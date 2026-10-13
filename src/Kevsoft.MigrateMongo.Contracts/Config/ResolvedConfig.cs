@@ -31,8 +31,9 @@ public sealed class ResolvedConfig
     public string? Environment { get; set; }
 
     /// <summary>
-    /// SSH tunnel the tool opens before connecting. Never serialised: the tool handles the tunnel and only passes the
-    /// rewritten <see cref="MongoUrl"/> to the runner, so SSH credentials never leave the tool process.
+    /// SSH tunnel to open before connecting. Never serialised: the tool opens the tunnel and only passes the rewritten
+    /// <see cref="MongoUrl"/> to the runner, so SSH credentials never leave the tool process. A standalone runner or bundle
+    /// opens it with its <see cref="IMongoTunnelProvider"/>.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public TunnelConfig? Tunnel { get; set; }

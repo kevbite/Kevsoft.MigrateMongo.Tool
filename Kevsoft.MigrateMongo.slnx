@@ -8,6 +8,7 @@
     <Project Path="src/Kevsoft.MigrateMongo.SourceGenerator/Kevsoft.MigrateMongo.SourceGenerator.csproj" />
     <Project Path="src/Kevsoft.MigrateMongo.Templates/Kevsoft.MigrateMongo.Templates.csproj" />
     <Project Path="src/Kevsoft.MigrateMongo.Tool/Kevsoft.MigrateMongo.Tool.csproj" />
+    <Project Path="src/Kevsoft.MigrateMongo.Tunnel/Kevsoft.MigrateMongo.Tunnel.csproj" />
     <Project Path="src/Kevsoft.MigrateMongo/Kevsoft.MigrateMongo.csproj" />
   </Folder>
   <Folder Name="/tests/">

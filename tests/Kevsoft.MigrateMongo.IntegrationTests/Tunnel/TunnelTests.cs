@@ -143,6 +143,60 @@ public sealed class TunnelTests(IntegrationEnvironment environment, TunnelEnviro
     }
 
     [Fact]
+    public async Task Bundle_with_the_tunnel_package_opens_the_tunnel_itself()
+    {
+        await using var workspace = CreateWorkspace($$"""
+            password: ${TUNNEL_PASSWORD}
+            hostKeyFingerprint: {{tunnel.HostKeyFingerprint}}
+            """);
+        var project = workspace.PathOf("BasicMigrations", "BasicMigrations.csproj");
+        File.WriteAllText(project, File.ReadAllText(project).Replace(
+            """<PackageReference Include="MongoDB.Driver" Version="3.12.0" />""",
+            """<PackageReference Include="MongoDB.Driver" Version="3.12.0" /><PackageReference Include="Kevsoft.MigrateMongo.Tunnel" Version="$(MigrateMongoVersion)" />"""));
+        File.WriteAllText(workspace.PathOf("BasicMigrations", "Program.cs"), """
+            using BasicMigrations;
+            using Kevsoft.MigrateMongo;
+            using Kevsoft.MigrateMongo.Tunnel;
+            using Microsoft.Extensions.DependencyInjection;
+
+            return await MigrateMongoRunner.RunAsync(args, new MigrateMongoRunnerOptions
+            {
+                ConfigureServices = services => services.AddSingleton(new SeedOptions("admin@example.com")),
+                TunnelProvider = new SshTunnelProvider(),
+            });
+            """);
+
+        var bundle = await workspace.RunAsync("bundle", "-o", "out");
+        bundle.ExitCode.ShouldBe(0, bundle.ToString());
+
+        var executable = workspace.PathOf("out", OperatingSystem.IsWindows() ? "BasicMigrations.exe" : "BasicMigrations");
+        var up = await ProcessHelper.RunAsync(executable, ["up"], workspace.PathOf("out"),
+            new Dictionary<string, string?> { ["TUNNEL_PASSWORD"] = TunnelEnvironment.Password, ["NO_COLOR"] = "1" }, TimeSpan.FromMinutes(2));
+
+        up.ExitCode.ShouldBe(0, up.ToString());
+        up.Output.ShouldContain($"Tunnel: tunnel@{tunnel.BastionHost}:{tunnel.BastionPort}, SOCKS proxy 127.0.0.1:");
+        AppliedMigrations(workspace).ShouldBe(AppliedIds);
+    }
+
+    [Fact]
+    public async Task Standalone_runner_without_a_tunnel_provider_explains_how_to_add_one()
+    {
+        await using var workspace = CreateWorkspace($"""
+            password: {TunnelEnvironment.Password}
+            hostKeyFingerprint: {tunnel.HostKeyFingerprint}
+            """);
+        var build = await workspace.RunAsync("status");
+        build.ExitCode.ShouldBe(0, build.ToString());
+
+        var up = await ProcessHelper.RunAsync("dotnet", [workspace.PathOf("BasicMigrations", "bin", "Debug", "net8.0", "BasicMigrations.dll"), "up"],
+            workspace.Directory, environment.ProcessEnvironment, TimeSpan.FromMinutes(2));
+
+        up.ExitCode.ShouldBe(1, up.ToString());
+        (up.Output + up.Error).ShouldContain("add the Kevsoft.MigrateMongo.Tunnel package and set `TunnelProvider = new SshTunnelProvider()`");
+        AppliedMigrations(workspace).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Wrong_password_reports_an_authentication_failure()
     {
         await using var workspace = CreateWorkspace($"""

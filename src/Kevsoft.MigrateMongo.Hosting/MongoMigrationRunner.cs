@@ -1,4 +1,5 @@
 using System.Reflection;
+using Kevsoft.MigrateMongo.Config;
 using Kevsoft.MigrateMongo.Engine;
 using Kevsoft.MigrateMongo.MongoDriver;
 using Kevsoft.MigrateMongo.Protocol;
@@ -67,7 +68,19 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
 
         IMongoClient client;
         IDisposable? ownedClient = null;
-        if (options.ConnectionString is { } connectionString)
+        using var tunnel = options.Tunnel is { } tunnelConfig && options.TunnelProvider is { } provider && options.ConnectionString is { } url
+            ? await provider.OpenAsync(
+                tunnelConfig,
+                url,
+                new MongoTunnelOptions { DriverVersion = MongoDriverBackend.DriverVersion, Warn = m => logger.LogWarning("{Message}", m) },
+                cancellationToken)
+            : null;
+        if (tunnel is not null)
+        {
+            logger.LogInformation("Tunnel: {Tunnel}", tunnel.Description);
+        }
+
+        if ((tunnel?.MongoUrl ?? options.ConnectionString) is { } connectionString)
         {
             var settings = MongoClientSettings.FromConnectionString(connectionString);
             settings.ApplicationName ??= "Kevsoft.MigrateMongo";

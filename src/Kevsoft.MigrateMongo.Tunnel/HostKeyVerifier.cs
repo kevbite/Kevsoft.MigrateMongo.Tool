@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace Kevsoft.MigrateMongo.Tool.Tunnel;
+namespace Kevsoft.MigrateMongo.Tunnel;
 
 /// <summary>Checks an SSH server's host key against a pinned fingerprint or an OpenSSH known_hosts file.</summary>
 internal static class HostKeyVerifier

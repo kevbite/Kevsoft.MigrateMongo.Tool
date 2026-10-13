@@ -417,8 +417,25 @@ with SOCKS5 proxy support. `local` mode works with any driver version: it forwar
 in the connection string and connects with `directConnection=true`. It can't use `mongodb+srv://` URLs, and TLS
 host name validation will fail unless the certificate also covers `127.0.0.1`.
 
-Tunnels are a feature of the `migrate-mongo` tool. The standalone runner (`dotnet run` on the migrations project)
-rejects configs with a `tunnel:`.
+Without `Kevsoft.MigrateMongo.Tunnel` the standalone runner (`dotnet run` on the migrations project) and bundles
+reject configs with a `tunnel:`. To let them open the tunnel themselves, add the package and set the provider:
+
+```bash
+dotnet add package Kevsoft.MigrateMongo.Tunnel
+```
+
+```csharp
+using Kevsoft.MigrateMongo;
+using Kevsoft.MigrateMongo.Tunnel;
+
+return await MigrateMongoRunner.RunAsync(args, new MigrateMongoRunnerOptions
+{
+    TunnelProvider = new SshTunnelProvider(),
+});
+```
+
+The package is opt-in, so SSH.NET only ends up in your dependencies if you ask for it. When the `migrate-mongo`
+tool drives the runner, the tool opens the tunnel and the provider isn't used.
 
 ### Bundles
 
@@ -439,8 +456,9 @@ commands, options and exit codes as the tool (`status`, `up`, `down`, `--json`, 
 | `-r`, `--runtime` | Runtime identifier to publish for, e.g. `linux-x64`, `linux-musl-x64`, `win-x64`, `osx-arm64`. Defaults to the current machine's. Any platform can be built from any OS. |
 | `-o`, `--output` | Output directory (default `bundle`). |
 
-When the bundle is for the current platform, `bundle` also runs a handshake with it to check it works. To get the
-tool's SSH tunnelling on the deploy agent, drive the bundle with the standalone tool instead of building:
+When the bundle is for the current platform, `bundle` also runs a handshake with it to check it works. For
+[tunnels](#tunnelling-through-a-bastion), either add `Kevsoft.MigrateMongo.Tunnel` to the project so the bundle
+opens them itself, or drive the bundle with the standalone tool:
 
 ```bash
 migrate-mongo up --env prod --runner ./out/Migrations
@@ -486,7 +504,13 @@ var result = await runner.UpAsync();          // also StatusAsync, PlanAsync, Dr
 if (result.ExitCode != 0) { /* result.Message says why */ }
 ```
 
-SSH tunnels aren't available in-app; use a direct connection or a SOCKS5 proxy in the connection string.
+To reach the database through an SSH bastion, add `Kevsoft.MigrateMongo.Tunnel` and set the tunnel and provider:
+
+```csharp
+o.ConnectionString = builder.Configuration.GetConnectionString("Mongo");
+o.Tunnel = new TunnelConfig { Host = "bastion.example.com", User = "deploy", PrivateKey = key, HostKeyFingerprint = "SHA256:..." };
+o.TunnelProvider = new SshTunnelProvider();
+```
 
 ## Samples
 

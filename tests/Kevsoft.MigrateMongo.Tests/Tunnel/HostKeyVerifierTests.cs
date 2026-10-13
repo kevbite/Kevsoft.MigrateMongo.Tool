@@ -1,4 +1,4 @@
-using Kevsoft.MigrateMongo.Tool.Tunnel;
+using Kevsoft.MigrateMongo.Tunnel;
 using Shouldly;
 
 namespace Kevsoft.MigrateMongo.Tests.Tunnel;

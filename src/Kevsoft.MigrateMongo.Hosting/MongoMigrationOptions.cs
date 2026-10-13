@@ -45,9 +45,28 @@ public sealed class MongoMigrationOptions
     /// <summary>Recorded with each run, e.g. the hosting environment name.</summary>
     public string? Environment { get; set; }
 
+    /// <summary>
+    /// An SSH tunnel to connect through, like the <c>tunnel</c> config section. Needs <see cref="ConnectionString"/> and a
+    /// <see cref="TunnelProvider"/>. The tunnel is open only while migrations run.
+    /// </summary>
+    public Config.TunnelConfig? Tunnel { get; set; }
+
+    /// <summary>Opens <see cref="Tunnel"/>: reference <c>Kevsoft.MigrateMongo.Tunnel</c> and use <c>new SshTunnelProvider()</c>.</summary>
+    public Config.IMongoTunnelProvider? TunnelProvider { get; set; }
+
     internal void Validate()
     {
         var errors = new List<string>();
+        if (Tunnel is not null && ConnectionString is null)
+        {
+            errors.Add($"{nameof(Tunnel)} needs {nameof(ConnectionString)}; a registered IMongoClient can't be tunnelled.");
+        }
+
+        if (Tunnel is not null && TunnelProvider is null)
+        {
+            errors.Add($"{nameof(Tunnel)} needs a {nameof(TunnelProvider)}: add the Kevsoft.MigrateMongo.Tunnel package and set `TunnelProvider = new SshTunnelProvider()`.");
+        }
+
         if (string.IsNullOrWhiteSpace(DatabaseName))
         {
             errors.Add($"{nameof(DatabaseName)} is required.");

@@ -20,7 +20,7 @@ public sealed class CliInvocation
 
     public string? Runner { get; init; }
 
-    /// <summary>Connect through <c>tunnel</c> without verifying the SSH server's host key (tool only).</summary>
+    /// <summary>Connect through <c>tunnel</c> without verifying the SSH server's host key.</summary>
     public bool InsecureSkipHostKeyCheck { get; init; }
 
     /// <summary><c>init --project</c> path.</summary>
@@ -64,11 +64,11 @@ public static class MigrateMongoCli
         root.Options.Add(file);
         root.Options.Add(env);
         root.Options.Add(json);
+        root.Options.Add(insecure);
         if (includeToolCommands)
         {
             root.Options.Add(noBuild);
             root.Options.Add(runner);
-            root.Options.Add(insecure);
         }
 
         CliInvocation Common(ParseResult p, string command, CommandArguments? arguments = null) => new()
@@ -80,7 +80,7 @@ public static class MigrateMongoCli
             Json = p.GetValue(json),
             NoBuild = includeToolCommands && p.GetValue(noBuild),
             Runner = includeToolCommands ? p.GetValue(runner) : null,
-            InsecureSkipHostKeyCheck = includeToolCommands && p.GetValue(insecure),
+            InsecureSkipHostKeyCheck = p.GetValue(insecure),
         };
 
         void Add(Command command, Func<ParseResult, CliInvocation> build)

@@ -385,8 +385,9 @@ jobs:
 ```
 
 A bundle is a self-contained single-file build of your migrations project, named after the project.
-`migrate-mongo.yaml` is copied next to it in `out/`. It accepts the same commands as the tool. If you also want the tool's rendering and tunnelling on the deploy agent, use the standalone
-tool binary to drive it:
+`migrate-mongo.yaml` is copied next to it in `out/`. It accepts the same commands as the tool. For tunnels, add `Kevsoft.MigrateMongo.Tunnel` to the project and set
+`TunnelProvider = new SshTunnelProvider()` in `Program.cs`, or use the standalone tool binary to drive it (you also get
+the tool's rendering):
 
 ```bash
 migrate-mongo up --env prod --runner ./Migrations

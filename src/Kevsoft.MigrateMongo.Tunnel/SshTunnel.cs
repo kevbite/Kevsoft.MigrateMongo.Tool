@@ -2,17 +2,20 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using Kevsoft.MigrateMongo.Config;
-using Kevsoft.MigrateMongo.Protocol;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 
-namespace Kevsoft.MigrateMongo.Tool.Tunnel;
+namespace Kevsoft.MigrateMongo.Tunnel;
 
-/// <summary>
-/// An SSH connection to a bastion host with a forwarded port the runner's MongoDB driver connects through.
-/// Lives in the tool so SSH credentials are never passed to the user's migrations process.
-/// </summary>
-internal sealed class SshTunnel : IDisposable
+/// <summary>Opens SSH tunnels with SSH.NET: <c>TunnelProvider = new SshTunnelProvider()</c>.</summary>
+public sealed class SshTunnelProvider : IMongoTunnelProvider
+{
+    public async Task<IMongoTunnel> OpenAsync(TunnelConfig config, string mongoUrl, MongoTunnelOptions options, CancellationToken cancellationToken) =>
+        await SshTunnel.OpenAsync(config, mongoUrl, options.DriverVersion, options.SkipHostKeyCheck, options.Warn ?? (_ => { }), cancellationToken);
+}
+
+/// <summary>An SSH connection to a bastion host with a forwarded port the MongoDB driver connects through.</summary>
+internal sealed class SshTunnel : IMongoTunnel
 {
     /// <summary>The first MongoDB.Driver version that supports SOCKS5 proxies.</summary>
     public static readonly Version MinimumSocksDriver = new(3, 12, 0);
@@ -36,15 +39,15 @@ internal sealed class SshTunnel : IDisposable
     public static async Task<SshTunnel> OpenAsync(
         TunnelConfig config,
         string mongoUrl,
-        string driverVersion,
+        string? driverVersion,
         bool skipHostKeyCheck,
         Action<string> warn,
         CancellationToken cancellationToken)
     {
         var socks = config.Mode == TunnelConfig.SocksMode;
-        if (socks && ParseVersion(driverVersion) is { } version && version < MinimumSocksDriver)
+        if (socks && driverVersion is not null && ParseVersion(driverVersion) is { } version && version < MinimumSocksDriver)
         {
-            throw new ToolException(ExitCodes.Failure,
+            throw new ConfigException(
                 $"'tunnel' mode 'socks' needs MongoDB.Driver {MinimumSocksDriver} or later in the migrations project (it has {driverVersion}). " +
                 "Update MongoDB.Driver, or use 'mode: local' to forward a single server.");
         }
@@ -94,7 +97,7 @@ internal sealed class SshTunnel : IDisposable
                 SshAuthenticationException => $"authentication as '{config.User}' failed ({e.Message})",
                 _ => e.Message,
             };
-            throw new ToolException(ExitCodes.Failure, $"Couldn't open the SSH tunnel to {config.Host}:{config.Port}: {reason}");
+            throw new MongoTunnelException($"Couldn't open the SSH tunnel to {config.Host}:{config.Port}: {reason}", e);
         }
 
         return new SshTunnel(client, port, url, $"{config.User}@{config.Host}:{config.Port}, {description}");
@@ -151,7 +154,7 @@ internal sealed class SshTunnel : IDisposable
             }
             catch (Exception e) when (e is SshException or IOException or UnauthorizedAccessException or ArgumentException)
             {
-                throw new ToolException(ExitCodes.Failure, $"Couldn't read the SSH private key{(config.PrivateKeyPath is null ? "" : $" '{config.PrivateKeyPath}'")}: {e.Message}");
+                throw new MongoTunnelException($"Couldn't read the SSH private key{(config.PrivateKeyPath is null ? "" : $" '{config.PrivateKeyPath}'")}: {e.Message}", e);
             }
 
             methods.Add(new PrivateKeyAuthenticationMethod(config.User, key));

@@ -1,6 +1,6 @@
 using Kevsoft.MigrateMongo.Config;
 
-namespace Kevsoft.MigrateMongo.Tool.Tunnel;
+namespace Kevsoft.MigrateMongo.Tunnel;
 
 /// <summary>Rewrites a MongoDB connection string to go through an SSH tunnel.</summary>
 internal static class MongoUrlRewriter

@@ -39,7 +39,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
-    <PackageReference Include="SSH.NET" />
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Tunnel\Kevsoft.MigrateMongo.Tunnel.csproj" />
   </ItemGroup>
 
   <ItemGroup>

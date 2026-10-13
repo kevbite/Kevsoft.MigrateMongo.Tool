@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>SSH tunnels (SOCKS5 proxy or local port forward, via SSH.NET) for Kevsoft.MigrateMongo's `tunnel:` config. Used by the migrate-mongo tool; reference it from a migrations project (bundles, standalone runs) or an app (hosting) and set `TunnelProvider = new SshTunnelProvider()` to tunnel without the tool.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
+    <PackageReference Include="SSH.NET" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
+  </ItemGroup>
+
+</Project>

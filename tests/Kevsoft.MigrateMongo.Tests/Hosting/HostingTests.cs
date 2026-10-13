@@ -85,6 +85,21 @@ public sealed class HostingTests
     }
 
     [Fact]
+    public async Task A_tunnel_needs_a_connection_string_and_a_provider()
+    {
+        var runner = Runner(services => services.AddMongoMigrations(o =>
+        {
+            o.DatabaseName = "app";
+            o.Tunnel = new Kevsoft.MigrateMongo.Config.TunnelConfig { Host = "bastion", User = "u", Password = "p" };
+        }));
+
+        var error = await Should.ThrowAsync<InvalidOperationException>(() => runner.UpAsync());
+
+        error.Message.ShouldBe("Invalid Kevsoft.MigrateMongo options: Tunnel needs ConnectionString; a registered IMongoClient can't be tunnelled. " +
+                               "Tunnel needs a TunnelProvider: add the Kevsoft.MigrateMongo.Tunnel package and set `TunnelProvider = new SshTunnelProvider()`.");
+    }
+
+    [Fact]
     public async Task Not_choosing_any_migrations_is_reported()
     {
         var runner = Runner(services => services.AddMongoMigrations(o => o.DatabaseName = "app"));

@@ -26,6 +26,13 @@ public sealed class MigrateMongoRunnerOptions
 
     /// <summary>Additional migration sources (e.g. non C# loaders).</summary>
     public List<IMigrationSource> Sources { get; } = [];
+
+    /// <summary>
+    /// Opens the config's <c>tunnel</c> when run standalone (including as a bundle). Reference
+    /// <c>Kevsoft.MigrateMongo.Tunnel</c> and set <c>new SshTunnelProvider()</c>. Not needed when the migrate-mongo tool
+    /// runs the migrations: the tool opens the tunnel itself.
+    /// </summary>
+    public IMongoTunnelProvider? TunnelProvider { get; set; }
 }
 
 /// <summary>
@@ -162,14 +169,14 @@ public static class MigrateMongoRunner
                                ?? ConfigLoader.Find(null, AppContext.BaseDirectory)
                                ?? throw new ConfigException($"No {ConfigLoader.DefaultFileName} found in the current directory.");
                     var config = ConfigLoader.LoadFile(path, invocation.Environment);
-                    if (config.Tunnel is not null)
-                    {
-                        throw new ConfigException("The config has a 'tunnel', which the standalone runner doesn't support; run it with the migrate-mongo tool (e.g. `migrate-mongo up --runner <this runner>`).");
-                    }
-
+                    using var tunnel = await OpenTunnelAsync(config, options, invocation.InsecureSkipHostKeyCheck, sink, ct);
                     result = await ExecuteAsync(invocation.Command, invocation.Arguments, config, null, options, entryAssembly, sink, ct);
                 }
                 catch (ConfigException e)
+                {
+                    result = new CommandResult { ExitCode = ExitCodes.Failure, Message = e.Message };
+                }
+                catch (MongoTunnelException e)
                 {
                     result = new CommandResult { ExitCode = ExitCodes.Failure, Message = e.Message };
                 }
@@ -179,6 +186,43 @@ public static class MigrateMongoRunner
             });
 
         return await root.Parse(args).InvokeAsync(cancellationToken: cancellation.Token);
+    }
+
+    private static async Task<IMongoTunnel?> OpenTunnelAsync(
+        ResolvedConfig config,
+        MigrateMongoRunnerOptions options,
+        bool skipHostKeyCheck,
+        IMigrationEventSink sink,
+        CancellationToken cancellationToken)
+    {
+        if (config.Tunnel is null)
+        {
+            return null;
+        }
+
+        ConfigLoader.EnsureConnectable(config);
+        if (options.TunnelProvider is null)
+        {
+            throw new ConfigException(
+                "The config has a 'tunnel'. To open it without the migrate-mongo tool, add the Kevsoft.MigrateMongo.Tunnel package and set " +
+                "`TunnelProvider = new SshTunnelProvider()` in MigrateMongoRunnerOptions; or run through the tool (`migrate-mongo up --runner <this runner>`).");
+        }
+
+        void Log(string level, string message) => sink.OnEvent(new RunnerEvent { Type = EventTypes.Log, Level = level, Message = message });
+
+        var tunnel = await options.TunnelProvider.OpenAsync(
+            config.Tunnel,
+            config.MongoUrl,
+            new MongoTunnelOptions { DriverVersion = MongoDriverBackend.DriverVersion, SkipHostKeyCheck = skipHostKeyCheck, Warn = m => Log("warning", m) },
+            cancellationToken);
+        if (skipHostKeyCheck)
+        {
+            Log("warning", "The SSH server's host key was not verified (--insecure-skip-host-key-check).");
+        }
+
+        Log("info", $"Tunnel: {tunnel.Description}");
+        config.MongoUrl = tunnel.MongoUrl;
+        return tunnel;
     }
 
     internal static async Task<CommandResult> ExecuteAsync(
