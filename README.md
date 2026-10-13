@@ -420,13 +420,30 @@ host name validation will fail unless the certificate also covers `127.0.0.1`.
 Tunnels are a feature of the `migrate-mongo` tool. The standalone runner (`dotnet run` on the migrations project)
 rejects configs with a `tunnel:`.
 
-### Bundles 🚧
+### Bundles
 
 Build once and deploy many times to agents with no .NET installed:
 
 ```bash
-migrate-mongo bundle -r linux-x64 -o out/migrations
-./out/migrations up --env staging
+migrate-mongo bundle -r linux-x64 -o out    # dotnet publish: self-contained, single file
+./out/Migrations up --env staging            # on the deploy agent: no SDK or runtime needed
+```
+
+A bundle is your migrations project published as a self-contained single-file executable, named after the
+project. `migrate-mongo.yaml` is copied next to it, and the bundle looks for its config in the current directory
+and then next to itself, so `${VAR}` connection strings work exactly as they do with the tool. It accepts the same
+commands, options and exit codes as the tool (`status`, `up`, `down`, `--json`, …).
+
+| Option | Meaning |
+| --- | --- |
+| `-r`, `--runtime` | Runtime identifier to publish for, e.g. `linux-x64`, `linux-musl-x64`, `win-x64`, `osx-arm64`. Defaults to the current machine's. Any platform can be built from any OS. |
+| `-o`, `--output` | Output directory (default `bundle`). |
+
+When the bundle is for the current platform, `bundle` also runs a handshake with it to check it works. To get the
+tool's SSH tunnelling on the deploy agent, drive the bundle with the standalone tool instead of building:
+
+```bash
+migrate-mongo up --env prod --runner ./out/Migrations
 ```
 
 ### Running on Application Startup

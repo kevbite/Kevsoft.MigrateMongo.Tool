@@ -370,7 +370,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with: { global-json-file: global.json }
       - run: dotnet tool restore
-      - run: dotnet tool run migrate-mongo bundle -r linux-x64 -o out/migrations
+      - run: dotnet tool run migrate-mongo bundle -r linux-x64 -o out
       - uses: actions/upload-artifact@v4
         with: { name: migrations, path: out/ }
 
@@ -380,16 +380,16 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: migrations }
-      - run: chmod +x migrations && ./migrations up --env staging
+      - run: chmod +x Migrations && ./Migrations up --env staging
         env: { STAGING_MONGODB_URL: ${{ secrets.STAGING_MONGODB_URL }} }
 ```
 
-A bundle is a self-contained single-file build of your migrations project. `migrate-mongo.yaml` is copied
-next to it in `out/`. It accepts the same commands as the tool. If you also want the tool's rendering and tunnelling on the deploy agent, use the standalone
+A bundle is a self-contained single-file build of your migrations project, named after the project.
+`migrate-mongo.yaml` is copied next to it in `out/`. It accepts the same commands as the tool. If you also want the tool's rendering and tunnelling on the deploy agent, use the standalone
 tool binary to drive it:
 
 ```bash
-migrate-mongo up --env prod --runner ./migrations
+migrate-mongo up --env prod --runner ./Migrations
 ```
 
 ### Option C: Docker
@@ -438,8 +438,8 @@ start at once, one applies the migrations, the others wait for the lock, see not
 ```
  dev machine                         CI (build)                       deploy agent / CI (release)
  ───────────                         ──────────                       ───────────────────────────
- migrate-mongo init                  dotnet tool restore              ./migrations validate --env prod
- migrate-mongo create <Name>         migrate-mongo validate           ./migrations up --env prod
+ migrate-mongo init                  dotnet tool restore              ./Migrations validate --env prod
+ migrate-mongo create <Name>         migrate-mongo validate           ./Migrations up --env prod
  edit Migrations/M..._<Name>.cs      migrate-mongo bundle -r <rid>      (or migrate-mongo up --env prod
  migrate-mongo plan / up / down        → artifact                         for tunnel + rich output)
  git commit

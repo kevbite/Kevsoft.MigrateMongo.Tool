@@ -80,11 +80,36 @@ public sealed class MigrateMongoCliTests
     [Theory]
     [InlineData("status", "--no-build")]
     [InlineData("up", "--insecure-skip-host-key-check")]
+    [InlineData("bundle")]
     public async Task Standalone_runner_rejects_tool_only_options(params string[] args)
     {
         var (exitCode, invocation) = await Parse(false, args);
 
         exitCode.ShouldNotBe(0);
         invocation.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Bundle_defaults_to_the_bundle_directory_and_current_runtime()
+    {
+        var (exitCode, invocation) = await Parse(true, "bundle");
+
+        exitCode.ShouldBe(0);
+        invocation.ShouldNotBeNull();
+        invocation.Command.ShouldBe("bundle");
+        invocation.Output.ShouldBe("bundle");
+        invocation.RuntimeIdentifier.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Bundle_accepts_runtime_output_and_config_file()
+    {
+        var (exitCode, invocation) = await Parse(true, "bundle", "-r", "linux-x64", "-o", "out/migrations", "-f", "config.yaml");
+
+        exitCode.ShouldBe(0);
+        invocation.ShouldNotBeNull();
+        invocation.RuntimeIdentifier.ShouldBe("linux-x64");
+        invocation.Output.ShouldBe("out/migrations");
+        invocation.ConfigFile.ShouldBe("config.yaml");
     }
 }

@@ -28,6 +28,12 @@ public sealed class CliInvocation
 
     /// <summary><c>create &lt;name&gt;</c>.</summary>
     public string? Name { get; init; }
+
+    /// <summary><c>bundle --runtime</c>: the runtime identifier to publish for (default: the current one).</summary>
+    public string? RuntimeIdentifier { get; init; }
+
+    /// <summary><c>bundle --output</c>: the directory to write the bundle to.</summary>
+    public string? Output { get; init; }
 }
 
 /// <summary>
@@ -92,6 +98,19 @@ public static class MigrateMongoCli
             var nameArgument = new Argument<string>("name") { Description = "Name of the migration, e.g. AddEmailIndexToUsers." };
             Add(new Command("create", "Create a new migration file.") { nameArgument },
                 p => new CliInvocation { Command = "create", Name = p.GetValue(nameArgument), ConfigFile = p.GetValue(file), Environment = p.GetValue(env), Json = p.GetValue(json) });
+
+            var runtime = new Option<string?>("--runtime", "-r") { Description = "Runtime identifier to bundle for, e.g. linux-x64 (default: this machine's)." };
+            var output = new Option<string>("--output", "-o") { Description = "Directory to write the bundle to.", DefaultValueFactory = _ => "bundle" };
+            Add(new Command("bundle", "Publish the migrations project as a self-contained single-file executable for machines without .NET.") { runtime, output },
+                p => new CliInvocation
+                {
+                    Command = "bundle",
+                    RuntimeIdentifier = p.GetValue(runtime),
+                    Output = p.GetValue(output),
+                    ConfigFile = p.GetValue(file),
+                    Environment = p.GetValue(env),
+                    Json = p.GetValue(json),
+                });
 
             Add(new Command("version", "Show the tool version."), p => new CliInvocation { Command = "version", Json = p.GetValue(json) });
         }

@@ -33,7 +33,11 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 >   `migrate-mongo.yaml` with `project: .`) and `migratemongo-migration` (same file as `create`). The Runner
 >   version is stamped in at pack time; unit tests keep the template files identical to `Scaffolding`.
 >   `create` doesn't read a custom `templates/migration.cs` yet.
-> * Deferred: bundles, scripting loaders, Docker images, the
+> * `bundle` is done (scenario 15): `dotnet publish -c Release -r <rid> --self-contained -p:PublishSingleFile=true`
+>   into `-o` (default `bundle/`), copies the config next to the executable and handshakes with it when the RID is
+>   the current one. Not trimmed (the driver isn't trim-safe). Integration tests run a bundle directly, through
+>   `--runner`, and a cross-built `linux-*` bundle in `runtime-deps:8.0` (no .NET).
+> * Deferred: scripting loaders, Docker images, the
 >   `Kevsoft.MigrateMongo.Tunnel` package for bundles/hosting.
 
 ---
@@ -321,7 +325,7 @@ engine, state collections and lock, so CLI and app runs coordinate safely. The c
 | `mark <id> --applied\|--unapplied` | Manual fix-ups, incl. resolving `failed`/`applying` state |
 | `history [<id>] [--json]` | Show the audit trail |
 | `unlock [--force]` | Release a stale lock |
-| `bundle [-r <rid>] [-o <path>]` | Publish the migrations project as a self-contained single-file runner (with `migrate-mongo.yaml` copied alongside) |
+| `bundle [-r <rid>] [-o <dir>]` | Publish the migrations project as a self-contained single-file runner (with `migrate-mongo.yaml` copied alongside) |
 | `version` | Tool version + RID; with a project, also the runner's library/driver/runtime versions from the handshake |
 
 The runner exe accepts the same commands directly, so a bundle works stand-alone on a deploy agent:

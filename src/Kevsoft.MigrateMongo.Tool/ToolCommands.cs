@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Kevsoft.MigrateMongo.Cli;
 using Kevsoft.MigrateMongo.Config;
@@ -30,6 +31,7 @@ internal sealed class ToolCommands(string workingDirectory)
                 "version" => Version(invocation),
                 "init" => await InitAsync(invocation, cancellationToken),
                 "create" => Create(invocation),
+                "bundle" => await BundleAsync(invocation, cancellationToken),
                 _ => await RunInRunnerAsync(invocation, cancellationToken),
             };
         }
@@ -152,6 +154,68 @@ internal sealed class ToolCommands(string workingDirectory)
         else
         {
             _out.Info($"Created {Relative(path)}");
+        }
+
+        return ExitCodes.Success;
+    }
+
+    private async Task<int> BundleAsync(CliInvocation invocation, CancellationToken cancellationToken)
+    {
+        var (configPath, config) = LoadConfig(invocation, projectOnly: true);
+        var configDirectory = Path.GetDirectoryName(configPath)!;
+        var projectFile = ResolveProjectFile(configPath, config);
+        var runtimeIdentifier = invocation.RuntimeIdentifier ?? RuntimeInformation.RuntimeIdentifier;
+        var outputDirectory = Path.GetFullPath(invocation.Output ?? "bundle", workingDirectory);
+        var assemblyName = await GetProjectPropertyAsync(projectFile, "AssemblyName", configDirectory, cancellationToken);
+
+        _progress.Muted($"Publishing {Relative(projectFile)} for {runtimeIdentifier}…");
+        var stopwatch = Stopwatch.StartNew();
+        var result = await ProcessRunner.RunAsync(
+            ProcessRunner.DotnetHost,
+            [
+                "publish", projectFile, "-c", "Release", "-r", runtimeIdentifier, "--self-contained", "true",
+                "-p:PublishSingleFile=true", "-p:DebugType=embedded", "-o", outputDirectory, "-nologo", "-v", "q", "-clp:NoSummary",
+            ],
+            configDirectory,
+            cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            Console.Error.WriteLine(result.StandardOutput.Trim());
+            Console.Error.WriteLine(result.StandardError.Trim());
+            throw new ToolException(ExitCodes.BuildFailed, $"Publishing {Relative(projectFile)} for {runtimeIdentifier} failed.");
+        }
+
+        var executable = Path.Combine(outputDirectory, assemblyName + (runtimeIdentifier.StartsWith("win", StringComparison.OrdinalIgnoreCase) ? ".exe" : ""));
+        if (!File.Exists(executable))
+        {
+            throw new ToolException(ExitCodes.BuildFailed, $"Publishing succeeded but {Relative(executable)} wasn't created. Is the project an Exe (<OutputType>Exe</OutputType>)?");
+        }
+
+        // The standalone runner looks for migrate-mongo.yaml in the current directory and then next to itself.
+        var bundledConfig = Path.Combine(outputDirectory, ConfigLoader.DefaultFileName);
+        if (!string.Equals(Path.GetFullPath(configPath), bundledConfig, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            File.Copy(configPath, bundledConfig, overwrite: true);
+        }
+
+        var size = new FileInfo(executable).Length / 1024.0 / 1024.0;
+        _progress.Muted($"Published in {stopwatch.Elapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture)}s");
+
+        // A bundle for this machine can be checked straight away; one for another platform can't run here.
+        if (string.Equals(runtimeIdentifier, RuntimeInformation.RuntimeIdentifier, StringComparison.OrdinalIgnoreCase))
+        {
+            var handshake = await HandshakeAsync(executable, [], outputDirectory, cancellationToken);
+            _progress.Muted($"Bundle: Kevsoft.MigrateMongo {handshake.Library} · MongoDB.Driver {handshake.Driver} · .NET {handshake.Runtime}");
+        }
+
+        if (invocation.Json)
+        {
+            WriteJsonResult(new CommandResult { ExitCode = 0, Message = executable });
+        }
+        else
+        {
+            _out.Info($"Created {Relative(executable)} ({runtimeIdentifier}, {size.ToString("0.0", CultureInfo.InvariantCulture)} MB) and {Relative(bundledConfig)}");
+            _out.Info($"Run it on a machine without .NET: {Relative(executable)} up [--env <name>], or `migrate-mongo up --runner {Relative(executable)}` for tunnels.");
         }
 
         return ExitCodes.Success;
@@ -361,25 +425,31 @@ internal sealed class ToolCommands(string workingDirectory)
 
     private static async Task<string> GetTargetPathAsync(string projectFile, string workingDir, CancellationToken cancellationToken)
     {
-        var result = await ProcessRunner.RunAsync(
-            ProcessRunner.DotnetHost,
-            ["msbuild", projectFile, "-nologo", "-getProperty:TargetPath"],
-            workingDir,
-            cancellationToken);
-        var targetPath = result.StandardOutput.Trim();
-        if (result.ExitCode != 0 || targetPath.Length == 0)
-        {
-            throw new ToolException(ExitCodes.BuildFailed,
-                $"Couldn't determine the output of {projectFile}. Projects with multiple target frameworks aren't supported; set a single <TargetFramework>." +
-                Environment.NewLine + (result.StandardOutput + result.StandardError).Trim());
-        }
-
+        var targetPath = await GetProjectPropertyAsync(projectFile, "TargetPath", workingDir, cancellationToken);
         if (!File.Exists(targetPath))
         {
             throw new ToolException(ExitCodes.BuildFailed, $"{targetPath} doesn't exist. Build the project, or run without --no-build.");
         }
 
         return targetPath;
+    }
+
+    private static async Task<string> GetProjectPropertyAsync(string projectFile, string property, string workingDir, CancellationToken cancellationToken)
+    {
+        var result = await ProcessRunner.RunAsync(
+            ProcessRunner.DotnetHost,
+            ["msbuild", projectFile, "-nologo", $"-getProperty:{property}"],
+            workingDir,
+            cancellationToken);
+        var value = result.StandardOutput.Trim();
+        if (result.ExitCode != 0 || value.Length == 0)
+        {
+            throw new ToolException(ExitCodes.BuildFailed,
+                $"Couldn't determine the {property} of {projectFile}. Projects with multiple target frameworks aren't supported; set a single <TargetFramework>." +
+                Environment.NewLine + (result.StandardOutput + result.StandardError).Trim());
+        }
+
+        return value;
     }
 
     private async Task<string> DetectTargetFrameworkAsync(CancellationToken cancellationToken)
