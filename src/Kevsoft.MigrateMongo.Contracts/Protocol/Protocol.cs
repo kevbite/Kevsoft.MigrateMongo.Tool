@@ -24,25 +24,10 @@ public static class ProtocolVersions
     public const string ProtocolArgument = "--mm-protocol";
 }
 
-/// <summary>
-/// Optional features a runner advertises in its handshake. Older runners ignore request fields they don't know, so the
-/// tool must check for a feature before sending a request that relies on it.
-/// </summary>
-public static class RunnerFeatures
-{
-    /// <summary><see cref="CommandArguments.DryRun"/> for <c>up</c> and <c>down</c>.</summary>
-    public const string DryRun = "dryRun";
-
-    public static readonly string[] Supported = [DryRun];
-}
-
 /// <summary>Printed (as one JSON line) by <c>runner --mm-handshake</c>.</summary>
 public sealed class HandshakeInfo
 {
     public int[] Protocol { get; set; } = [];
-
-    /// <summary>See <see cref="RunnerFeatures"/>. Null for runners from before features were advertised.</summary>
-    public string[]? Features { get; set; }
 
     public string Library { get; set; } = "";
 

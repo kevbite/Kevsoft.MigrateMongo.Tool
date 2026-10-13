@@ -110,27 +110,4 @@ public sealed class DryRunTests(IntegrationEnvironment environment)
         workspace.Find("_migrations.lock").Single()["runId"].AsString.ShouldBe("deploy-from-another-agent");
         workspace.CollectionNames().ShouldBe(["_migrations.lock"]);
     }
-
-    [Fact]
-    public async Task An_old_runner_is_refused_a_dry_run_instead_of_applying_migrations()
-    {
-        await using var workspace = Workspace.FromFixture(environment, "BasicMigrations");
-        // Kevsoft.MigrateMongo.Runner 0.1.1 (from nuget.org) predates --dry-run and would ignore it.
-        var project = workspace.PathOf("BasicMigrations", "BasicMigrations.csproj");
-        await File.WriteAllTextAsync(project, (await File.ReadAllTextAsync(project)).Replace("$(MigrateMongoVersion)", "0.1.1"));
-
-        var dryRun = await workspace.RunAsync("up", "--dry-run");
-
-        dryRun.ExitCode.ShouldBe(5, dryRun.ToString());
-        dryRun.Output.ShouldContain("Runner: Kevsoft.MigrateMongo 0.1.1");
-        dryRun.Error.ShouldContain(
-            "--dry-run isn't supported by the runner (Kevsoft.MigrateMongo 0.1.1); nothing was run. " +
-            "Update the Kevsoft.MigrateMongo.Runner package in your migrations project to 0.2.0 or later.");
-        workspace.CollectionNames().ShouldBeEmpty();
-
-        // Everything else still works with the old runner.
-        var plan = await workspace.RunAsync("plan", "--no-build");
-        plan.ExitCode.ShouldBe(2, plan.ToString());
-        workspace.Find("_migrations").ShouldBeEmpty();
-    }
 }

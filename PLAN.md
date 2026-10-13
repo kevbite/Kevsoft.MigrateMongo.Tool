@@ -22,8 +22,8 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 >   transaction errors (`transactionRetryTimeout`), and `Kevsoft.MigrateMongo.Hosting` (§4.5).
 > * `up --dry-run` / `down --dry-run` are done. They don't run migration code (so there's no
 >   `MigrationRunInfo.DryRun`), take the lock or write anything, and return the exit code a real run would.
->   `plan` stays separate (exit `2` with pending work). Runners advertise `features: ["dryRun"]` in the handshake
->   and the tool refuses `--dry-run` (exit `5`) against older runners, which would ignore the flag.
+>   `plan` stays separate (exit `2` with pending work). There's no runner capability check: pre-0.2.0 runners
+>   ignore `--dry-run` and do a real run, which is accepted while we're pre-1.0.
 > * Deferred: bundles, Templates, scripting loaders, Docker images, the
 >   `Kevsoft.MigrateMongo.Tunnel` package for bundles/hosting.
 

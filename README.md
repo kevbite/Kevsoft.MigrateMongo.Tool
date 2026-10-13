@@ -258,8 +258,8 @@ support) and exits with the code a real run would. It never runs migration code,
 anything, not even the `_migrations` collections, so it works with a read-only database user. If another run holds
 the lock, it prints a warning instead of waiting. Unlike `plan`, it exits `0` when there is pending work.
 
-`--dry-run` needs `Kevsoft.MigrateMongo.Runner` 0.2.0 or later in the migrations project. Older runners would
-ignore the flag, so the tool refuses with exit code `5` and runs nothing.
+> ⚠️ `--dry-run` needs `Kevsoft.MigrateMongo.Runner` 0.2.0 or later in the migrations project. Older runners don't
+> know the flag and ignore it, so **`up --dry-run` against an older runner applies migrations for real**.
 
 ### Applying Migrations
 
@@ -321,7 +321,7 @@ migrate-mongo history 20261009150030            # audit trail for a migration
 | `2` | Pending migrations exist (`plan` / `status --check`). |
 | `3` | Timed out waiting for the lock. |
 | `4` | Validation failed (checksum mismatch, missing or out-of-order migrations). |
-| `5` | The tool and runner have no protocol version in common (update the tool), or the runner is too old for a requested feature such as `--dry-run` (update `Kevsoft.MigrateMongo.Runner`). |
+| `5` | The tool and runner have no protocol version in common. Update the tool. |
 | `6` | Building the migrations project failed. |
 
 ### Running in CI
