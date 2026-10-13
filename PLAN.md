@@ -18,12 +18,14 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * Spectre.Console isn't used; the tool has a small hand-written renderer, so AOT has no third-party risk.
 > * `IMigrationSource.GetMigrations()` is synchronous; `init` doesn't scaffold an initial migration.
 > * `create` only reads `project` from the config, so it works without connection variables set.
-> * Done since v0.1.1: SSH tunnels (§6, SOCKS + local forward, in the tool only), automatic retry of transient
+> * Also done: SSH tunnels (§6, SOCKS + local forward, in the tool only), automatic retry of transient
 >   transaction errors (`transactionRetryTimeout`), and `Kevsoft.MigrateMongo.Hosting` (§4.5).
 > * `up --dry-run` / `down --dry-run` are done. They don't run migration code (so there's no
 >   `MigrationRunInfo.DryRun`), take the lock or write anything, and return the exit code a real run would.
->   `plan` stays separate (exit `2` with pending work). There's no runner capability check: pre-0.2.0 runners
->   ignore `--dry-run` and do a real run, which is accepted while we're pre-1.0.
+>   `plan` stays separate (exit `2` with pending work).
+> * **Pre-1.0: no compatibility with earlier releases.** Nobody depends on the 0.x packages yet, so breaking changes
+>   are fine and there are no version checks, upgrade notes or shims for older tools/runners. The protocol rules
+>   (§3), ApiCompat baselines and tests against previously published runners apply from 1.0.
 > * Deferred: bundles, Templates, scripting loaders, Docker images, the
 >   `Kevsoft.MigrateMongo.Tunnel` package for bundles/hosting.
 
