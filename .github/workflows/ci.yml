@@ -204,7 +204,7 @@ jobs:
       - name: Install and run the tool
         shell: bash
         run: |
-          version=$(ls packages/Kevsoft.MigrateMongo.Tool.*.nupkg | sed -E 's/.*Kevsoft\.MigrateMongo\.Tool\.(.*)\.nupkg/\1/')
+          version=$(ls packages/Kevsoft.MigrateMongo.Tool.[0-9]*.nupkg | sed -E 's/.*Kevsoft\.MigrateMongo\.Tool\.(.*)\.nupkg/\1/')
           dotnet tool install Kevsoft.MigrateMongo.Tool --version "$version" --add-source ./packages --tool-path ./tool
           ./tool/migrate-mongo version
           mkdir demo && cd demo
@@ -252,11 +252,19 @@ jobs:
           set -e
           version=$(ls packages/Kevsoft.MigrateMongo.Tool.Native.[0-9]*.nupkg | sed -E 's/.*Kevsoft\.MigrateMongo\.Tool\.Native\.(.*)\.nupkg/\1/')
           dotnet tool install Kevsoft.MigrateMongo.Tool.Native --version "$version" --add-source ./packages --tool-path ./tool
-          ./tool/migrate-mongo version | tee version.txt
+          # On Windows the SDK installs native tools with a .cmd shim, which bash can't run directly.
+          if [ -f tool/migrate-mongo.cmd ]; then
+            shim=$(cygpath -w "$PWD/tool/migrate-mongo.cmd")
+            mm() { cmd //c "$shim" "$@"; }
+          else
+            shim="$PWD/tool/migrate-mongo"
+            mm() { "$shim" "$@"; }
+          fi
+          mm version | tee version.txt
           grep -q "($1; aot)" version.txt
           mkdir demo && cd demo
-          ../tool/migrate-mongo init
-          ../tool/migrate-mongo create AddUsersCollection
+          mm init
+          mm create AddUsersCollection
           ls Migrations/Migrations
           EOF
 
