@@ -11,12 +11,15 @@ change as the design settles.
 ## 1. Install the tool
 
 ```bash
-# As a global tool (Native AOT; doesn't need any .NET runtime to run)
+# As a global tool (runs on any installed .NET runtime >= 8)
 dotnet tool install -g Kevsoft.MigrateMongo.Tool
 
 # Or pinned per-repo (recommended for CI reproducibility)
 dotnet new tool-manifest
 dotnet tool install Kevsoft.MigrateMongo.Tool
+
+# Or the Native AOT build: same tool, no .NET runtime needed to run it (needs the .NET 10+ SDK to install)
+dotnet tool install Kevsoft.MigrateMongo.Tool.Native
 
 # Or without .NET at all (e.g. a deploy agent)
 curl -fsSL https://github.com/kevbite/Kevsoft.MigrateMongo/releases/latest/download/install.sh | sh

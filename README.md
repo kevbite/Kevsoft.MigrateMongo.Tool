@@ -13,8 +13,8 @@ with ideas borrowed from [Mongock](https://mongock.io/), [Flyway](https://flyway
 
 ## Why another migration tool?
 
-- **It doesn't break when the .NET runtime or SDK changes.** The `migrate-mongo` CLI is a Native AOT binary,
-  so it needs no .NET runtime to start. Your migrations live in a small console project that **you** own. The
+- **It doesn't break when the .NET runtime or SDK changes.** The `migrate-mongo` CLI runs on any .NET runtime from
+  8 upwards, or, as Native AOT, with no runtime at all. Your migrations live in a small console project that **you** own. The
   CLI builds that project with your SDK and runs it on your runtime, so you never need a particular SDK to
   match the tool.
 - **It doesn't break when the MongoDB driver changes.** You choose the `MongoDB.Driver` version (3.5 or later).
@@ -40,7 +40,7 @@ with ideas borrowed from [Mongock](https://mongock.io/), [Flyway](https://flyway
   ```
 
 - A [.NET SDK](https://dotnet.microsoft.com/download) to build your migrations project (.NET 8 or later). The
-  `migrate-mongo` CLI itself needs no runtime.
+  `migrate-mongo` CLI runs on any installed .NET runtime from 8 upwards, or needs none if you use the Native AOT build.
 
 ### Installing the Tool
 
@@ -56,6 +56,15 @@ alternatively you can install it globally.
 
 ```bash
 dotnet tool install -g Kevsoft.MigrateMongo.Tool
+```
+
+With the .NET 10 SDK or later you can install **Kevsoft.MigrateMongo.Tool.Native** instead. It's the same tool,
+compiled to Native AOT for your platform (Windows, Linux glibc/musl and macOS on x64 and arm64), so it starts
+instantly and doesn't need a .NET runtime. On other platforms it falls back to the framework-dependent build.
+Older SDKs can't install platform-specific tool packages, so use `Kevsoft.MigrateMongo.Tool` with them.
+
+```bash
+dotnet tool install Kevsoft.MigrateMongo.Tool.Native
 ```
 
 Check it's working:
@@ -75,7 +84,8 @@ dotnet add package MongoDB.Driver   # any version >= 3.5, your choice
 
 | Package | Purpose |
 |---|---|
-| `Kevsoft.MigrateMongo.Tool` | The `migrate-mongo` CLI (Native AOT). |
+| `Kevsoft.MigrateMongo.Tool` | The `migrate-mongo` CLI (framework-dependent; any .NET SDK/runtime 8+). |
+| `Kevsoft.MigrateMongo.Tool.Native` | The `migrate-mongo` CLI as platform-specific Native AOT packages (needs the .NET 10+ SDK to install). |
 | `Kevsoft.MigrateMongo.Runner` | Entry point for your migrations console project (`MigrateMongoRunner.RunAsync`). |
 | `Kevsoft.MigrateMongo.Abstractions` | `IMigration`, `[Migration]`, `MigrationContext` and the source generator. Reference it directly to keep migrations in a class library. |
 | `Kevsoft.MigrateMongo` | The migration engine: planning, locking, state and checksums. |
