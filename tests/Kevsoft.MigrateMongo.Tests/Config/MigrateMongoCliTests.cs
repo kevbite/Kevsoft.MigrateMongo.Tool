@@ -43,6 +43,41 @@ public sealed class MigrateMongoCliTests
     }
 
     [Theory]
+    [InlineData(true, "up", "--dry-run")]
+    [InlineData(false, "up", "--dry-run", "--to", "20260101000002")]
+    [InlineData(true, "down", "--batch", "--dry-run")]
+    [InlineData(false, "down", "--dry-run")]
+    public async Task Up_and_down_accept_dry_run_in_the_tool_and_standalone_runner(bool includeToolCommands, params string[] args)
+    {
+        var (exitCode, invocation) = await Parse(includeToolCommands, args);
+
+        exitCode.ShouldBe(0);
+        invocation.ShouldNotBeNull();
+        invocation.Command.ShouldBe(args[0]);
+        invocation.Arguments.DryRun.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Up_is_not_a_dry_run_by_default()
+    {
+        var (_, invocation) = await Parse(true, "up");
+
+        invocation.ShouldNotBeNull();
+        invocation.Arguments.DryRun.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("plan", "--dry-run")]
+    [InlineData("baseline", "--to", "20260101000001", "--dry-run")]
+    public async Task Dry_run_is_rejected_by_other_commands(params string[] args)
+    {
+        var (exitCode, invocation) = await Parse(true, args);
+
+        exitCode.ShouldNotBe(0);
+        invocation.ShouldBeNull();
+    }
+
+    [Theory]
     [InlineData("status", "--no-build")]
     [InlineData("up", "--insecure-skip-host-key-check")]
     public async Task Standalone_runner_rejects_tool_only_options(params string[] args)

@@ -103,13 +103,15 @@ public static class MigrateMongoCli
         Add(new Command("plan", "Show what 'up' would do. Exits with code 2 if there is pending work."), p => Common(p, "plan"));
 
         var upTo = new Option<string?>("--to") { Description = "Stop after this migration id." };
-        Add(new Command("up", "Apply pending migrations.") { upTo },
-            p => Common(p, "up", new CommandArguments { To = p.GetValue(upTo) }));
+        var upDryRun = new Option<bool>("--dry-run") { Description = "Show what would be applied without changing anything (no lock, no writes, no migration code runs)." };
+        Add(new Command("up", "Apply pending migrations.") { upTo, upDryRun },
+            p => Common(p, "up", new CommandArguments { To = p.GetValue(upTo), DryRun = p.GetValue(upDryRun) }));
 
         var downTo = new Option<string?>("--to") { Description = "Roll back every migration after this id (exclusive)." };
         var count = new Option<int?>("--count", "-n") { Description = "Number of migrations to roll back (default 1)." };
         var batch = new Option<bool>("--batch") { Description = "Roll back the whole last batch." };
-        var down = new Command("down", "Roll back applied migrations.") { downTo, count, batch };
+        var downDryRun = new Option<bool>("--dry-run") { Description = "Show what would be rolled back without changing anything." };
+        var down = new Command("down", "Roll back applied migrations.") { downTo, count, batch, downDryRun };
         down.Validators.Add(r =>
         {
             var selected = (r.GetValue(downTo) is not null ? 1 : 0) + (r.GetValue(count) is not null ? 1 : 0) + (r.GetValue(batch) ? 1 : 0);
@@ -123,7 +125,7 @@ public static class MigrateMongoCli
                 r.AddError("--count must be at least 1.");
             }
         });
-        Add(down, p => Common(p, "down", new CommandArguments { To = p.GetValue(downTo), Count = p.GetValue(count), Batch = p.GetValue(batch) }));
+        Add(down, p => Common(p, "down", new CommandArguments { To = p.GetValue(downTo), Count = p.GetValue(count), Batch = p.GetValue(batch), DryRun = p.GetValue(downDryRun) }));
 
         Add(new Command("validate", "Check applied migrations against the code (checksums, missing and out-of-order migrations)."), p => Common(p, "validate"));
 

@@ -19,6 +19,12 @@ public interface IMongoMigrationRunner
     /// <summary>Applies pending migrations, optionally stopping after <paramref name="to"/>.</summary>
     Task<CommandResult> UpAsync(string? to = null, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Reports what <see cref="UpAsync"/> would apply without changing anything (no lock, no writes, no migration code
+    /// runs). For <c>down</c>, use <see cref="ExecuteAsync"/> with <see cref="CommandArguments.DryRun"/>.
+    /// </summary>
+    Task<CommandResult> DryRunUpAsync(string? to = null, CancellationToken cancellationToken = default);
+
     Task<CommandResult> StatusAsync(CancellationToken cancellationToken = default);
 
     /// <summary>What <see cref="UpAsync"/> would do. The exit code is <see cref="ExitCodes.PendingMigrations"/> when there is work.</summary>
@@ -39,6 +45,9 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
 
     public Task<CommandResult> UpAsync(string? to = null, CancellationToken cancellationToken = default) =>
         ExecuteAsync("up", new CommandArguments { To = to }, cancellationToken);
+
+    public Task<CommandResult> DryRunUpAsync(string? to = null, CancellationToken cancellationToken = default) =>
+        ExecuteAsync("up", new CommandArguments { To = to, DryRun = true }, cancellationToken);
 
     public Task<CommandResult> StatusAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync("status", new CommandArguments(), cancellationToken);

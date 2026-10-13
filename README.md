@@ -245,10 +245,27 @@ migrate-mongo plan       # what `up` would do, without changing anything
 
 `plan` exits with code `2` when there is pending work, so you can use it as a CI gate.
 
+### Dry Runs
+
+```bash
+migrate-mongo up --dry-run               # what `up` would apply, and in which batch
+migrate-mongo up --to 20261009145210 --dry-run
+migrate-mongo down --batch --dry-run     # what `down` would roll back
+```
+
+A dry run uses the same checks as a real run (validation, blocked migrations, unknown `--to`, transaction
+support) and exits with the code a real run would. It never runs migration code, takes the lock or writes
+anything, not even the `_migrations` collections, so it works with a read-only database user. If another run holds
+the lock, it prints a warning instead of waiting. Unlike `plan`, it exits `0` when there is pending work.
+
+`--dry-run` needs `Kevsoft.MigrateMongo.Runner` 0.2.0 or later in the migrations project. Older runners would
+ignore the flag, so the tool refuses with exit code `5` and runs nothing.
+
 ### Applying Migrations
 
 ```bash
 migrate-mongo up                       # apply everything pending, as one batch
+migrate-mongo up --dry-run             # show what would be applied, change nothing
 migrate-mongo up --to 20261009145210   # stop after this migration
 migrate-mongo up --env prod            # use the `prod` environment
 migrate-mongo up --no-build            # skip `dotnet build` and reuse the last build
@@ -262,6 +279,7 @@ migrate-mongo down                     # revert the last applied migration
 migrate-mongo down --count 3           # revert the last 3
 migrate-mongo down --batch             # revert everything from the last `up`
 migrate-mongo down --to 20261009144500 # revert everything after this migration
+migrate-mongo down --batch --dry-run   # show what would be reverted, change nothing
 ```
 
 ### Validating
@@ -303,7 +321,7 @@ migrate-mongo history 20261009150030            # audit trail for a migration
 | `2` | Pending migrations exist (`plan` / `status --check`). |
 | `3` | Timed out waiting for the lock. |
 | `4` | Validation failed (checksum mismatch, missing or out-of-order migrations). |
-| `5` | The tool and runner have no protocol version in common. Update the tool. |
+| `5` | The tool and runner have no protocol version in common (update the tool), or the runner is too old for a requested feature such as `--dry-run` (update `Kevsoft.MigrateMongo.Runner`). |
 | `6` | Building the migrations project failed. |
 
 ### Running in CI
@@ -412,7 +430,7 @@ use `IMongoMigrationRunner`:
 
 ```csharp
 var runner = app.Services.GetRequiredService<IMongoMigrationRunner>();
-var result = await runner.UpAsync();          // also StatusAsync, PlanAsync, ValidateAsync and ExecuteAsync("down", ...)
+var result = await runner.UpAsync();          // also StatusAsync, PlanAsync, DryRunUpAsync, ValidateAsync and ExecuteAsync("down", ...)
 if (result.ExitCode != 0) { /* result.Message says why */ }
 ```
 

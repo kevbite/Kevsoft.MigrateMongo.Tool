@@ -200,6 +200,7 @@ internal sealed class ToolCommands(string workingDirectory)
         }
 
         _progress.Muted($"Runner: Kevsoft.MigrateMongo {handshake.Library} · MongoDB.Driver {handshake.Driver} · .NET {handshake.Runtime} · protocol {protocol}");
+        EnsureRunnerSupports(invocation, handshake);
 
         using var tunnel = config.Tunnel is null
             ? null
@@ -316,6 +317,20 @@ internal sealed class ToolCommands(string workingDirectory)
         }
 
         return result.ExitCode;
+    }
+
+    /// <summary>
+    /// Older runners silently ignore request fields they don't know; e.g. one without <see cref="RunnerFeatures.DryRun"/>
+    /// would really apply migrations for <c>up --dry-run</c>. Refuse before sending such a request.
+    /// </summary>
+    internal static void EnsureRunnerSupports(CliInvocation invocation, HandshakeInfo handshake)
+    {
+        if (invocation.Arguments.DryRun && !(handshake.Features ?? []).Contains(RunnerFeatures.DryRun))
+        {
+            throw new ToolException(ExitCodes.ProtocolMismatch,
+                $"--dry-run isn't supported by the runner (Kevsoft.MigrateMongo {handshake.Library}); nothing was run. " +
+                "Update the Kevsoft.MigrateMongo.Runner package in your migrations project to 0.2.0 or later.");
+        }
     }
 
     private static async Task<HandshakeInfo> HandshakeAsync(string fileName, string[] prefix, string workingDir, CancellationToken cancellationToken)

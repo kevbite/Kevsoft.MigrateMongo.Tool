@@ -61,6 +61,7 @@ public static class MigrateMongoRunner
     internal static HandshakeInfo Handshake() => new()
     {
         Protocol = ProtocolVersions.Supported,
+        Features = RunnerFeatures.Supported,
         Library = LibraryVersion,
         Driver = MongoDriverBackend.DriverVersion,
         Runtime = Environment.Version.ToString(),

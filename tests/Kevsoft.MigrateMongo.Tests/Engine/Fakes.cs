@@ -14,7 +14,13 @@ internal sealed class FakeStore : IMigrationStore
 
     public int ReleaseCount { get; private set; }
 
-    public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public int InitializeCount { get; private set; }
+
+    public Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        InitializeCount++;
+        return Task.CompletedTask;
+    }
 
     public Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<StoredMigrationState>>(States.Values.Select(Clone).ToList());

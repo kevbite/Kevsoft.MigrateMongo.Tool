@@ -71,7 +71,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         {
             foreach (var item in plan)
             {
-                WriteLine($"  {item.Id}  {item.Name}   ({(item.Transactional ? "transaction" : "no transaction")})");
+                WriteLine($"  {(item.Direction == "down" ? "◀" : "▶")} {item.Id}  {item.Name}   ({(item.Transactional ? "transaction" : "no transaction")})");
             }
         }
 

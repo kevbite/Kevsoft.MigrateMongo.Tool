@@ -49,9 +49,13 @@ public sealed class MigrationEngine
 
     public Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken) => command switch
     {
+        _ when arguments.DryRun && command is not ("up" or "down") =>
+            Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"--dry-run is only supported by 'up' and 'down', not '{command}'." }),
         "status" => StatusAsync(arguments.Check, cancellationToken),
         "plan" => PlanAsync(cancellationToken),
+        "up" when arguments.DryRun => DryRunUpAsync(arguments.To, cancellationToken),
         "up" => UpAsync(arguments.To, cancellationToken),
+        "down" when arguments.DryRun => DryRunDownAsync(arguments, cancellationToken),
         "down" => DownAsync(arguments, cancellationToken),
         "validate" => ValidateAsync(cancellationToken),
         "baseline" => BaselineAsync(arguments.To ?? "", cancellationToken),
@@ -90,9 +94,65 @@ public sealed class MigrationEngine
         };
     }
 
-    public async Task<CommandResult> PlanAsync(CancellationToken cancellationToken)
+    /// <summary>Shows what <c>up</c> would do. Exits with <see cref="ExitCodes.PendingMigrations"/> if there is pending work.</summary>
+    public Task<CommandResult> PlanAsync(CancellationToken cancellationToken) => PreviewUpAsync(null, dryRun: false, cancellationToken);
+
+    /// <summary>
+    /// Reports what <c>up</c> would apply without changing anything: no lock, no state or history writes and no migration
+    /// code runs. Exits with the code a real run would (barring the migrations themselves failing or a lock timeout).
+    /// </summary>
+    public Task<CommandResult> DryRunUpAsync(string? to, CancellationToken cancellationToken) => PreviewUpAsync(to, dryRun: true, cancellationToken);
+
+    /// <summary>Reports what <c>down</c> would roll back without changing anything.</summary>
+    public async Task<CommandResult> DryRunDownAsync(CommandArguments arguments, CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
+        var states = await _store.GetStatesAsync(cancellationToken);
+        var issues = Analyse(states, BuildStatus(states));
+        if (BlockingResult(issues.Where(i => i.Kind is "blocked" or "unsupportedState").ToList()) is { } blocked)
+        {
+            return blocked;
+        }
+
+        if (SelectRollbackTargets(states, arguments, out var targets) is { } invalid)
+        {
+            return invalid;
+        }
+
+        if (targets.Count == 0)
+        {
+            return new CommandResult { ExitCode = ExitCodes.Success, Plan = [], Message = "Dry run: nothing to roll back." };
+        }
+
+        List<PlannedMigration> plan;
+        try
+        {
+            plan = await PlanItemsAsync(targets.Select(t => _byId[t.Id]), "down", cancellationToken);
+        }
+        catch (MigrationEngineException e)
+        {
+            return new CommandResult { ExitCode = ExitCodes.Failure, Message = e.Message };
+        }
+
+        var lockIssues = new List<ValidationIssue>();
+        var holder = await ReportHeldLockAsync(lockIssues, cancellationToken);
+        return new CommandResult
+        {
+            ExitCode = ExitCodes.Success,
+            Plan = plan,
+            Issues = lockIssues,
+            Lock = holder,
+            Message = $"Dry run: would roll back {plan.Count} migration(s); nothing was changed.",
+        };
+    }
+
+    // Read-only on purpose (no InitializeAsync, no lock) so it changes nothing and works with a read-only database user.
+    private async Task<CommandResult> PreviewUpAsync(string? to, bool dryRun, CancellationToken cancellationToken)
+    {
+        if (to is not null && !_byId.ContainsKey(to))
+        {
+            return new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Migration '{to}' was not found." };
+        }
+
         var states = await _store.GetStatesAsync(cancellationToken);
         var issues = Analyse(states, BuildStatus(states));
         if (BlockingResult(issues) is { } blocked)
@@ -100,27 +160,64 @@ public sealed class MigrationEngine
             return blocked;
         }
 
-        var pending = PendingMigrations(states, to: null);
+        List<PlannedMigration> plan;
+        try
+        {
+            plan = await PlanItemsAsync(PendingMigrations(states, to), "up", cancellationToken);
+        }
+        catch (MigrationEngineException e)
+        {
+            return new CommandResult { ExitCode = ExitCodes.Failure, Issues = issues, Message = e.Message };
+        }
+
+        var holder = await ReportHeldLockAsync(issues, cancellationToken);
+        var batch = NextBatch(states);
+        return new CommandResult
+        {
+            ExitCode = plan.Count > 0 && !dryRun ? ExitCodes.PendingMigrations : ExitCodes.Success,
+            Plan = plan,
+            Batch = plan.Count > 0 ? batch : null,
+            Issues = issues,
+            Lock = holder,
+            Message = (plan.Count, dryRun) switch
+            {
+                (0, true) => "Dry run: nothing to apply; database is up to date.",
+                (0, false) => "Nothing to apply; database is up to date.",
+                (_, true) => $"Dry run: would apply {plan.Count} migration(s) as batch {batch}; nothing was changed.",
+                _ => $"Would apply {plan.Count} migration(s) as batch {batch}.",
+            },
+        };
+    }
+
+    private async Task<List<PlannedMigration>> PlanItemsAsync(IEnumerable<MigrationDescriptor> migrations, string direction, CancellationToken cancellationToken)
+    {
         var plan = new List<PlannedMigration>();
-        foreach (var migration in pending)
+        foreach (var migration in migrations)
         {
             plan.Add(new PlannedMigration
             {
                 Id = migration.Id,
                 Name = migration.Name,
-                Direction = "up",
+                Direction = direction,
                 Transactional = await DecideTransactionalAsync(migration, cancellationToken),
             });
         }
 
-        return new CommandResult
+        return plan;
+    }
+
+    /// <summary>Adds a warning if another run currently holds the lock, as a real run would have to wait for it.</summary>
+    private async Task<LockInfo?> ReportHeldLockAsync(List<ValidationIssue> issues, CancellationToken cancellationToken)
+    {
+        var holder = await _store.GetLockAsync(cancellationToken);
+        if (holder is null || holder.ExpiresAt <= Now)
         {
-            ExitCode = plan.Count > 0 ? ExitCodes.PendingMigrations : ExitCodes.Success,
-            Plan = plan,
-            Batch = plan.Count > 0 ? NextBatch(states) : null,
-            Issues = issues,
-            Message = plan.Count > 0 ? $"Would apply {plan.Count} migration(s) as batch {NextBatch(states)}." : "Nothing to apply; database is up to date.",
-        };
+            return null;
+        }
+
+        issues.Add(Issue("warning", "locked", null,
+            $"Migrations are locked by run {holder.RunId} ({holder.Host}) until {holder.ExpiresAt:u}; a real run would wait up to {_options.LockWaitTimeout.TotalSeconds:0}s for it."));
+        return holder;
     }
 
     public async Task<CommandResult> UpAsync(string? to, CancellationToken cancellationToken)
@@ -189,43 +286,14 @@ public sealed class MigrationEngine
                 return blocked;
             }
 
-            var applied = states.Where(s => s.State == MigrationStates.Applied)
-                .OrderByDescending(s => s.Id, StringComparer.Ordinal)
-                .ToList();
-
-            List<StoredMigrationState> targets;
-            if (arguments.To is not null)
+            if (SelectRollbackTargets(states, arguments, out var targets) is { } invalid)
             {
-                if (!_byId.ContainsKey(arguments.To) && applied.All(s => s.Id != arguments.To))
-                {
-                    return new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Migration '{arguments.To}' was not found." };
-                }
-
-                targets = applied.Where(s => string.CompareOrdinal(s.Id, arguments.To) > 0).ToList();
-            }
-            else if (arguments.Batch)
-            {
-                var lastBatch = applied.Count == 0 ? 0 : applied.Max(s => s.Batch);
-                targets = applied.Where(s => s.Batch == lastBatch).ToList();
-            }
-            else
-            {
-                targets = applied.Take(arguments.Count ?? 1).ToList();
+                return invalid;
             }
 
             if (targets.Count == 0)
             {
                 return new CommandResult { ExitCode = ExitCodes.Success, RolledBack = [], Message = "Nothing to roll back." };
-            }
-
-            var missing = targets.FirstOrDefault(t => !_byId.ContainsKey(t.Id));
-            if (missing is not null)
-            {
-                return new CommandResult
-                {
-                    ExitCode = ExitCodes.Failure,
-                    Message = $"Cannot roll back {missing.Id} {missing.Name}: the migration is no longer in the code.",
-                };
             }
 
             var rolledBack = new List<string>();
@@ -480,6 +548,44 @@ public sealed class MigrationEngine
 
     private static int NextBatch(IReadOnlyList<StoredMigrationState> states) =>
         states.Count == 0 ? 1 : states.Max(s => s.Batch) + 1;
+
+    /// <summary>Picks what <c>down</c> rolls back, newest first.</summary>
+    /// <returns>An error result if the arguments can't be satisfied, otherwise null.</returns>
+    private CommandResult? SelectRollbackTargets(IReadOnlyList<StoredMigrationState> states, CommandArguments arguments, out List<StoredMigrationState> targets)
+    {
+        var applied = states.Where(s => s.State == MigrationStates.Applied)
+            .OrderByDescending(s => s.Id, StringComparer.Ordinal)
+            .ToList();
+
+        if (arguments.To is not null)
+        {
+            if (!_byId.ContainsKey(arguments.To) && applied.All(s => s.Id != arguments.To))
+            {
+                targets = [];
+                return new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Migration '{arguments.To}' was not found." };
+            }
+
+            targets = applied.Where(s => string.CompareOrdinal(s.Id, arguments.To) > 0).ToList();
+        }
+        else if (arguments.Batch)
+        {
+            var lastBatch = applied.Count == 0 ? 0 : applied.Max(s => s.Batch);
+            targets = applied.Where(s => s.Batch == lastBatch).ToList();
+        }
+        else
+        {
+            targets = applied.Take(arguments.Count ?? 1).ToList();
+        }
+
+        var missing = targets.FirstOrDefault(t => !_byId.ContainsKey(t.Id));
+        return missing is null
+            ? null
+            : new CommandResult
+            {
+                ExitCode = ExitCodes.Failure,
+                Message = $"Cannot roll back {missing.Id} {missing.Name}: the migration is no longer in the code.",
+            };
+    }
 
     private async Task<bool> DecideTransactionalAsync(MigrationDescriptor migration, CancellationToken cancellationToken)
     {

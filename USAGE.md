@@ -204,12 +204,21 @@ Runner: Kevsoft.MigrateMongo 1.0.0 · MongoDB.Driver 3.5.2 · .NET 10.0.1 · pro
  20261009150030  split-full-name             pending
 
 $ migrate-mongo plan
-Would apply 2 migration(s) as batch 2:
-  20261009145210  add-email-index-to-users   (no transaction)
-  20261009150030  split-full-name            (transaction)
+Would apply 2 migration(s) as batch 2.
+  ▶ 20261009145210  add-email-index-to-users   (no transaction)
+  ▶ 20261009150030  split-full-name   (transaction)
 $ echo $?
 2          # 2 = there is pending work (useful as a CI gate)
+
+$ migrate-mongo up --dry-run
+Dry run: would apply 2 migration(s) as batch 2; nothing was changed.
+  ▶ 20261009145210  add-email-index-to-users   (no transaction)
+  ▶ 20261009150030  split-full-name   (transaction)
+$ echo $?
+0          # same exit code a real `up` would return; nothing is written, not even the lock
 ```
+
+`down --dry-run` works the same way (`◀` lines, newest first) with `--count`, `--batch` or `--to`.
 
 ---
 

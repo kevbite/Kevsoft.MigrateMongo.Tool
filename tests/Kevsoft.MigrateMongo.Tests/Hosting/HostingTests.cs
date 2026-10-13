@@ -212,6 +212,8 @@ public sealed class HostingTests
             return Task.FromResult(result);
         }
 
+        public Task<CommandResult> DryRunUpAsync(string? to = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<CommandResult> StatusAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<CommandResult> PlanAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();

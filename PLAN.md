@@ -20,6 +20,10 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * `create` only reads `project` from the config, so it works without connection variables set.
 > * Done since v0.1.1: SSH tunnels (§6, SOCKS + local forward, in the tool only), automatic retry of transient
 >   transaction errors (`transactionRetryTimeout`), and `Kevsoft.MigrateMongo.Hosting` (§4.5).
+> * `up --dry-run` / `down --dry-run` are done. They don't run migration code (so there's no
+>   `MigrationRunInfo.DryRun`), take the lock or write anything, and return the exit code a real run would.
+>   `plan` stays separate (exit `2` with pending work). Runners advertise `features: ["dryRun"]` in the handshake
+>   and the tool refuses `--dry-run` (exit `5`) against older runners, which would ignore the flag.
 > * Deferred: bundles, Templates, scripting loaders, Docker images, the
 >   `Kevsoft.MigrateMongo.Tunnel` package for bundles/hosting.
 
@@ -302,7 +306,7 @@ engine, state collections and lock, so CLI and app runs coordinate safely. The c
 | `up [--to <id>] [--dry-run]` | Apply pending migrations (all share one `batch` number) |
 | `down [--to <id> \| --batch \| --count N]` | Roll back last migration / to a target / whole last batch |
 | `status [--json] [--exit-code]` | Table of applied/pending/changed/missing/failed/in-flight migrations |
-| `plan` | Alias for `up --dry-run`: list what would run, exit code 0/2 for "nothing/something to do" |
+| `plan` | Like `up --dry-run`, but exits 0/2 for "nothing/something to do" |
 | `validate` | Fail if applied migrations have changed checksums, are missing, or pending ones are out of order |
 | `baseline --to <id>` | Mark migrations up to `<id>` as applied without running them (adopting an existing DB) |
 | `mark <id> --applied\|--unapplied` | Manual fix-ups, incl. resolving `failed`/`applying` state |

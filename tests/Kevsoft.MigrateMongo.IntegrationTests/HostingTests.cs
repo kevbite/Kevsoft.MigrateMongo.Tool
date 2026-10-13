@@ -109,6 +109,21 @@ public sealed class HostingTests(IntegrationEnvironment environment)
         workspace.Find("_migrations.lock").ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task App_can_dry_run_without_changing_anything()
+    {
+        await using var workspace = await AppWorkspaceAsync();
+
+        var run = await RunAppAsync(workspace, dryRun: true);
+
+        run.ExitCode.ShouldBe(0, run.ToString());
+        run.Output.ShouldContain("Would apply 20260101000001 create-users");
+        run.Output.ShouldContain("Would apply 20260101000003 seed-defaults");
+        run.Output.ShouldContain("Dry run: would apply 3 migration(s) as batch 1; nothing was changed.");
+        run.Output.ShouldNotContain("Applying migration");
+        workspace.CollectionNames().ShouldBeEmpty();
+    }
+
     /// <summary>A workspace with BasicMigrations (and its migrate-mongo.yaml) plus HostingApp, built once into <c>app/</c>.</summary>
     private async Task<Workspace> AppWorkspaceAsync()
     {
@@ -119,12 +134,13 @@ public sealed class HostingTests(IntegrationEnvironment environment)
         return workspace;
     }
 
-    private Task<ProcessResult> RunAppAsync(Workspace workspace)
+    private Task<ProcessResult> RunAppAsync(Workspace workspace, bool dryRun = false)
     {
         var variables = new Dictionary<string, string?>(environment.ProcessEnvironment)
         {
             ["MONGODB_URL"] = environment.MongoUrl,
             ["DATABASE_NAME"] = workspace.DatabaseName,
+            ["DRY_RUN"] = dryRun ? "1" : null,
             ["Logging__Console__FormatterName"] = "simple",
             ["Logging__Console__FormatterOptions__SingleLine"] = "true",
         };
