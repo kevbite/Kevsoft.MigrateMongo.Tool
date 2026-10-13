@@ -28,11 +28,12 @@
   <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <!-- linux-musl-* must be listed, otherwise the RID graph gives Alpine the glibc linux-* build. -->
     <ToolPackageRuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64;any</ToolPackageRuntimeIdentifiers>
-    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
-    <!-- RID packages: Native AOT binaries have no managed symbols worth a symbol package. -->
+    <!-- Only the RID builds are Native AOT; the main package (pointer + net8.0) and `-r any -p:PublishAot=false` aren't. -->
+    <PublishAot>true</PublishAot>
+    <!-- Native AOT binaries have no managed symbols worth a symbol package. -->
     <IncludeSymbols>false</IncludeSymbols>
   </PropertyGroup>
 
@@ -44,5 +45,18 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
   </ItemGroup>
+
+  <!--
+    SDK 10.0.4xx+ puts a RID-specific pointer's settings file in tools/any/any/, which NuGet ranks below tools/net8.0/,
+    so .NET 10 SDKs would install the net8.0 build. Keep the pointer under its TFM so .NET 10+ SDKs choose it.
+  -->
+  <Target Name="KeepToolPointerUnderTargetFramework" AfterTargets="PackTool"
+          Condition="'$(RuntimeIdentifier)' == '' and '$(ToolPackageRuntimeIdentifiers)' != ''">
+    <ItemGroup>
+      <TfmSpecificPackageFile Condition="'%(TfmSpecificPackageFile.PackagePath)' == 'tools/any/any/'">
+        <PackagePath>tools/$(TargetFramework)/any/</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
 
 </Project>
