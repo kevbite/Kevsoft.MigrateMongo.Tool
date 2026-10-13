@@ -232,4 +232,22 @@ public sealed class ConfigLoaderTests
             directory.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void Migration_template_is_resolved_relative_to_the_config_file_even_when_only_loading_the_project()
+    {
+        var directory = Directory.CreateTempSubdirectory("mm-config-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "migrate-mongo.yaml");
+            File.WriteAllText(path, "project: src/Migrations\nmigrationTemplate: templates/migration.cs.template\n");
+
+            ConfigLoader.LoadFile(path, null, Env, projectOnly: true).MigrationTemplate
+                .ShouldBe(Path.Combine(directory.FullName, "templates", "migration.cs.template"));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
 }

@@ -130,6 +130,14 @@ internal sealed class ToolCommands(string workingDirectory)
                         ?? throw new ToolException(ExitCodes.Failure, $"'{invocation.Name}' isn't a valid migration name; use something like AddEmailIndexToUsers.");
         var (configPath, config) = LoadConfig(invocation, projectOnly: true);
         var projectFile = ResolveProjectFile(configPath, config);
+        string? template = null;
+        if (config.MigrationTemplate is { } templatePath)
+        {
+            template = File.Exists(templatePath)
+                ? File.ReadAllText(templatePath)
+                : throw new ConfigException($"Migration template '{templatePath}' (migrationTemplate in {configPath}) was not found.");
+        }
+
         var migrationsDirectory = Path.Combine(Path.GetDirectoryName(projectFile)!, "Migrations");
         Directory.CreateDirectory(migrationsDirectory);
 
@@ -149,7 +157,11 @@ internal sealed class ToolCommands(string workingDirectory)
 
         var path = Path.Combine(migrationsDirectory, $"M{id}_{className}.cs");
         var rootNamespace = Scaffolding.ToNamespace(Path.GetFileNameWithoutExtension(projectFile));
-        File.WriteAllText(path, Scaffolding.MigrationFile(rootNamespace + ".Migrations", id, className, Scaffolding.ToKebabCase(className)));
+        var @namespace = rootNamespace + ".Migrations";
+        var name = Scaffolding.ToKebabCase(className);
+        File.WriteAllText(path, template is null
+            ? Scaffolding.MigrationFile(@namespace, id, className, name)
+            : Scaffolding.RenderMigrationTemplate(template, @namespace, id, className, name));
 
         if (invocation.Json)
         {

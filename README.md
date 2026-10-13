@@ -162,6 +162,7 @@ lockWaitTimeout: 60                  # seconds to wait for another run to finish
 onChecksumMismatch: fail             # fail | warn | ignore
 transaction: auto                    # auto | always | never
 transactionRetryTimeout: 120         # seconds to keep retrying transient transaction errors (0 = off)
+migrationTemplate: templates/migration.cs.template   # optional: what `create` writes (relative to this file)
 environments:
   prod:
     mongodb:
@@ -211,6 +212,34 @@ public sealed class MigrationContext
     MigrationRunInfo Run { get; }           // run id, batch, direction, environment
 }
 ```
+
+To change what `create` writes (a base class, team usings, a header comment, ...), point `migrationTemplate` in
+`migrate-mongo.yaml` at your own file. These placeholders are replaced; everything else is copied as-is:
+
+| Placeholder | Example |
+|---|---|
+| `{{namespace}}` | `MyApp.Migrations.Migrations` |
+| `{{id}}` | `20261009145210` |
+| `{{className}}` | `AddEmailIndexToUsers` |
+| `{{name}}` | `add-email-index-to-users` |
+
+```csharp
+using Kevsoft.MigrateMongo;
+using MongoDB.Driver;
+
+namespace {{namespace}};
+
+[Migration("{{id}}", "{{name}}")]
+public sealed class {{className}} : IMigration
+{
+    public Task UpAsync(MigrationContext ctx, CancellationToken ct) => throw new NotImplementedException();
+
+    public Task DownAsync(MigrationContext ctx, CancellationToken ct) => throw new NotImplementedException();
+}
+```
+
+Don't give the template a `.cs` extension if it lives inside the migrations project, or it'll be compiled.
+`dotnet new migratemongo-migration` always uses the built-in template.
 
 The source generator reports these build errors:
 

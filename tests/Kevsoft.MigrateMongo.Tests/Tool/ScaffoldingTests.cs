@@ -28,4 +28,11 @@ public sealed class ScaffoldingTests
     [InlineData("MyApp.Migrations", "MyApp.Migrations")]
     [InlineData("my-app.1migrations", "my_app._1migrations")]
     public void ToNamespace(string input, string expected) => Scaffolding.ToNamespace(input).ShouldBe(expected);
+
+    [Fact]
+    public void RenderMigrationTemplate_replaces_the_known_placeholders_only() =>
+        Scaffolding.RenderMigrationTemplate(
+                "namespace {{namespace}};\n[Migration(\"{{id}}\", \"{{name}}\")]\nclass {{className}} : BaseMigration { string S => $$\"\"\"{{other}}\"\"\"; }",
+                "Shop.Migrations", "20261013091500", "AddProducts", "add-products")
+            .ShouldBe("namespace Shop.Migrations;\n[Migration(\"20261013091500\", \"add-products\")]\nclass AddProducts : BaseMigration { string S => $$\"\"\"{{other}}\"\"\"; }");
 }

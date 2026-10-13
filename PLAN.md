@@ -32,7 +32,7 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * `Kevsoft.MigrateMongo.Templates` is done: `migratemongo` (project, same output as `init` plus a
 >   `migrate-mongo.yaml` with `project: .`) and `migratemongo-migration` (same file as `create`). The Runner
 >   version is stamped in at pack time; unit tests keep the template files identical to `Scaffolding`.
->   `create` doesn't read a custom `templates/migration.cs` yet.
+>   `create` renders `migrationTemplate:` (a config path) when set: `{{namespace}}`, `{{id}}`, `{{className}}`, `{{name}}`.
 > * `bundle` is done (scenario 15): `dotnet publish -c Release -r <rid> --self-contained -p:PublishSingleFile=true`
 >   into `-o` (default `bundle/`), copies the config next to the executable and handshakes with it when the RID is
 >   the current one. Not trimmed (the driver isn't trim-safe). Integration tests run a bundle directly, through
@@ -317,7 +317,7 @@ engine, state collections and lock, so CLI and app runs coordinate safely. The c
 | Command | Description |
 |---------|-------------|
 | `init` | Scaffold `migrate-mongo.yaml` and a migrations console project (`Program.cs` calling `MigrateMongoRunner.RunAsync(args)`, package refs, sample migration). The tool writes files itself; no `dotnet new` template install needed. A `dotnet new` template package is also published. |
-| `create <name>` | New `Migrations/M<timestamp>_<Name>.cs` from the template (customisable via `templates/migration.cs`) |
+| `create <name>` | New `Migrations/M<timestamp>_<Name>.cs` from the template (customisable via `migrationTemplate:`) |
 | `up [--to <id>] [--dry-run]` | Apply pending migrations (all share one `batch` number) |
 | `down [--to <id> \| --batch \| --count N]` | Roll back last migration / to a target / whole last batch |
 | `status [--json] [--exit-code]` | Table of applied/pending/changed/missing/failed/in-flight migrations |

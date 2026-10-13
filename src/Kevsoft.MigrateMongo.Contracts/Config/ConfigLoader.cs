@@ -16,7 +16,7 @@ public static class ConfigLoader
     private static readonly HashSet<string> KnownKeys =
     [
         "project", "mongodb", "stateCollection", "lockTtl", "lockWaitTimeout", "onChecksumMismatch",
-        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel",
+        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate",
     ];
 
     private static readonly HashSet<string> TunnelKeys =
@@ -45,6 +45,8 @@ public static class ConfigLoader
         {
             resolved.Project = Path.GetFullPath(resolved.Project, directory);
         }
+
+        resolved.MigrationTemplate = ResolvePath(resolved.MigrationTemplate, directory);
 
         if (resolved.Tunnel is { } tunnel)
         {
@@ -94,6 +96,7 @@ public static class ConfigLoader
 
         var config = new ResolvedConfig { Environment = string.IsNullOrEmpty(environment) ? null : environment };
         config.Project = OptionalString(root, "project", getEnvironmentVariable);
+        config.MigrationTemplate = OptionalString(root, "migrationTemplate", getEnvironmentVariable);
         if (projectOnly)
         {
             return config;

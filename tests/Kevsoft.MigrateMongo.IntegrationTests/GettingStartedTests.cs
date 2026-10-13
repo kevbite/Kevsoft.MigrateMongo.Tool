@@ -50,6 +50,54 @@ public sealed class GettingStartedTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task Create_uses_a_custom_migration_template()
+    {
+        await using var workspace = Workspace.Empty(environment);
+        var init = await workspace.RunAsync("init", "--project", "src/Shop.Migrations");
+        init.ExitCode.ShouldBe(0, init.ToString());
+
+        var config = File.ReadAllText(workspace.ConfigPath).Replace("databaseName: shop", $"databaseName: {workspace.DatabaseName}");
+        File.WriteAllText(workspace.ConfigPath, config + "migrationTemplate: templates/migration.cs.template\n");
+
+        var missing = await workspace.RunAsync("create", "AddProducts");
+        missing.ExitCode.ShouldNotBe(0);
+        (missing.Output + missing.Error).ShouldContain("migration.cs.template");
+
+        Directory.CreateDirectory(workspace.PathOf("templates"));
+        File.WriteAllText(workspace.PathOf("templates", "migration.cs.template"), """
+            using Kevsoft.MigrateMongo;
+            using MongoDB.Bson;
+            using MongoDB.Driver;
+
+            namespace {{namespace}};
+
+            // Team template
+            [Migration("{{id}}", "{{name}}")]
+            public sealed class {{className}} : IMigration
+            {
+                public Task UpAsync(MigrationContext context, CancellationToken cancellationToken) =>
+                    context.Database.GetCollection<BsonDocument>("templated").InsertOneAsync(new BsonDocument("_id", "{{className}}"), cancellationToken: cancellationToken);
+
+                public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+            }
+            """);
+
+        var create = await workspace.RunAsync("create", "AddProducts");
+        create.ExitCode.ShouldBe(0, create.ToString());
+        var migrationFile = Directory.GetFiles(workspace.PathOf("src", "Shop.Migrations", "Migrations")).ShouldHaveSingleItem();
+        var id = Regex.Match(Path.GetFileName(migrationFile), @"^M(\d{14})_AddProducts\.cs$").Groups[1].Value;
+        var source = File.ReadAllText(migrationFile);
+        source.ShouldContain("// Team template");
+        source.ShouldContain("namespace Shop.Migrations.Migrations;");
+        source.ShouldContain($"[Migration(\"{id}\", \"add-products\")]");
+
+        var up = await workspace.RunAsync(["up"], new Dictionary<string, string?> { ["MONGODB_URL"] = environment.MongoUrl });
+
+        up.ExitCode.ShouldBe(0, up.ToString());
+        workspace.Find("templated").ShouldBe([new BsonDocument("_id", "AddProducts")]);
+    }
+
+    [Fact]
     public async Task Version_reports_the_tool_version()
     {
         await using var workspace = Workspace.Empty(environment);

@@ -72,6 +72,14 @@ internal static class Scaffolding
 
         """;
 
+    /// <summary>Renders a user's <c>migrationTemplate</c>. Anything other than the known placeholders is left untouched.</summary>
+    public static string RenderMigrationTemplate(string template, string @namespace, string id, string className, string name) =>
+        template
+            .Replace("{{namespace}}", @namespace, StringComparison.Ordinal)
+            .Replace("{{id}}", id, StringComparison.Ordinal)
+            .Replace("{{className}}", className, StringComparison.Ordinal)
+            .Replace("{{name}}", name, StringComparison.Ordinal);
+
     /// <summary>Turns user input such as <c>add email-index</c> into a C# class name (<c>AddEmailIndex</c>).</summary>
     public static string? ToClassName(string input)
     {

@@ -136,6 +136,9 @@ public sealed class AddEmailIndexToUsers : IMigration
 }
 ```
 
+To generate something else (a base class, team usings, …), set `migrationTemplate: templates/migration.cs.template`
+in `migrate-mongo.yaml`; see the README's "Creating a Migration" section for the placeholders.
+
 Fill it in using the normal MongoDB driver API:
 
 ```csharp
