@@ -46,11 +46,10 @@ jobs:
 
       - name: Pack
         if: matrix.os == 'ubuntu-latest'
-        # The solution pack includes the Kevsoft.MigrateMongo.Tool.Native pointer package; its Native AOT packages are
-        # packed by the aot job and the framework-dependent fallback (`any`) here.
+        # The tool's Native AOT packages are packed by the aot job; its framework-dependent `any` fallback here.
         run: |
           dotnet pack Kevsoft.MigrateMongo.slnx -c Release --no-build -o artifacts/packages
-          dotnet pack src/Kevsoft.MigrateMongo.Tool.Native -c Release -r any -p:PublishAot=false -o artifacts/packages
+          dotnet pack src/Kevsoft.MigrateMongo.Tool -c Release -r any -p:PublishAot=false -o artifacts/packages
 
       - name: Upload packages
         if: matrix.os == 'ubuntu-latest'
@@ -112,8 +111,8 @@ jobs:
         if: ${{ !matrix.alpine }}
         shell: bash
         run: |
-          dotnet publish src/Kevsoft.MigrateMongo.Tool.Native -c Release -r ${{ matrix.rid }} -o artifacts/aot/${{ matrix.rid }}
-          dotnet pack src/Kevsoft.MigrateMongo.Tool.Native -c Release -r ${{ matrix.rid }} -o artifacts/native-packages
+          dotnet publish src/Kevsoft.MigrateMongo.Tool -c Release -r ${{ matrix.rid }} -o artifacts/aot/${{ matrix.rid }}
+          dotnet pack src/Kevsoft.MigrateMongo.Tool -c Release -r ${{ matrix.rid }} -o artifacts/tool-packages
 
       - name: Publish and pack (Alpine)
         if: ${{ matrix.alpine }}
@@ -122,8 +121,8 @@ jobs:
             set -e
             apk add -q clang build-base zlib-dev git
             git config --global --add safe.directory /src
-            dotnet publish src/Kevsoft.MigrateMongo.Tool.Native -c Release -r ${{ matrix.rid }} -o artifacts/aot/${{ matrix.rid }}
-            dotnet pack src/Kevsoft.MigrateMongo.Tool.Native -c Release -r ${{ matrix.rid }} -o artifacts/native-packages
+            dotnet publish src/Kevsoft.MigrateMongo.Tool -c Release -r ${{ matrix.rid }} -o artifacts/aot/${{ matrix.rid }}
+            dotnet pack src/Kevsoft.MigrateMongo.Tool -c Release -r ${{ matrix.rid }} -o artifacts/tool-packages
             ./artifacts/aot/${{ matrix.rid }}/migrate-mongo version
             chown -R '"$(id -u):$(id -g)"' artifacts'
 
@@ -137,8 +136,8 @@ jobs:
       - name: Upload tool package
         uses: actions/upload-artifact@v7
         with:
-          name: native-package-${{ matrix.rid }}
-          path: artifacts/native-packages/*.nupkg
+          name: tool-package-${{ matrix.rid }}
+          path: artifacts/tool-packages/*.nupkg
           if-no-files-found: error
 
       - name: Upload binary
@@ -154,7 +153,7 @@ jobs:
     name: Integration tests (MongoDB Atlas Local)
     # GitHub's Windows and macOS runners can't run Linux containers.
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, aot]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -171,6 +170,12 @@ jobs:
           name: packages
           path: artifacts/packages
 
+      # The .NET 10 SDK installs the tool from its Native AOT package for this runner.
+      - uses: actions/download-artifact@v8
+        with:
+          name: tool-package-linux-x64
+          path: artifacts/packages
+
       - name: Use the CI packages
         run: |
           version=$(ls artifacts/packages/Kevsoft.MigrateMongo.Runner.*.nupkg | sed -E 's/.*Kevsoft\.MigrateMongo\.Runner\.(.*)\.nupkg/\1/')
@@ -182,57 +187,31 @@ jobs:
         run: dotnet test --project tests/Kevsoft.MigrateMongo.IntegrationTests -c Release
 
   smoke:
-    name: Tool install (${{ matrix.os }}, .NET ${{ matrix.dotnet }})
-    runs-on: ${{ matrix.os }}
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        # The tool targets net8.0 with RollForward=LatestMajor, so it must run on whatever runtime is installed.
-        dotnet: ['8.0.x', '10.0.x']
-    steps:
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: ${{ matrix.dotnet }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: packages
-          path: packages
-
-      - name: Install and run the tool
-        shell: bash
-        run: |
-          version=$(ls packages/Kevsoft.MigrateMongo.Tool.[0-9]*.nupkg | sed -E 's/.*Kevsoft\.MigrateMongo\.Tool\.(.*)\.nupkg/\1/')
-          dotnet tool install Kevsoft.MigrateMongo.Tool --version "$version" --add-source ./packages --tool-path ./tool
-          ./tool/migrate-mongo version
-          mkdir demo && cd demo
-          ../tool/migrate-mongo init
-          ../tool/migrate-mongo create AddUsersCollection
-          ls Migrations/Migrations
-
-  smoke-native:
-    name: Native tool install (${{ matrix.name }})
+    name: Tool install (${{ matrix.name }}, .NET ${{ matrix.sdk }} SDK)
     runs-on: ${{ matrix.os }}
     needs: [build, aot]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x64, os: ubuntu-latest }
-          - { name: linux-arm64, os: ubuntu-24.04-arm }
-          - { name: linux-musl-x64, os: ubuntu-latest, alpine: true }
-          - { name: linux-musl-arm64, os: ubuntu-24.04-arm, alpine: true }
-          - { name: win-x64, os: windows-latest }
-          - { name: win-arm64, os: windows-11-arm }
-          - { name: osx-x64, os: macos-15-intel }
-          - { name: osx-arm64, os: macos-latest }
+          # .NET 10+ SDKs install the Native AOT package for the platform.
+          - { name: linux-x64, os: ubuntu-latest, sdk: 10, expect: 'linux-x64; aot' }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, sdk: 10, expect: 'linux-arm64; aot' }
+          - { name: linux-musl-x64, os: ubuntu-latest, sdk: 10, alpine: true, expect: 'linux-musl-x64; aot' }
+          - { name: linux-musl-arm64, os: ubuntu-24.04-arm, sdk: 10, alpine: true, expect: 'linux-musl-arm64; aot' }
+          - { name: win-x64, os: windows-latest, sdk: 10, expect: 'win-x64; aot' }
+          - { name: win-arm64, os: windows-11-arm, sdk: 10, expect: 'win-arm64; aot' }
+          - { name: osx-x64, os: macos-15-intel, sdk: 10, expect: 'osx-x64; aot' }
+          - { name: osx-arm64, os: macos-latest, sdk: 10, expect: 'osx-arm64; aot' }
+          # Older SDKs can't install RID-specific tools, so they get the framework-dependent net8.0 build.
+          - { name: linux-x64, os: ubuntu-latest, sdk: 8, expect: '; .NET ' }
+          - { name: win-x64, os: windows-latest, sdk: 8, expect: '; .NET ' }
+          - { name: osx-arm64, os: macos-latest, sdk: 8, expect: '; .NET ' }
     steps:
       - uses: actions/setup-dotnet@v6
         if: ${{ !matrix.alpine }}
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: ${{ matrix.sdk }}.0.x
 
       - uses: actions/download-artifact@v8
         with:
@@ -241,18 +220,21 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: native-package-*
+          pattern: tool-package-*
           path: packages
           merge-multiple: true
 
       - name: Write the install script
         shell: bash
         run: |
+          # Runners have newer SDKs preinstalled, so pin the one under test.
+          echo '{"sdk":{"version":"${{ matrix.sdk }}.0.100","rollForward":"latestFeature"}}' > global.json
           cat > install.sh <<'EOF'
           set -e
-          version=$(ls packages/Kevsoft.MigrateMongo.Tool.Native.[0-9]*.nupkg | sed -E 's/.*Kevsoft\.MigrateMongo\.Tool\.Native\.(.*)\.nupkg/\1/')
-          dotnet tool install Kevsoft.MigrateMongo.Tool.Native --version "$version" --add-source ./packages --tool-path ./tool
-          # On Windows the SDK installs native tools with a .cmd shim, which bash can't run directly.
+          dotnet --version
+          version=$(ls packages/Kevsoft.MigrateMongo.Tool.[0-9]*.nupkg | sed -E 's/.*Kevsoft\.MigrateMongo\.Tool\.(.*)\.nupkg/\1/')
+          dotnet tool install Kevsoft.MigrateMongo.Tool --version "$version" --add-source ./packages --tool-path ./tool
+          # On Windows the SDK installs RID-specific tools with a .cmd shim, which bash can't run directly.
           if [ -f tool/migrate-mongo.cmd ]; then
             shim=$(cygpath -w "$PWD/tool/migrate-mongo.cmd")
             mm() { cmd //c "$shim" "$@"; }
@@ -261,21 +243,21 @@ jobs:
             mm() { "$shim" "$@"; }
           fi
           mm version | tee version.txt
-          grep -q "($1; aot)" version.txt
+          grep -qF "$1" version.txt
           mkdir demo && cd demo
           mm init
           mm create AddUsersCollection
           ls Migrations/Migrations
           EOF
 
-      - name: Install and run the native tool
+      - name: Install and run the tool
         if: ${{ !matrix.alpine }}
         shell: bash
-        run: bash install.sh ${{ matrix.name }}
+        run: bash install.sh '${{ matrix.expect }}'
 
-      - name: Install and run the native tool (Alpine)
+      - name: Install and run the tool (Alpine)
         if: ${{ matrix.alpine }}
-        run: docker run --rm -v "$PWD:/w" -w /w mcr.microsoft.com/dotnet/sdk:10.0-alpine sh install.sh ${{ matrix.name }}
+        run: docker run --rm -v "$PWD:/w" -w /w mcr.microsoft.com/dotnet/sdk:10.0-alpine sh install.sh '${{ matrix.expect }}'
 
   publish-preview:
     name: Publish preview packages (GitHub Packages)
@@ -296,14 +278,14 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: native-package-*
+          pattern: tool-package-*
           path: packages
           merge-multiple: true
 
       - name: Push
-        # The Native tool's RID-specific packages must exist before its pointer package, so the pointer goes last.
+        # The tool's RID-specific packages must exist before the package that points at them, so it goes last.
         run: |
-          mkdir pointer && mv packages/Kevsoft.MigrateMongo.Tool.Native.[0-9]*.nupkg pointer/
+          mkdir pointer && mv packages/Kevsoft.MigrateMongo.Tool.[0-9]*.*nupkg pointer/
           for dir in packages pointer; do
             dotnet nuget push "$dir/*.nupkg" \
               --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
@@ -315,7 +297,7 @@ jobs:
     name: CI success
     if: always()
     runs-on: ubuntu-latest
-    needs: [build, driver-compat, aot, integration, smoke, smoke-native]
+    needs: [build, driver-compat, aot, integration, smoke]
     steps:
       - name: Check all jobs passed
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

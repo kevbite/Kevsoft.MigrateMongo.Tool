@@ -12,12 +12,12 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > adapter, Runner, the `migrate-mongo` tool (all commands in §5), unit tests, Atlas Local integration tests
 > (`tests/Kevsoft.MigrateMongo.IntegrationTests`, fixtures in `tests/fixtures`) and GitHub Actions
 > (`ci.yml`, `release.yml`, `nightly.yml`). Where the build differs from this plan:
-> * The tool ships as **one framework-dependent `net8.0` tool package with `RollForward=LatestMajor`** (runs on
->   any installed runtime ≥ 8), plus **standalone Native AOT binaries** on GitHub Releases. The RID-specific AOT
->   tool packages are a **separate package, `Kevsoft.MigrateMongo.Tool.Native`** (`net10.0`, same sources), because
->   .NET 8/9 SDKs refuse to install a RID-specific pointer package ("Format version is higher than supported")
->   instead of falling back to `any`. Its `any` package is the fallback for RIDs without an AOT build;
->   `linux-musl-*` must be listed explicitly, otherwise the RID graph would pick the glibc `linux-*` build on Alpine.
+> * The tool is **one package that multi-targets `net8.0;net10.0`**. Each TFM has its own `DotnetToolSettings.xml`:
+>   `net8.0` is a framework-dependent tool (`RollForward=LatestMajor`, runs on any runtime ≥ 8), which .NET 8/9 SDKs
+>   pick because they reject RID-specific tool packages ("Format version is higher than supported") rather than
+>   falling back; `net10.0` points at the RID-specific Native AOT packages (+ `any`), which .NET 10+ SDKs pick.
+>   RID packs (`-r <rid>`) build `net10.0` only. `linux-musl-*` must be listed explicitly, otherwise the RID graph
+>   would pick the glibc `linux-*` build on Alpine. Standalone AOT binaries are also on GitHub Releases.
 > * Spectre.Console isn't used; the tool has a small hand-written renderer, so AOT has no third-party risk.
 > * `IMigrationSource.GetMigrations()` is synchronous; `init` doesn't scaffold an initial migration.
 > * `create` only reads `project` from the config, so it works without connection variables set.
@@ -154,8 +154,8 @@ small, versioned JSON protocol, so no assembly is ever loaded across the boundar
 
 | Channel | Build | Needs .NET on the machine? |
 |---------|-------|----------------------------|
-| `dotnet tool install -g Kevsoft.MigrateMongo.Tool` | Framework-dependent `net8.0`, `<RollForward>LatestMajor</RollForward>` | Any .NET ≥ 8 runtime (any SDK ≥ 8 to install) |
-| `dotnet tool install -g Kevsoft.MigrateMongo.Tool.Native` | .NET 10 RID-specific **Native AOT** packages (`win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64`) **+ `any`** fallback for other RIDs | Only the .NET 10+ SDK to *install* it; not to run |
+| `dotnet tool install -g Kevsoft.MigrateMongo.Tool` (.NET 10+ SDK) | `net10.0` → RID-specific **Native AOT** packages (`win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64`) **+ `any`** fallback for other RIDs | Only the SDK to *install* it; not to run |
+| Same package (.NET 8/9 SDK) | `net8.0` framework-dependent, `<RollForward>LatestMajor</RollForward>` | Any .NET ≥ 8 runtime |
 | GitHub Releases | Standalone AOT binaries + checksums (+ install script) | No |
 | Docker image (`ghcr.io/kevbite/migrate-mongo`) | AOT tool + .NET SDK base (needs to build user projects) and a `runtime-deps` variant for bundles | No (for bundles) |
 | **Migration bundle** (`migrate-mongo bundle`) | `dotnet publish` of the user's migrations project: self-contained single-file runner | No. Runs on deploy agents directly or via the tool's `--runner` |

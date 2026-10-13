@@ -31,7 +31,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: native-package-*
+          pattern: tool-package-*
           path: packages
           merge-multiple: true
 
@@ -53,9 +53,9 @@ jobs:
           user: ${{ secrets.NUGET_USER }}
 
       - name: Push
-        # The Native tool's RID-specific packages must exist before its pointer package, so the pointer goes last.
+        # The tool's RID-specific packages must exist before the package that points at them, so it goes last.
         run: |
-          mkdir pointer && mv packages/Kevsoft.MigrateMongo.Tool.Native.[0-9]*.nupkg pointer/
+          mkdir pointer && mv packages/Kevsoft.MigrateMongo.Tool.[0-9]*.*nupkg pointer/
           for dir in packages pointer; do
             dotnet nuget push "$dir/*.nupkg" \
               --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \

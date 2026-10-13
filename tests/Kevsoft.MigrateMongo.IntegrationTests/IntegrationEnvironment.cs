@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Kevsoft.MigrateMongo.IntegrationTests;
@@ -102,6 +103,12 @@ public sealed class IntegrationEnvironment : IAsyncLifetime
                     "pack", Path.Combine(RepositoryRoot, "src", project, project + ".csproj"), "-c", "Release", "-o", feed,
                     $"-p:MinVerVersionOverride={version}", "-nologo");
             }
+
+            // .NET 10+ SDKs install the tool from its package for this RID. Native AOT needs a platform linker, so
+            // locally that package is framework-dependent; CI tests the real Native AOT package.
+            await Dotnet.RunAsync(RepositoryRoot, null,
+                "pack", Path.Combine(RepositoryRoot, "src", "Kevsoft.MigrateMongo.Tool", "Kevsoft.MigrateMongo.Tool.csproj"), "-c", "Release", "-o", feed,
+                "-r", RuntimeInformation.RuntimeIdentifier, "-p:PublishAot=false", $"-p:MinVerVersionOverride={version}", "-nologo");
         }
 
         PackageVersion = version;
@@ -115,7 +122,10 @@ public sealed class IntegrationEnvironment : IAsyncLifetime
 
         await Dotnet.RunAsync(RepositoryRoot, ProcessEnvironment,
             "tool", "install", "Kevsoft.MigrateMongo.Tool", "--version", version, "--add-source", PackageFeed, "--tool-path", toolDirectory);
-        ToolPath = Path.Combine(toolDirectory, OperatingSystem.IsWindows() ? "migrate-mongo.exe" : "migrate-mongo");
+        // RID-specific tools get a .cmd shim on Windows rather than an apphost.
+        ToolPath = OperatingSystem.IsWindows()
+            ? new[] { "migrate-mongo.exe", "migrate-mongo.cmd" }.Select(name => Path.Combine(toolDirectory, name)).First(File.Exists)
+            : Path.Combine(toolDirectory, "migrate-mongo");
     }
 
     /// <summary>Environment variables for every process the tests start; <c>null</c> removes an inherited variable.</summary>
