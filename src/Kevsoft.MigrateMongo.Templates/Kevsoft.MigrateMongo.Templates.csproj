@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Kevsoft.MigrateMongo.Templates</PackageId>
+    <PackageType>Template</PackageType>
+    <PackageTags>$(PackageTags);dotnet-new;templates</PackageTags>
+    <Description>dotnet new templates for Kevsoft.MigrateMongo: a MongoDB migrations project (migratemongo) and a migration class (migratemongo-migration).</Description>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <!-- .template.config folders start with a dot, which NuGet excludes by default. -->
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <TemplateFile Include="content\**\*" Exclude="content\**\bin\**;content\**\obj\**" />
+    <None Include="@(TemplateFile)" />
+  </ItemGroup>
+
+  <!-- Stamps this release's version into the project template so new projects reference matching packages. -->
+  <Target Name="StampTemplates" BeforeTargets="_GetPackageFiles" DependsOnTargets="MinVer">
+    <PropertyGroup>
+      <_StampedTemplates>$(IntermediateOutputPath)templates\</_StampedTemplates>
+      <_ProjectTemplateFile>content\project\MigrateMongo.Migrations.csproj</_ProjectTemplateFile>
+      <_StampedProjectFile>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\$(_ProjectTemplateFile)').Replace('KEVSOFT_MIGRATEMONGO_VERSION', '$(PackageVersion)').TrimEnd())</_StampedProjectFile>
+    </PropertyGroup>
+    <RemoveDir Directories="$(_StampedTemplates)" />
+    <Copy SourceFiles="@(TemplateFile)" DestinationFiles="@(TemplateFile->'$(_StampedTemplates)%(RecursiveDir)%(Filename)%(Extension)')" />
+    <WriteLinesToFile File="$(_StampedTemplates)project\MigrateMongo.Migrations.csproj" Lines="$([MSBuild]::Escape($(_StampedProjectFile)))" Overwrite="true" />
+    <ItemGroup>
+      <_StampedTemplateFile Include="$(_StampedTemplates)**\*" />
+      <None Include="@(_StampedTemplateFile)" Pack="true" PackagePath="content\" />
+    </ItemGroup>
+  </Target>
+
+</Project>

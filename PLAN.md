@@ -26,7 +26,11 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * **Pre-1.0: no compatibility with earlier releases.** Nobody depends on the 0.x packages yet, so breaking changes
 >   are fine and there are no version checks, upgrade notes or shims for older tools/runners. The protocol rules
 >   (§3), ApiCompat baselines and tests against previously published runners apply from 1.0.
-> * Deferred: bundles, Templates, scripting loaders, Docker images, the
+> * `Kevsoft.MigrateMongo.Templates` is done: `migratemongo` (project, same output as `init` plus a
+>   `migrate-mongo.yaml` with `project: .`) and `migratemongo-migration` (same file as `create`). The Runner
+>   version is stamped in at pack time; unit tests keep the template files identical to `Scaffolding`.
+>   `create` doesn't read a custom `templates/migration.cs` yet.
+> * Deferred: bundles, scripting loaders, Docker images, the
 >   `Kevsoft.MigrateMongo.Tunnel` package for bundles/hosting.
 
 ---

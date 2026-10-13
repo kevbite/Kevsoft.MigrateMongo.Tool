@@ -92,6 +92,17 @@ return await MigrateMongoRunner.RunAsync(args);
 You can also add migrations to an existing project instead. Add the `Kevsoft.MigrateMongo.Runner`
 package and point `project:` at it.
 
+Prefer `dotnet new`? The `Kevsoft.MigrateMongo.Templates` package creates the same project, with
+`migrate-mongo.yaml` next to it:
+
+```bash
+$ dotnet new install Kevsoft.MigrateMongo.Templates
+$ dotnet new migratemongo -n MyApp.Migrations -o src/MyApp.Migrations
+The template "MongoDB Migrations Project (Kevsoft.MigrateMongo)" was created successfully.
+$ dotnet new migratemongo-migration -n AddEmailIndexToUsers -o src/MyApp.Migrations/Migrations
+The template "MongoDB Migration (Kevsoft.MigrateMongo)" was created successfully.
+```
+
 ---
 
 ## 3. Create a migration

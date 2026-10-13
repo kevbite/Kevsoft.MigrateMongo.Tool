@@ -1,0 +1,14 @@
+# Kevsoft.MigrateMongo configuration. See https://github.com/kevbite/Kevsoft.MigrateMongo
+project: .
+mongodb:
+  url: ${MONGODB_URL}
+  databaseName: mydatabase
+stateCollection: _migrations
+lockTtl: 300
+lockWaitTimeout: 60
+onChecksumMismatch: fail   # fail | warn | ignore
+transaction: auto          # auto | always | never
+# environments:
+#   prod:
+#     mongodb:
+#       url: ${PROD_MONGODB_URL}

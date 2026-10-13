@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "kevbite",
+  "classifications": [ "MongoDB", "Migrations", "Console" ],
+  "identity": "Kevsoft.MigrateMongo.Templates.Project",
+  "name": "MongoDB Migrations Project (Kevsoft.MigrateMongo)",
+  "description": "A console project for MongoDB migrations written in C#, run with the migrate-mongo tool.",
+  "shortName": "migratemongo",
+  "sourceName": "MigrateMongo.Migrations",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "description": "The target framework for the project.",
+      "datatype": "choice",
+      "choices": [
+        { "choice": "net10.0", "description": "Target .NET 10" },
+        { "choice": "net9.0", "description": "Target .NET 9" },
+        { "choice": "net8.0", "description": "Target .NET 8" }
+      ],
+      "defaultValue": "net10.0",
+      "replaces": "net10.0"
+    },
+    "DatabaseName": {
+      "type": "parameter",
+      "description": "The MongoDB database to migrate. Defaults to the first part of the project name, lower-cased (Shop.Migrations -> shop).",
+      "datatype": "text"
+    },
+    "projectNamePrefix": {
+      "type": "generated",
+      "generator": "regex",
+      "parameters": {
+        "source": "name",
+        "steps": [ { "regex": "\\..*$", "replacement": "" } ]
+      }
+    },
+    "defaultDatabaseName": {
+      "type": "generated",
+      "generator": "casing",
+      "parameters": { "source": "projectNamePrefix", "toLower": true }
+    },
+    "databaseNameValue": {
+      "type": "generated",
+      "generator": "coalesce",
+      "parameters": { "sourceVariableName": "DatabaseName", "fallbackVariableName": "defaultDatabaseName" },
+      "replaces": "mydatabase"
+    },
+    "SkipConfig": {
+      "type": "parameter",
+      "description": "Don't create migrate-mongo.yaml (e.g. to create one at the repository root with `migrate-mongo init --project <dir>`).",
+      "datatype": "bool",
+      "defaultValue": "false"
+    },
+    "skipRestore": {
+      "type": "parameter",
+      "description": "Skip the automatic restore of the project on create.",
+      "datatype": "bool",
+      "defaultValue": "false"
+    }
+  },
+  "sources": [
+    {
+      "modifiers": [
+        { "condition": "(SkipConfig)", "exclude": [ "migrate-mongo.yaml" ] }
+      ]
+    }
+  ],
+  "primaryOutputs": [
+    { "path": "MigrateMongo.Migrations.csproj" }
+  ],
+  "postActions": [
+    {
+      "id": "restore",
+      "condition": "(!skipRestore)",
+      "description": "Restore NuGet packages required by this project.",
+      "manualInstructions": [ { "text": "Run 'dotnet restore'" } ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    }
+  ]
+}

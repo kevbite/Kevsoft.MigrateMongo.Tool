@@ -81,6 +81,7 @@ dotnet add package MongoDB.Driver   # any version >= 3.5, your choice
 | `Kevsoft.MigrateMongo` | The migration engine: planning, locking, state and checksums. |
 | `Kevsoft.MigrateMongo.MongoDriver` | Engine adapter for the MongoDB C# driver. |
 | `Kevsoft.MigrateMongo.Hosting` | Run migrations from your own app on startup, or on demand with `IMongoMigrationRunner`. |
+| `Kevsoft.MigrateMongo.Templates` | `dotnet new` templates for a migrations project and a migration class. |
 
 ### Creating Your First Project
 
@@ -105,6 +106,38 @@ migrate-mongo status
 
 To use an existing project instead, add the `Kevsoft.MigrateMongo.Runner` package to it and point `project:` in
 `migrate-mongo.yaml` at it.
+
+### Using `dotnet new` Templates
+
+If you prefer `dotnet new` (or your IDE's *New Project* dialog), install the templates:
+
+```bash
+dotnet new install Kevsoft.MigrateMongo.Templates
+```
+
+| Template | Short name | Creates |
+|---|---|---|
+| MongoDB Migrations Project | `migratemongo` | The same project as `init`, plus a `migrate-mongo.yaml` next to it (`project: .`). |
+| MongoDB Migration | `migratemongo-migration` | The same `M<timestamp>_<Name>.cs` file as `create`. |
+
+```bash
+dotnet new migratemongo -n MyApp.Migrations -o src/MyApp.Migrations
+dotnet new migratemongo-migration -n AddEmailIndexToUsers -o src/MyApp.Migrations/Migrations
+
+cd src/MyApp.Migrations && migrate-mongo up        # or: migrate-mongo up -f src/MyApp.Migrations/migrate-mongo.yaml
+```
+
+`migratemongo` options:
+
+| Option | Default | Description |
+|---|---|---|
+| `--framework` | `net10.0` | `net10.0`, `net9.0` or `net8.0`. |
+| `--database-name` | first part of the project name, lower-cased | The database written to `migrate-mongo.yaml`. |
+| `--skip-config` | `false` | Don't create `migrate-mongo.yaml`, e.g. to keep it at the repository root with `migrate-mongo init --project src/MyApp.Migrations`. |
+| `--no-restore` | `false` | Don't restore the project after creating it. |
+
+`migratemongo-migration` uses `<project root namespace>.Migrations` as the namespace (read from the restored
+project; it falls back to `Migrations`). Pass `--namespace` to choose your own.
 
 ## Usage
 
