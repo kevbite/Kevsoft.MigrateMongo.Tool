@@ -66,7 +66,8 @@ if [ -z "$install_dir" ]; then
   if [ "$(id -u)" = "0" ]; then
     install_dir="/usr/local/bin"
   else
-    install_dir="${HOME:?HOME isn't set; pass --install-dir}/.local/bin"
+    [ -n "${HOME:-}" ] || fail "HOME isn't set; pass --install-dir"
+    install_dir="$HOME/.local/bin"
   fi
 fi
 
