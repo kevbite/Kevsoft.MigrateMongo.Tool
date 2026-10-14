@@ -1,115 +1,48 @@
 # Kevsoft.MigrateMongo [![Continuous Integration Workflow](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/actions/workflows/ci.yml/badge.svg)](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/actions/workflows/ci.yml) [![install from nuget](http://img.shields.io/nuget/v/Kevsoft.MigrateMongo.Tool.svg?style=flat-square)](https://www.nuget.org/packages/Kevsoft.MigrateMongo.Tool) [![downloads](http://img.shields.io/nuget/dt/Kevsoft.MigrateMongo.Tool.svg?style=flat-square)](https://www.nuget.org/packages/Kevsoft.MigrateMongo.Tool)
 
-.NET database migration tool for [MongoDB](https://www.mongodb.com/). You write migrations in C# against the
-official [MongoDB C# driver](https://github.com/mongodb/mongo-csharp-driver), then apply and roll them back from
-the command line, your build server or your application.
+Database migrations for [MongoDB](https://www.mongodb.com/) in .NET. Write migrations in C# with the official
+[MongoDB C# driver](https://github.com/mongodb/mongo-csharp-driver), then apply and roll them back from the command
+line, your build server or your application.
 
-Inspired by [migrate-mongo](https://www.npmjs.com/package/migrate-mongo) from [seppevs](https://github.com/seppevs),
-with ideas borrowed from [Mongock](https://mongock.io/), [Flyway](https://flywaydb.org/) and
-[EF Core migrations](https://learn.microsoft.com/ef/core/managing-schemas/migrations/).
+- **Your SDK, your runtime, your driver.** Migrations live in a small console project you own. The `migrate-mongo`
+  tool builds and runs it with whatever .NET (8 or later) and `MongoDB.Driver` (3.5 or later) you use, so upgrading
+  either side doesn't break the other.
+- **Safe to run anywhere.** A distributed lock stops concurrent runs, migrations run in transactions where possible,
+  and checksums catch migrations edited after they were applied.
+- **Built for CI.** Meaningful exit codes, `--json` output, per-environment config with `${ENV_VAR}` secrets, dry
+  runs, SSH tunnels through a bastion, AWS IAM authentication, and self-contained bundles for agents without .NET.
+- **Mistakes caught at compile time.** A source generator finds migrations without reflection and reports duplicate
+  or malformed ids as build errors.
 
-> **Status:** under active development. Features marked 🚧 are planned but not available yet.
-> [PLAN.md](PLAN.md) describes the full design and [USAGE.md](USAGE.md) walks through it end to end.
+## Getting started
 
-## Why another migration tool?
+You need a [.NET SDK](https://dotnet.microsoft.com/download) (8 or later) and MongoDB 4.2 or later. Transactions need a
+replica set or sharded cluster. Locally, [MongoDB Atlas Local](https://hub.docker.com/r/mongodb/mongodb-atlas-local)
+works well:
 
-- **It doesn't break when the .NET runtime or SDK changes.** Installed with the .NET 10+ SDK, the `migrate-mongo`
-  CLI is a Native AOT binary that needs no .NET runtime; older SDKs get a build that runs on any .NET runtime from 8
-  upwards. Your migrations live in a small console project that **you** own. The
-  CLI builds that project with your SDK and runs it on your runtime, so you never need a particular SDK to
-  match the tool.
-- **It doesn't break when the MongoDB driver changes.** You choose the `MongoDB.Driver` version (3.5 or later).
-  Your migrations compile against that version and the library never calls driver APIs on your behalf.
-  Driver upgrades therefore can't cause `MissingMethodException`s in code you didn't write.
-- **It's safe to run anywhere.** A distributed lock stops concurrent runs, `applying`/`rollingBack` states are
-  written before each migration runs, migrations can run in transactions, and checksums detect migrations
-  edited after they were applied.
-- **It's built for build servers.** Exit codes are meaningful, `--json` gives machine-readable output, there
-  are per-environment configs and `${ENV_VAR}` secrets, and built-in SSH tunnelling reaches databases behind a bastion.
-- **Mistakes are caught at compile time.** A source generator discovers migrations without reflection and
-  reports duplicate or malformed ids as build errors.
+```bash
+docker run -d -p 27017:27017 mongodb/mongodb-atlas-local:8.0
+```
 
-## Getting Started
-
-### Prerequisites
-
-- A MongoDB deployment to migrate, version 4.2 or later. Transactions require a replica set or sharded
-  cluster. Locally, [MongoDB Atlas Local](https://hub.docker.com/r/mongodb/mongodb-atlas-local) works well:
-
-  ```bash
-  docker run -d -p 27017:27017 mongodb/mongodb-atlas-local:8.0
-  ```
-
-- A [.NET SDK](https://dotnet.microsoft.com/download) to build your migrations project (.NET 8 or later).
-
-### Installing the Tool
-
-**Kevsoft.MigrateMongo.Tool** can be installed as a [.NET tool](https://learn.microsoft.com/dotnet/core/tools/global-tools).
-Pinning it in a local tool manifest is recommended, so CI uses the same version as you:
+### 1. Install the tool
 
 ```bash
 dotnet new tool-manifest
 dotnet tool install Kevsoft.MigrateMongo.Tool
 ```
 
-alternatively you can install it globally.
-
-```bash
-dotnet tool install -g Kevsoft.MigrateMongo.Tool
-```
-
-With the .NET 10 SDK or later you get the Native AOT build for your platform (Windows, Linux glibc/musl and macOS
-on x64 and arm64), which starts instantly and doesn't need a .NET runtime; other platforms get the framework-dependent
-build. Older SDKs can't install platform-specific tools, so they get a framework-dependent build that runs on any .NET
-runtime from 8 upwards. `migrate-mongo version` shows which one you have (`aot` or `.NET x`).
-
-Without .NET (e.g. a deploy agent), install the standalone Native AOT binary from GitHub Releases. The scripts pick
-your platform, verify the download against `SHA256SUMS` and install to `~/.local/bin` (`/usr/local/bin` as root) or
-`%LOCALAPPDATA%\Programs\migrate-mongo`:
+With the .NET 10 SDK or later you get a Native AOT build that doesn't need a .NET runtime. To install without .NET,
+use the install script or the Docker image:
 
 ```bash
 curl -fsSL https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.sh | sh
-# a specific version / location
-curl -fsSL https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.sh | sh -s -- --version 0.2.0 --install-dir ./bin
 ```
 
 ```powershell
 irm https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.ps1 | iex
 ```
 
-Both read `MIGRATE_MONGO_VERSION` and `MIGRATE_MONGO_INSTALL_DIR` too (`MIGRATE_MONGO_NO_PATH=1` stops `install.ps1`
-changing your user `PATH`).
-
-Or use the Docker image, `ghcr.io/kevbite/migrate-mongo` (see [Running in CI](#running-in-ci)).
-
-Check it's working:
-
-```bash
-migrate-mongo version
-```
-
-### Installing the Packages
-
-The migrations project references the runner, which brings in everything else it needs:
-
-```bash
-dotnet add package Kevsoft.MigrateMongo.Runner
-dotnet add package MongoDB.Driver   # any version >= 3.5, your choice
-```
-
-| Package | Purpose |
-|---|---|
-| `Kevsoft.MigrateMongo.Tool` | The `migrate-mongo` CLI (Native AOT with the .NET 10+ SDK, otherwise framework-dependent). |
-| `Kevsoft.MigrateMongo.Runner` | Entry point for your migrations console project (`MigrateMongoRunner.RunAsync`). |
-| `Kevsoft.MigrateMongo.Abstractions` | `IMigration`, `[Migration]`, `MigrationContext` and the source generator. Reference it directly to keep migrations in a class library. |
-| `Kevsoft.MigrateMongo` | The migration engine: planning, locking, state and checksums. |
-| `Kevsoft.MigrateMongo.MongoDriver` | Engine adapter for the MongoDB C# driver. |
-| `Kevsoft.MigrateMongo.Hosting` | Run migrations from your own app on startup, or on demand with `IMongoMigrationRunner`. |
-| `Kevsoft.MigrateMongo.Tunnel` | Lets the runner, bundles and Hosting open [SSH tunnels](#tunnelling-through-a-bastion) themselves. |
-| `Kevsoft.MigrateMongo.Aws` | [AWS IAM authentication](#aws-iam-authentication-atlas) (`authMechanism=MONGODB-AWS`). |
-| `Kevsoft.MigrateMongo.Templates` | `dotnet new` templates for a migrations project and a migration class. |
-
-### Creating Your First Project
+### 2. Create a migrations project
 
 From the root of your repository:
 
@@ -117,511 +50,91 @@ From the root of your repository:
 migrate-mongo init --project src/MyApp.Migrations
 ```
 
-This creates `migrate-mongo.yaml` and a console project with a `Program.cs` that's a single line:
-
-```csharp
-return await MigrateMongoRunner.RunAsync(args);
-```
-
-Set your connection string and check the status:
-
-```bash
-export MONGODB_URL="mongodb://localhost:27017/?directConnection=true"
-migrate-mongo status
-```
-
-To use an existing project instead, add the `Kevsoft.MigrateMongo.Runner` package to it and point `project:` in
-`migrate-mongo.yaml` at it.
-
-### Using `dotnet new` Templates
-
-If you prefer `dotnet new` (or your IDE's *New Project* dialog), install the templates:
-
-```bash
-dotnet new install Kevsoft.MigrateMongo.Templates
-```
-
-| Template | Short name | Creates |
-|---|---|---|
-| MongoDB Migrations Project | `migratemongo` | The same project as `init`, plus a `migrate-mongo.yaml` next to it (`project: .`). |
-| MongoDB Migration | `migratemongo-migration` | The same `M<timestamp>_<Name>.cs` file as `create`. |
-
-```bash
-dotnet new migratemongo -n MyApp.Migrations -o src/MyApp.Migrations
-dotnet new migratemongo-migration -n AddEmailIndexToUsers -o src/MyApp.Migrations/Migrations
-
-cd src/MyApp.Migrations && migrate-mongo up        # or: migrate-mongo up -f src/MyApp.Migrations/migrate-mongo.yaml
-```
-
-`migratemongo` options:
-
-| Option | Default | Description |
-|---|---|---|
-| `--framework` | `net10.0` | `net10.0`, `net9.0` or `net8.0`. |
-| `--database-name` | first part of the project name, lower-cased | The database written to `migrate-mongo.yaml`. |
-| `--skip-config` | `false` | Don't create `migrate-mongo.yaml`, e.g. to keep it at the repository root with `migrate-mongo init --project src/MyApp.Migrations`. |
-| `--auth` | `none` | `aws` references `Kevsoft.MigrateMongo.Aws` for [AWS IAM authentication](#aws-iam-authentication-atlas), like `migrate-mongo init --auth aws`. |
-| `--no-restore` | `false` | Don't restore the project after creating it. |
-
-`migratemongo-migration` uses `<project root namespace>.Migrations` as the namespace (read from the restored
-project; it falls back to `Migrations`). Pass `--namespace` to choose your own.
-
-## Usage
-
-### Configuration
-
-`migrate-mongo.yaml` lives at the root of your repository. Values can reference environment variables with
-`${NAME}`. Each entry under `environments:` is merged over the top-level settings when you pass `--env <name>`.
+This creates `migrate-mongo.yaml` and a console project that references `Kevsoft.MigrateMongo.Runner` and
+`MongoDB.Driver`. You can also use `dotnet new install Kevsoft.MigrateMongo.Templates` and
+`dotnet new migratemongo`.
 
 ```yaml
-project: src/MyApp.Migrations        # relative to this file
+project: src/MyApp.Migrations
 mongodb:
   url: ${MONGODB_URL}
   databaseName: myapp
-stateCollection: _migrations         # also uses _migrations.history and _migrations.lock
-lockTtl: 300                         # seconds; the lock is renewed while running
-lockWaitTimeout: 60                  # seconds to wait for another run to finish
-onChecksumMismatch: fail             # fail | warn | ignore
-transaction: auto                    # auto | always | never
-transactionRetryTimeout: 120         # seconds to keep retrying transient transaction errors (0 = off)
-migrationTemplate: templates/migration.cs.template   # optional: what `create` writes (relative to this file)
 environments:
   prod:
     mongodb:
       url: ${PROD_MONGODB_URL}
 ```
 
-Use `-f <path>` to point at a different config file.
-
-### Creating a Migration
+### 3. Write a migration
 
 ```bash
 migrate-mongo create AddEmailIndexToUsers
 ```
 
-This creates `Migrations/M<timestamp>_AddEmailIndexToUsers.cs`. Fill in `UpAsync` and `DownAsync` using the
-normal driver API:
-
 ```csharp
-using Kevsoft.MigrateMongo;
-using MongoDB.Bson;
-using MongoDB.Driver;
-
-[Migration("20261009145210", "add-email-index-to-users", Transaction = TransactionMode.Never)]
+[Migration("20261014164028", "add-email-index-to-users", Transaction = TransactionMode.Never)]
 public sealed class AddEmailIndexToUsers : IMigration
 {
-    public Task UpAsync(MigrationContext ctx, CancellationToken ct) =>
-        ctx.Database.GetCollection<BsonDocument>("users").Indexes.CreateOneAsync(
+    public Task UpAsync(MigrationContext context, CancellationToken cancellationToken) =>
+        context.Database.GetCollection<BsonDocument>("users").Indexes.CreateOneAsync(
             new CreateIndexModel<BsonDocument>(
                 Builders<BsonDocument>.IndexKeys.Ascending("email"),
                 new CreateIndexOptions { Unique = true, Name = "email_1" }),
-            cancellationToken: ct);
+            cancellationToken: cancellationToken);
 
-    public Task DownAsync(MigrationContext ctx, CancellationToken ct) =>
-        ctx.Database.GetCollection<BsonDocument>("users").Indexes.DropOneAsync("email_1", ct);
+    public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) =>
+        context.Database.GetCollection<BsonDocument>("users").Indexes.DropOneAsync("email_1", cancellationToken);
 }
 ```
 
-`MigrationContext` gives you:
-
-```csharp
-public sealed class MigrationContext
-{
-    IMongoDatabase Database { get; }        // the configured database
-    IClientSessionHandle? Session { get; }  // set when running in a transaction
-    ILogger Logger { get; }                 // output is streamed to the CLI
-    IServiceProvider Services { get; }      // for constructor-injected dependencies
-    MigrationRunInfo Run { get; }           // run id, batch, direction, environment
-}
-```
-
-To change what `create` writes (a base class, team usings, a header comment, ...), point `migrationTemplate` in
-`migrate-mongo.yaml` at your own file. These placeholders are replaced; everything else is copied as-is:
-
-| Placeholder | Example |
-|---|---|
-| `{{namespace}}` | `MyApp.Migrations.Migrations` |
-| `{{id}}` | `20261009145210` |
-| `{{className}}` | `AddEmailIndexToUsers` |
-| `{{name}}` | `add-email-index-to-users` |
-
-```csharp
-using Kevsoft.MigrateMongo;
-using MongoDB.Driver;
-
-namespace {{namespace}};
-
-[Migration("{{id}}", "{{name}}")]
-public sealed class {{className}} : IMigration
-{
-    public Task UpAsync(MigrationContext ctx, CancellationToken ct) => throw new NotImplementedException();
-
-    public Task DownAsync(MigrationContext ctx, CancellationToken ct) => throw new NotImplementedException();
-}
-```
-
-Don't give the template a `.cs` extension if it lives inside the migrations project, or it'll be compiled.
-`dotnet new migratemongo-migration` always uses the built-in template.
-
-The source generator reports these build errors:
-
-| Code | Meaning |
-|---|---|
-| `MM0001` | Two migrations share the same id. |
-| `MM0002` | The id isn't a 14-digit `yyyyMMddHHmmss` timestamp. |
-| `MM0003` | A `[Migration]` class doesn't implement `IMigration`. |
-| `MM0004` | The migration class can't be constructed (abstract, private, or no accessible constructor). |
-| `MM0005` | The migration name is empty. |
-
-### Transactions
-
-By default (`transaction: auto`) each migration runs in a transaction when the deployment supports one. The
-migration's state document is written in the same transaction, so a failure leaves nothing half-applied.
-Pass `ctx.Session` to every operation:
-
-```csharp
-[Migration("20261009150030", "split-full-name")]
-public sealed class SplitFullName : IMigration
-{
-    public Task UpAsync(MigrationContext ctx, CancellationToken ct) =>
-        ctx.Database.GetCollection<BsonDocument>("users").UpdateManyAsync(
-            ctx.Session,
-            Builders<BsonDocument>.Filter.Exists("fullName"),
-            new EmptyPipelineDefinition<BsonDocument>()
-                .AppendStage<BsonDocument, BsonDocument, BsonDocument>(BsonDocument.Parse("""
-                    { $set: {
-                        firstName: { $arrayElemAt: [ { $split: ["$fullName", " "] }, 0 ] },
-                        lastName:  { $arrayElemAt: [ { $split: ["$fullName", " "] }, 1 ] } } }
-                    """)),
-            cancellationToken: ct);
-
-    public Task DownAsync(MigrationContext ctx, CancellationToken ct) =>
-        ctx.Database.GetCollection<BsonDocument>("users").UpdateManyAsync(
-            ctx.Session,
-            Builders<BsonDocument>.Filter.Exists("firstName"),
-            Builders<BsonDocument>.Update.Unset("firstName").Unset("lastName"),
-            cancellationToken: ct);
-}
-```
-
-Some operations, such as building indexes on existing collections, can't run in a transaction. Use
-`TransactionMode.Never` for those. `TransactionMode.Always` fails the migration if transactions aren't available.
-
-If the server reports a `TransientTransactionError` (e.g. a write conflict or a primary election), the whole
-transaction is aborted and the migration runs again from the start. An `UnknownTransactionCommitResult` retries
-just the commit. Retries back off from 100ms up to 5s and stop after `transactionRetryTimeout` seconds
-(default `120`, `0` disables retries). This means **a transactional migration's `UpAsync`/`DownAsync` can run
-more than once**, so keep any side effects outside the database (HTTP calls, files) idempotent.
-
-### Dependency Injection
-
-Migrations can take constructor dependencies. The generated factory resolves them from `ctx.Services`, without
-reflection. Register services in `Program.cs`:
-
-```csharp
-return await MigrateMongoRunner.RunAsync(args, services =>
-{
-    services.AddSingleton<IClock, SystemClock>();
-});
-```
-
-### Checking Status and Planning
+### 4. Run it
 
 ```bash
-migrate-mongo status     # every migration and its state (pending, applied, failed, applying, ...)
-migrate-mongo plan       # what `up` would do, without changing anything
+export MONGODB_URL="mongodb://localhost:27017/?directConnection=true"
+
+migrate-mongo status            # every migration and its state
+migrate-mongo up --dry-run      # what would be applied, without changing anything
+migrate-mongo up                # apply pending migrations
+migrate-mongo down              # roll back the last one
+migrate-mongo up --env prod     # use the prod environment
 ```
 
-`plan` exits with code `2` when there is pending work, so you can use it as a CI gate.
-
-### Dry Runs
-
-```bash
-migrate-mongo up --dry-run               # what `up` would apply, and in which batch
-migrate-mongo up --to 20261009145210 --dry-run
-migrate-mongo down --batch --dry-run     # what `down` would roll back
-```
-
-A dry run uses the same checks as a real run (validation, blocked migrations, unknown `--to`, transaction
-support) and exits with the code a real run would. It never runs migration code, takes the lock or writes
-anything, not even the `_migrations` collections, so it works with a read-only database user. If another run holds
-the lock, it prints a warning instead of waiting. Unlike `plan`, it exits `0` when there is pending work.
-
-### Applying Migrations
-
-```bash
-migrate-mongo up                       # apply everything pending, as one batch
-migrate-mongo up --dry-run             # show what would be applied, change nothing
-migrate-mongo up --to 20261009145210   # stop after this migration
-migrate-mongo up --env prod            # use the `prod` environment
-migrate-mongo up --no-build            # skip `dotnet build` and reuse the last build
-migrate-mongo up --json                # machine-readable output
-```
-
-### Rolling Back
-
-```bash
-migrate-mongo down                     # revert the last applied migration
-migrate-mongo down --count 3           # revert the last 3
-migrate-mongo down --batch             # revert everything from the last `up`
-migrate-mongo down --to 20261009144500 # revert everything after this migration
-migrate-mongo down --batch --dry-run   # show what would be reverted, change nothing
-```
-
-### Validating
-
-```bash
-migrate-mongo validate --env staging
-```
-
-This fails with exit code `4` if an applied migration was edited (checksum mismatch), an applied migration is
-missing from the code, or a pending migration is older than one already applied. Run it in pull-request builds.
-
-### Fixing State
-
-When a migration crashed half-way without a transaction, or you need to adopt an existing database:
-
-```bash
-migrate-mongo mark 20261009160000 --applied     # it actually finished, or accept an edited checksum
-migrate-mongo mark 20261009160000 --unapplied   # it didn't; run it again next time
-migrate-mongo baseline --to 20261009144500      # record everything up to here as applied without running it
-migrate-mongo unlock                            # remove an expired lock
-migrate-mongo unlock --force                    # remove a lock even if it hasn't expired
-migrate-mongo history 20261009150030            # audit trail for a migration
-```
-
-### What Gets Stored
-
-| Collection | Contents |
-|---|---|
-| `_migrations` | One document per migration, keyed by id: `state`, `batch`, `checksum`, `transactional`, `appliedAt`, `durationMs` and `appliedBy` (host, user, tool, library, driver and runtime versions). |
-| `_migrations.history` | Append-only audit log of every apply, rollback, failure and `mark`. |
-| `_migrations.lock` | The single lock document, with owner, expiry and heartbeat. |
-
-### Exit Codes
-
-| Code | Meaning |
-|---|---|
-| `0` | Success. |
-| `1` | A migration failed, or a general error. |
-| `2` | Pending migrations exist (`plan` / `status --check`). |
-| `3` | Timed out waiting for the lock. |
-| `4` | Validation failed (checksum mismatch, missing or out-of-order migrations). |
-| `5` | The tool and runner have no protocol version in common. Update the tool. |
-| `6` | Building the migrations project failed. |
-
-### Running in CI
-
-```yaml
-jobs:
-  migrate:
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with: { global-json-file: global.json }
-      - run: dotnet tool restore
-      - run: dotnet tool run migrate-mongo validate --env prod
-      - run: dotnet tool run migrate-mongo up --env prod
-        env:
-          PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
-```
-
-#### Docker
-
-`ghcr.io/kevbite/migrate-mongo` (`linux/amd64` and `linux/arm64`) is tagged with the version (`0.2.0`, `0.2`) and
-`latest`:
-
-* `ghcr.io/kevbite/migrate-mongo:<version>` is the AOT tool on the .NET 10 SDK, with the .NET 8 and 9 runtimes, so it
-  can build and run your migrations project. A `global.json` pinning an older SDK won't work in it.
-* `ghcr.io/kevbite/migrate-mongo:<version>-bundle` is the AOT tool on `runtime-deps` (no .NET) for running
-  [bundles](#bundles) with `--runner`.
-
-The working directory is `/src`. Run as your user so build output in the mount isn't owned by root:
-
-```bash
-docker run --rm -v "$PWD:/src" --user "$(id -u):$(id -g)" -e HOME=/tmp \
-  -e PROD_MONGODB_URL ghcr.io/kevbite/migrate-mongo:latest up --env prod
-
-docker run --rm -v "$PWD:/src" -e PROD_MONGODB_URL \
-  ghcr.io/kevbite/migrate-mongo:latest-bundle up --env prod --runner ./bundle/Migrations
-```
-
-### Tunnelling Through a Bastion
-
-If the database is only reachable through a jump host, add a `tunnel:` to the environment. The tool opens an SSH
-connection (in-process, no `ssh` binary needed), verifies the host key, and gives the driver a local SOCKS5 proxy,
-so every replica set member is reachable by the hostnames in your connection string:
-
-```yaml
-environments:
-  prod:
-    mongodb:
-      url: ${PROD_MONGODB_URL}       # e.g. mongodb://db1.internal,db2.internal/?replicaSet=rs0
-    tunnel:
-      host: bastion.example.com
-      user: deploy
-      privateKey: ${BASTION_SSH_KEY}
-      hostKeyFingerprint: SHA256:x9Yb...
-```
-
-| Setting | Meaning |
-|---|---|
-| `host` / `port` | The SSH server (`port` defaults to `22`). Required: `host`. |
-| `user` | The SSH user. Required. |
-| `password` | Password authentication (also answers keyboard-interactive prompts). |
-| `privateKey` | The private key's contents, e.g. from a CI secret. Literal `\n` sequences are turned into new lines. |
-| `privateKeyPath` | Path to a private key file. `~/` and paths relative to the config file are supported. |
-| `passphrase` | Passphrase for an encrypted private key. |
-| `hostKeyFingerprint` | The server's `SHA256:...` host key fingerprint, as printed by `ssh-keygen -lf`. |
-| `knownHostsPath` | A `known_hosts` file to verify the host key against. Defaults to `~/.ssh/known_hosts`. |
-| `mode` | `socks` (default) or `local`. |
-
-You need `password`, `privateKey` or `privateKeyPath` (not both key settings). The host key is always verified,
-using `hostKeyFingerprint` if set or the `known_hosts` file otherwise. If verification fails, the error shows the
-server's fingerprint so you can pin it. `--insecure-skip-host-key-check` turns verification off; avoid it outside
-throwaway environments.
-
-`socks` mode needs `MongoDB.Driver` 3.12 or later in your migrations project, because that's the first version
-with SOCKS5 proxy support. `local` mode works with any driver version: it forwards a local port to the first host
-in the connection string and connects with `directConnection=true`. It can't use `mongodb+srv://` URLs, and TLS
-host name validation will fail unless the certificate also covers `127.0.0.1`.
-
-Without `Kevsoft.MigrateMongo.Tunnel` the standalone runner (`dotnet run` on the migrations project) and bundles
-reject configs with a `tunnel:`. To let them open the tunnel themselves, add the package and set the provider:
-
-```bash
-dotnet add package Kevsoft.MigrateMongo.Tunnel
-```
-
-```csharp
-using Kevsoft.MigrateMongo;
-using Kevsoft.MigrateMongo.Tunnel;
-
-return await MigrateMongoRunner.RunAsync(args, new MigrateMongoRunnerOptions
-{
-    TunnelProvider = new SshTunnelProvider(),
-});
-```
-
-The package is opt-in, so SSH.NET only ends up in your dependencies if you ask for it. When the `migrate-mongo`
-tool drives the runner, the tool opens the tunnel and the provider isn't used.
-
-### AWS IAM Authentication (Atlas)
-
-To connect without a password, using an AWS IAM role (MongoDB Atlas "AWS IAM" database users), reference the AWS
-package from the migrations project and use `authMechanism=MONGODB-AWS`:
-
-```bash
-dotnet add package Kevsoft.MigrateMongo.Aws     # or: migrate-mongo init --auth aws / dotnet new migratemongo --auth aws
-```
-
-```yaml
-environments:
-  prod:
-    mongodb:
-      url: mongodb+srv://cluster0.xxxxx.mongodb.net/?authSource=%24external&authMechanism=MONGODB-AWS
-      databaseName: shop
-```
-
-That's all: the runner, bundles and Hosting register the mechanism with the driver when the URL asks for it.
-Credentials come from the standard AWS sources, so nothing secret goes in the URL: the `AWS_ACCESS_KEY_ID` /
-`AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` environment variables (e.g. from assuming a role in CI), web identity
-(`AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`), or the ECS/EC2 instance role. The tool passes its environment to the
-runner, so set them wherever you run `migrate-mongo`. In Atlas, add a database user with AWS IAM authentication for
-the role's ARN (`arn:aws:iam::123456789012:role/deploy`), not the assumed-role session ARN.
-
-Without the package, a `MONGODB-AWS` URL fails before connecting with a message saying which package to add. The
-package is opt-in, so the AWS SDK only ends up in your dependencies if you need it. It works through a
-[tunnel](#tunnelling-through-a-bastion) too (the request is signed locally); use `mode: socks` for `mongodb+srv://`
-URLs. If you build your own `MongoClientSettings` and want to register the mechanism yourself, call
-`AwsAuthentication.Register()` (it's idempotent).
-
-### Bundles
-
-Build once and deploy many times to agents with no .NET installed:
-
-```bash
-migrate-mongo bundle -r linux-x64 -o out    # dotnet publish: self-contained, single file
-./out/Migrations up --env staging            # on the deploy agent: no SDK or runtime needed
-```
-
-A bundle is your migrations project published as a self-contained single-file executable, named after the
-project. `migrate-mongo.yaml` is copied next to it, and the bundle looks for its config in the current directory
-and then next to itself, so `${VAR}` connection strings work exactly as they do with the tool. It accepts the same
-commands, options and exit codes as the tool (`status`, `up`, `down`, `--json`, …).
-
-| Option | Meaning |
-| --- | --- |
-| `-r`, `--runtime` | Runtime identifier to publish for, e.g. `linux-x64`, `linux-musl-x64`, `win-x64`, `osx-arm64`. Defaults to the current machine's. Any platform can be built from any OS. |
-| `-o`, `--output` | Output directory (default `bundle`). |
-
-When the bundle is for the current platform, `bundle` also runs a handshake with it to check it works. For
-[tunnels](#tunnelling-through-a-bastion), either add `Kevsoft.MigrateMongo.Tunnel` to the project so the bundle
-opens them itself, or drive the bundle with the standalone tool:
-
-```bash
-migrate-mongo up --env prod --runner ./out/Migrations
-```
-
-### Running on Application Startup
-
-Reference your migrations project (or a class library with your migrations) from your app, add the hosting package,
-and apply migrations when the app starts:
-
-```bash
-dotnet add package Kevsoft.MigrateMongo.Hosting
-```
+In CI, `migrate-mongo validate` fails if an applied migration was edited, and `migrate-mongo bundle -r linux-x64`
+builds a single executable to run on deploy agents without .NET. To apply migrations when your app starts, use
+`Kevsoft.MigrateMongo.Hosting`:
 
 ```csharp
 builder.Services
     .AddMongoMigrations(o =>
     {
-        o.ConnectionString = builder.Configuration.GetConnectionString("Mongo"); // or omit to use your registered IMongoClient
+        o.ConnectionString = builder.Configuration.GetConnectionString("Mongo");
         o.DatabaseName = "myapp";
     })
     .FromAssemblyContaining<AddEmailIndexToUsers>()
     .RunOnStartup();
 ```
 
-`RunOnStartup()` applies pending migrations before any hosted service starts, so ASP.NET Core doesn't serve requests
-against an out-of-date database. If a migration fails, or the lock can't be acquired within `LockWaitTimeout`, the
-host fails to start with a `MongoMigrationException`. Migration progress goes to your app's `ILogger`, and migrations
-can take your app's services (including scoped ones) as constructor dependencies.
+## Documentation
 
-App instances and CLI runs share the same state collections and lock, so it's safe when many pods start together:
-one applies the migrations, the others wait for the lock and then find nothing to do. Keep the options the same as
-your `migrate-mongo.yaml` (`DatabaseName`, `StateCollection`, `Transaction`, `OnChecksumMismatch`, ...). The
-defaults match the config file's defaults. The state records each app run with `appliedBy.tool` set to
-`app/<application name>`.
+[USAGE.md](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md) covers everything in detail:
 
-To run migrations yourself instead (e.g. from an admin endpoint or a `--migrate` switch), skip `RunOnStartup()` and
-use `IMongoMigrationRunner`:
+- [Installing](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#installing) and
+  [setting up a project](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#setting-up-a-project)
+- [Configuration](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#configuration)
+- [Writing migrations](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#writing-migrations):
+  transactions, dependency injection and custom templates
+- [Commands](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#commands) and
+  [exit codes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#exit-codes)
+- [When something goes wrong](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#when-something-goes-wrong)
+- [Running in CI](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#running-in-ci),
+  [bundles](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#bundles) and
+  [Docker](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#docker)
+- [Tunnelling through a bastion](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#tunnelling-through-a-bastion)
+- [AWS IAM authentication (Atlas)](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#aws-iam-authentication-atlas)
+- [Running from your application](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#running-from-your-application)
 
-```csharp
-var runner = app.Services.GetRequiredService<IMongoMigrationRunner>();
-var result = await runner.UpAsync();          // also StatusAsync, PlanAsync, DryRunUpAsync, ValidateAsync and ExecuteAsync("down", ...)
-if (result.ExitCode != 0) { /* result.Message says why */ }
-```
-
-To reach the database through an SSH bastion, add `Kevsoft.MigrateMongo.Tunnel` and set the tunnel and provider:
-
-```csharp
-o.ConnectionString = builder.Configuration.GetConnectionString("Mongo");
-o.Tunnel = new TunnelConfig { Host = "bastion.example.com", User = "deploy", PrivateKey = key, HostKeyFingerprint = "SHA256:..." };
-o.TunnelProvider = new SshTunnelProvider();
-```
-
-## Samples
-
-The [tests/fixtures](tests/fixtures/) folder contains small migrations projects used by the integration tests. They
-also show the setup working end to end:
-
-- **BasicMigrations** (`net8.0`) creates a collection with a validator, adds a unique index and seeds data using a
-  service injected from `Program.cs`.
-- **FailingMigrations** (`net10.0`) shows that a failed transactional migration is rolled back and recorded.
-- **HostingApp** (`net8.0`) references BasicMigrations and applies them on startup with `Kevsoft.MigrateMongo.Hosting`.
+The [tests/fixtures](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/tree/main/tests/fixtures) folder has small
+working migrations projects, including one that runs migrations from an app with Hosting.
 
 ## Contributing
 
@@ -631,15 +144,15 @@ also show the setup working end to end:
 1. Pull Request
 
 You'll need the .NET 8 and 10 SDKs ([global.json](global.json) pins the one used to build) and
-[Docker](https://www.docker.com/). The integration tests pack the repo into a local NuGet feed, install the tool
-from it, and use [Testcontainers](https://dotnet.testcontainers.org/) to start MongoDB Atlas Local automatically:
+[Docker](https://www.docker.com/). The integration tests pack the repo into a local NuGet feed, install the tool from
+it, and start MongoDB Atlas Local with [Testcontainers](https://dotnet.testcontainers.org/):
 
 ```bash
 dotnet build
 dotnet test --project tests/Kevsoft.MigrateMongo.Tests               # unit tests
-dotnet test --project tests/Kevsoft.MigrateMongo.IntegrationTests    # full tool tests against MongoDB in Docker
+dotnet test --project tests/Kevsoft.MigrateMongo.IntegrationTests    # tool tests against MongoDB in Docker
 ```
 
-To use your own MongoDB instead of a container, set `MIGRATE_MONGO_TEST_MONGODB_URL` (it must be a replica set
-so transactions work). To test packages you've already packed, set `MIGRATE_MONGO_PACKAGE_VERSION` and
-`MIGRATE_MONGO_PACKAGE_FEED`.
+To use your own MongoDB instead of a container, set `MIGRATE_MONGO_TEST_MONGODB_URL` (a replica set, so
+transactions work). To test packages you've already packed, set `MIGRATE_MONGO_PACKAGE_VERSION` and
+`MIGRATE_MONGO_PACKAGE_FEED`. [PLAN.md](PLAN.md) describes the design.
