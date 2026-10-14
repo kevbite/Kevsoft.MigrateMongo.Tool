@@ -1,4 +1,6 @@
+using System.CommandLine;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Kevsoft.MigrateMongo.Cli;
@@ -110,6 +112,15 @@ public static class MigrateMongoRunner
         }
 
         using var cancellation = new CancellationTokenSource();
+
+        // Ctrl+C goes to the whole console process group. The tool turns it into a "cancel" message (and stdin closes
+        // if the tool dies), so don't let it kill this process mid-migration.
+        Console.CancelKeyPress += (_, e) => e.Cancel = true;
+        using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+        {
+            context.Cancel = true;
+            cancellation.Cancel();
+        });
         _ = Task.Run(async () =>
         {
             // A "cancel" message, or stdin closing (the tool went away), cancels the run.
@@ -152,6 +163,11 @@ public static class MigrateMongoRunner
             e.Cancel = true;
             cancellation.Cancel();
         };
+        using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+        {
+            context.Cancel = true;
+            cancellation.Cancel();
+        });
 
         var root = MigrateMongoCli.Create(
             $"Kevsoft.MigrateMongo runner {LibraryVersion}",
@@ -185,7 +201,8 @@ public static class MigrateMongoRunner
                 return result.ExitCode;
             });
 
-        return await root.Parse(args).InvokeAsync(cancellationToken: cancellation.Token);
+        // System.CommandLine's own handler would end the process 2s after Ctrl+C/SIGTERM, before the lock is released.
+        return await root.Parse(args).InvokeAsync(new InvocationConfiguration { ProcessTerminationTimeout = null }, cancellation.Token);
     }
 
     private static async Task<IMongoTunnel?> OpenTunnelAsync(

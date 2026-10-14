@@ -1,4 +1,4 @@
-# Kevsoft.MigrateMongo configuration. See https://github.com/kevbite/Kevsoft.MigrateMongo
+# Kevsoft.MigrateMongo configuration. See https://github.com/kevbite/Kevsoft.MigrateMongo.Tool
 project: .
 mongodb:
   url: ${MONGODB_URL}

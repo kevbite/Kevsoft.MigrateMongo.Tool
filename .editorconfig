@@ -1,0 +1,47 @@
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{csproj,props,targets,slnx,xml,json,yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.sh]
+end_of_line = lf
+
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+csharp_prefer_braces = when_multiline:suggestion
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+dotnet_style_readonly_field = true:warning
+
+# Unnecessary usings
+dotnet_diagnostic.IDE0005.severity = warning
+
+# Public API parameters named `from`/`to` read well in C#; VB keyword clashes don't matter here.
+dotnet_diagnostic.CA1716.severity = none
+
+[tests/**.cs]
+# Test names use underscores for readability.
+dotnet_diagnostic.CA1707.severity = none
+# Rules aimed at shipped code.
+dotnet_diagnostic.CA1822.severity = none
+# xUnit collection definitions end in "Collection".
+dotnet_diagnostic.CA1711.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA2201.severity = none
+
+[src/Kevsoft.MigrateMongo.Templates/content/**]
+# Template content is shipped as-is to users.
+generated_code = true

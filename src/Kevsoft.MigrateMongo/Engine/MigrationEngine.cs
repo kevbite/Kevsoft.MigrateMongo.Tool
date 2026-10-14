@@ -59,7 +59,9 @@ public sealed class MigrationEngine
         "down" => DownAsync(arguments, cancellationToken),
         "validate" => ValidateAsync(cancellationToken),
         "baseline" => BaselineAsync(arguments.To ?? "", cancellationToken),
-        "mark" => MarkAsync(arguments.Id ?? "", arguments.Applied ?? false, cancellationToken),
+        "mark" when arguments.Applied is null =>
+            Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = "'mark' needs --applied or --unapplied." }),
+        "mark" => MarkAsync(arguments.Id ?? "", arguments.Applied.Value, cancellationToken),
         "unlock" => UnlockAsync(arguments.Force, cancellationToken),
         "history" => HistoryAsync(arguments.Id, arguments.Limit, cancellationToken),
         _ => Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Unknown command '{command}'." }),
@@ -247,6 +249,14 @@ public sealed class MigrationEngine
             var applied = new List<string>();
             foreach (var migration in pending)
             {
+                if (LockLost(ct, cancellationToken) is { } lost)
+                {
+                    lost.Batch = batch;
+                    lost.Applied = applied;
+                    lost.Issues = issues;
+                    return lost;
+                }
+
                 var error = await ApplyAsync(migration, batch, ct);
                 if (error is not null)
                 {
@@ -299,6 +309,12 @@ public sealed class MigrationEngine
             var rolledBack = new List<string>();
             foreach (var state in targets)
             {
+                if (LockLost(ct, cancellationToken) is { } lost)
+                {
+                    lost.RolledBack = rolledBack;
+                    return lost;
+                }
+
                 var error = await RollBackAsync(_byId[state.Id], state, ct);
                 if (error is not null)
                 {
@@ -800,7 +816,7 @@ public sealed class MigrationEngine
         }
 
         using var lockLost = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var heartbeat = HeartbeatAsync(lockLost);
+        var heartbeat = HeartbeatAsync(lockLost, acquired.ExpiresAt);
         try
         {
             return await action(lockLost.Token);
@@ -862,24 +878,63 @@ public sealed class MigrationEngine
         }
     }
 
-    private async Task HeartbeatAsync(CancellationTokenSource lockLost)
+    private async Task HeartbeatAsync(CancellationTokenSource lockLost, DateTime expiresAt)
     {
         var interval = _options.LockTtl / 3;
-        try
+        while (!lockLost.IsCancellationRequested)
         {
-            while (!lockLost.IsCancellationRequested)
+            try
             {
                 await Task.Delay(interval, _time, lockLost.Token);
-                if (!await _store.RenewLockAsync(RunId, Now + _options.LockTtl, lockLost.Token))
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            var renewedUntil = Now + _options.LockTtl;
+            try
+            {
+                if (await _store.RenewLockAsync(RunId, renewedUntil, lockLost.Token))
                 {
-                    _events.OnEvent(new RunnerEvent { Type = EventTypes.Log, Level = "error", Message = "Lost the migration lock; cancelling." });
-                    await lockLost.CancelAsync();
+                    expiresAt = renewedUntil;
+                    continue;
                 }
+
+                _events.OnEvent(new RunnerEvent { Type = EventTypes.Log, Level = "error", Message = "Lost the migration lock; cancelling." });
+                await lockLost.CancelAsync();
+                return;
+            }
+            catch (OperationCanceledException) when (lockLost.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception e)
+            {
+                // Transient errors (elections, network blips) are retried while the lock is still ours; stop the run
+                // before it could expire and be taken by someone else.
+                if (Now + interval >= expiresAt)
+                {
+                    _events.OnEvent(new RunnerEvent { Type = EventTypes.Log, Level = "error", Message = $"Couldn't renew the migration lock before it expires ({e.Message}); cancelling." });
+                    await lockLost.CancelAsync();
+                    return;
+                }
+
+                _events.OnEvent(new RunnerEvent { Type = EventTypes.Log, Level = "warning", Message = $"Couldn't renew the migration lock ({e.Message}); retrying." });
             }
         }
-        catch (OperationCanceledException)
-        {
-        }
+    }
+
+    /// <summary>
+    /// Stops before the next migration once the lock is lost (rather than relying on driver calls noticing), so another
+    /// run that takes over the lock can't run migrations alongside this one. Caller cancellation still throws.
+    /// </summary>
+    private static CommandResult? LockLost(CancellationToken lockToken, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return lockToken.IsCancellationRequested
+            ? new CommandResult { ExitCode = ExitCodes.Failure, Message = "Lost the migration lock; stopped before the next migration." }
+            : null;
     }
 
     private static async Task StopHeartbeatAsync(CancellationTokenSource lockLost, Task heartbeat)

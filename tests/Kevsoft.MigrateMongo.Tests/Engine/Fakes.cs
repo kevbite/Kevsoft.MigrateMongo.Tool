@@ -58,8 +58,16 @@ internal sealed class FakeStore : IMigrationStore
         return Task.FromResult(false);
     }
 
+    /// <summary>Called on each renewal; return an exception to make that renewal fail.</summary>
+    public Func<Exception?>? RenewFailure { get; set; }
+
     public Task<bool> RenewLockAsync(string runId, DateTime expiresAt, CancellationToken cancellationToken)
     {
+        if (RenewFailure?.Invoke() is { } failure)
+        {
+            throw failure;
+        }
+
         if (Lock?.RunId != runId)
         {
             return Task.FromResult(false);
@@ -107,9 +115,22 @@ internal sealed class FakeStore : IMigrationStore
 
     private static StoredMigrationState Clone(StoredMigrationState s) => new()
     {
-        Id = s.Id, V = s.V, Name = s.Name, Source = s.Source, Origin = s.Origin, Checksum = s.Checksum, State = s.State,
-        Direction = s.Direction, Batch = s.Batch, Transactional = s.Transactional, AppliedAt = s.AppliedAt, UpdatedAt = s.UpdatedAt,
-        DurationMs = s.DurationMs, RunId = s.RunId, Error = s.Error, AppliedBy = s.AppliedBy,
+        Id = s.Id,
+        V = s.V,
+        Name = s.Name,
+        Source = s.Source,
+        Origin = s.Origin,
+        Checksum = s.Checksum,
+        State = s.State,
+        Direction = s.Direction,
+        Batch = s.Batch,
+        Transactional = s.Transactional,
+        AppliedAt = s.AppliedAt,
+        UpdatedAt = s.UpdatedAt,
+        DurationMs = s.DurationMs,
+        RunId = s.RunId,
+        Error = s.Error,
+        AppliedBy = s.AppliedBy,
     };
 }
 

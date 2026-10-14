@@ -1,3 +1,5 @@
+using System.CommandLine;
+using System.Runtime.InteropServices;
 using System.Text;
 using Kevsoft.MigrateMongo.Cli;
 using Kevsoft.MigrateMongo.Tool;
@@ -6,19 +8,26 @@ Console.OutputEncoding = new UTF8Encoding(false);
 
 using var cancellation = new CancellationTokenSource();
 var cancelRequests = 0;
-Console.CancelKeyPress += (_, e) =>
+
+// First Ctrl+C/SIGTERM asks the runner to stop gracefully; the second one lets the process die.
+bool CancelGracefully()
 {
-    // First Ctrl+C asks the runner to stop gracefully; the second one lets the process die.
-    if (Interlocked.Increment(ref cancelRequests) == 1)
+    if (Interlocked.Increment(ref cancelRequests) != 1)
     {
-        e.Cancel = true;
-        cancellation.Cancel();
+        return false;
     }
-};
+
+    cancellation.Cancel();
+    return true;
+}
+
+Console.CancelKeyPress += (_, e) => e.Cancel = CancelGracefully();
+using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => context.Cancel = CancelGracefully());
 
 var root = MigrateMongoCli.Create(
     $"migrate-mongo {ToolInfo.Version}: MongoDB migrations for .NET",
     includeToolCommands: true,
     (invocation, ct) => new ToolCommands(Environment.CurrentDirectory).RunAsync(invocation, ct));
 
-return await root.Parse(args).InvokeAsync(cancellationToken: cancellation.Token);
+// System.CommandLine's own handler would end the process 2s after Ctrl+C/SIGTERM, cutting the graceful stop short.
+return await root.Parse(args).InvokeAsync(new InvocationConfiguration { ProcessTerminationTimeout = null }, cancellation.Token);

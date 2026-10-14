@@ -6,7 +6,7 @@ namespace Kevsoft.MigrateMongo.Tool;
 internal static class Scaffolding
 {
     public static string ConfigFile(string projectRelativePath, string databaseName) => $"""
-        # Kevsoft.MigrateMongo configuration. See https://github.com/kevbite/Kevsoft.MigrateMongo
+        # Kevsoft.MigrateMongo configuration. See https://github.com/kevbite/Kevsoft.MigrateMongo.Tool
         project: {projectRelativePath}
         mongodb:
           url: ${"{"}MONGODB_URL{"}"}

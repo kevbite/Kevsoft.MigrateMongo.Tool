@@ -67,17 +67,17 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
         var migrations = registration.Discover(logger);
 
         IMongoClient client;
-        IDisposable? ownedClient = null;
+        MongoClient? ownedClient = null;
         using var tunnel = options.Tunnel is { } tunnelConfig && options.TunnelProvider is { } provider && options.ConnectionString is { } url
             ? await provider.OpenAsync(
                 tunnelConfig,
                 url,
-                new MongoTunnelOptions { DriverVersion = MongoDriverBackend.DriverVersion, Warn = m => logger.LogWarning("{Message}", m) },
+                new MongoTunnelOptions { DriverVersion = MongoDriverBackend.DriverVersion, Warn = m => Log.Message(logger, LogLevel.Warning, m) },
                 cancellationToken)
             : null;
         if (tunnel is not null)
         {
-            logger.LogInformation("Tunnel: {Tunnel}", tunnel.Description);
+            Log.TunnelOpened(logger, tunnel.Description);
         }
 
         if ((tunnel?.MongoUrl ?? options.ConnectionString) is { } connectionString)
@@ -86,7 +86,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             settings.ApplicationName ??= "Kevsoft.MigrateMongo";
             var created = new MongoClient(settings);
             client = created;
-            ownedClient = created as IDisposable;
+            ownedClient = created;
         }
         else
         {

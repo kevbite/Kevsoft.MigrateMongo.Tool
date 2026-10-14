@@ -97,7 +97,7 @@ internal static class MongoUrlRewriter
             : throw new ConfigException($"'mongodb.url' has an invalid port in '{hostAndPort}'.");
     }
 
-    private static IEnumerable<string> Options(string query) => query.Split('&', StringSplitOptions.RemoveEmptyEntries);
+    private static string[] Options(string query) => query.Split('&', StringSplitOptions.RemoveEmptyEntries);
 
     private static string OptionName(string option) => option.Split('=', 2)[0];
 

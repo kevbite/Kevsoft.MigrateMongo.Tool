@@ -4,6 +4,12 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Needed for IDE0005 (unnecessary usings) in builds; docs aren't required on every public member. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
@@ -11,8 +17,8 @@
     <Authors>kevbite</Authors>
     <Copyright>Copyright (c) kevbite</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/kevbite/Kevsoft.MigrateMongo</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/kevbite/Kevsoft.MigrateMongo</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/kevbite/Kevsoft.MigrateMongo.Tool</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kevbite/Kevsoft.MigrateMongo.Tool</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>mongodb;migrations;migrate-mongo;database;schema</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>

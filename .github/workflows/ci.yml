@@ -23,16 +23,18 @@ jobs:
   build:
     name: Build & unit tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0 # MinVer needs the history and tags
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: |
             8.0.x
@@ -40,6 +42,10 @@ jobs:
 
       - name: Build
         run: dotnet build Kevsoft.MigrateMongo.slnx -c Release
+
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet format Kevsoft.MigrateMongo.slnx --verify-no-changes --severity warn --no-restore
 
       - name: Unit tests
         run: dotnet test --project tests/Kevsoft.MigrateMongo.Tests -c Release --no-build
@@ -53,7 +59,7 @@ jobs:
 
       - name: Upload packages
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages
           path: artifacts/packages
@@ -62,17 +68,19 @@ jobs:
   driver-compat:
     name: MongoDB.Driver ${{ matrix.driver }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         # The floor the libraries are compiled against, and the newest version we've verified.
         driver: ['3.5.0', '3.12.0']
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: |
             8.0.x
@@ -84,6 +92,7 @@ jobs:
   aot:
     name: Native AOT (${{ matrix.rid }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -98,11 +107,12 @@ jobs:
           - { rid: linux-musl-x64, os: ubuntu-latest, alpine: true }
           - { rid: linux-musl-arm64, os: ubuntu-24.04-arm, alpine: true }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         if: ${{ !matrix.alpine }}
         with:
           dotnet-version: 10.0.x
@@ -134,14 +144,14 @@ jobs:
           ./artifacts/aot/${{ matrix.rid }}/migrate-mongo --help
 
       - name: Upload tool package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tool-package-${{ matrix.rid }}
           path: artifacts/tool-packages/*.nupkg
           if-no-files-found: error
 
       - name: Upload binary
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: aot-${{ matrix.rid }}
           path: |
@@ -152,11 +162,14 @@ jobs:
   release-assets:
     name: Release assets
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [aot]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: aot-*
           path: aot
@@ -178,7 +191,7 @@ jobs:
           (cd release && sha256sum * > SHA256SUMS)
           ls -la release
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release
           path: release/*
@@ -187,6 +200,7 @@ jobs:
   install-script:
     name: Install script (${{ matrix.rid }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     needs: [release-assets]
     strategy:
       fail-fast: false
@@ -201,7 +215,7 @@ jobs:
           - { rid: win-x64, os: windows-latest }
           - { rid: win-arm64, os: windows-11-arm }
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: release
@@ -242,32 +256,35 @@ jobs:
   docker:
     name: Docker images (linux/amd64, linux/arm64)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [aot]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: aot-linux-x64
           path: docker/bin/amd64
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: aot-linux-arm64
           path: docker/bin/arm64
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # The Dockerfile only copies the prebuilt binaries, so arm64 builds without QEMU.
       - name: Build tool image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker
           target: tool
           platforms: linux/amd64,linux/arm64
 
       - name: Build bundle image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker
           target: bundle
@@ -277,25 +294,27 @@ jobs:
     name: Integration tests (MongoDB Atlas Local)
     # GitHub's Windows and macOS runners can't run Linux containers.
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [build, aot]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: |
             8.0.x
             10.0.x
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
           path: artifacts/packages
 
       # The .NET 10 SDK installs the tool from its Native AOT package for this runner.
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tool-package-linux-x64
           path: artifacts/packages
@@ -307,7 +326,7 @@ jobs:
           echo "MIGRATE_MONGO_PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
           echo "MIGRATE_MONGO_PACKAGE_FEED=$GITHUB_WORKSPACE/artifacts/packages" >> "$GITHUB_ENV"
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: aot-linux-x64
           path: docker/bin/amd64
@@ -325,6 +344,7 @@ jobs:
   smoke:
     name: Tool install (${{ matrix.name }}, .NET ${{ matrix.sdk }} SDK)
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     needs: [build, aot]
     strategy:
       fail-fast: false
@@ -344,17 +364,17 @@ jobs:
           - { name: win-x64, os: windows-latest, sdk: 8, expect: '; .NET ' }
           - { name: osx-arm64, os: macos-latest, sdk: 8, expect: '; .NET ' }
     steps:
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         if: ${{ !matrix.alpine }}
         with:
           dotnet-version: ${{ matrix.sdk }}.0.x
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
           path: packages
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: tool-package-*
           path: packages
@@ -399,20 +419,21 @@ jobs:
     name: Publish preview packages (GitHub Packages)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [integration, smoke, aot, driver-compat]
     permissions:
       packages: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
           path: packages
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: tool-package-*
           path: packages
@@ -433,6 +454,7 @@ jobs:
     name: CI success
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [build, driver-compat, aot, integration, smoke, release-assets, install-script, docker]
     steps:
       - name: Check all jobs passed

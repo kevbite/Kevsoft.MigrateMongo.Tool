@@ -247,6 +247,57 @@ public sealed class MigrationEngineTests
     }
 
     [Fact]
+    public async Task Mark_without_applied_or_unapplied_fails_and_changes_nothing()
+    {
+        await Engine([Migrations.Create("20260101000001", "a")]).UpAsync(null, CancellationToken.None);
+
+        var result = await Engine([Migrations.Create("20260101000001", "a")])
+            .ExecuteAsync("mark", new CommandArguments { Id = "20260101000001" }, CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        _store.States["20260101000001"].State.ShouldBe("applied");
+    }
+
+    [Fact]
+    public async Task Up_retries_a_failed_lock_renewal_and_still_releases_the_lock()
+    {
+        var renewals = 0;
+        _store.RenewFailure = () => Interlocked.Increment(ref renewals) == 1 ? new TimeoutException("blip") : null;
+        var engine = Engine(
+            [Migrations.Create("20260101000001", "slow", up: () => Task.Delay(TimeSpan.FromMilliseconds(800)))],
+            configure: o => o.LockTtl = TimeSpan.FromMilliseconds(600));
+
+        var result = await engine.UpAsync(null, CancellationToken.None);
+
+        result.ExitCode.ShouldBe(0);
+        renewals.ShouldBeGreaterThan(1);
+        _sink.Events.ShouldContain(e => e.Level == "warning" && e.Message!.Contains("blip"));
+        _store.Lock.ShouldBeNull();
+        _store.ReleaseCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Up_cancels_when_the_lock_cannot_be_renewed_before_it_expires()
+    {
+        _store.RenewFailure = () => new TimeoutException("down");
+        var executor = new FakeExecutor();
+        var engine = Engine(
+            [
+                Migrations.Create("20260101000001", "slow", up: () => Task.Delay(TimeSpan.FromMilliseconds(800))),
+                Migrations.Create("20260101000002", "next"),
+            ],
+            executor,
+            configure: o => o.LockTtl = TimeSpan.FromMilliseconds(300));
+
+        var result = await engine.UpAsync(null, CancellationToken.None);
+
+        _sink.Events.ShouldContain(e => e.Level == "error" && e.Message!.Contains("Couldn't renew the migration lock"));
+        executor.Calls.ShouldNotContain(c => c.Contains("20260101000002"));
+        result.ExitCode.ShouldNotBe(0);
+        _store.ReleaseCount.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Down_rolls_back_the_last_migration_by_default()
     {
         var executor = new FakeExecutor();

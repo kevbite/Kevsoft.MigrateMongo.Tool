@@ -53,7 +53,7 @@ internal sealed class ToolCommands(string workingDirectory)
         }
     }
 
-    private int Version(CliInvocation invocation)
+    private static int Version(CliInvocation invocation)
     {
         if (invocation.Json)
         {
@@ -519,7 +519,7 @@ internal sealed class ToolCommands(string workingDirectory)
         throw new ConfigException($"Project '{project}' was not found.");
     }
 
-    private int Fail(CliInvocation invocation, int exitCode, string message)
+    private static int Fail(CliInvocation invocation, int exitCode, string message)
     {
         if (invocation.Json)
         {

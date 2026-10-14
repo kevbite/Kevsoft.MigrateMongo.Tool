@@ -91,6 +91,8 @@ internal static class HostKeyVerifier
         return matched;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5350",
+        Justification = "OpenSSH hashed known_hosts entries (|1|salt|hash) are defined as HMAC-SHA1; this only reads them.")]
     private static bool MatchesHashed(string entry, string name)
     {
         var parts = entry.Split('|');

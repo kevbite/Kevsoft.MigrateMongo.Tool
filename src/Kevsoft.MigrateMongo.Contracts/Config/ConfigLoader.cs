@@ -36,6 +36,10 @@ public static class ConfigLoader
         return AlternativeFileNames.Select(n => Path.Combine(directory, n)).FirstOrDefault(File.Exists);
     }
 
+    /// <summary>Loads and resolves a config file.</summary>
+    /// <param name="path">The config file.</param>
+    /// <param name="environment">The <c>environments:</c> entry to apply, if any.</param>
+    /// <param name="getEnvironmentVariable">Looks up <c>${VAR}</c> values (default: the process environment).</param>
     /// <param name="projectOnly">Only resolve <c>project</c>, so commands that don't connect (like <c>create</c>) work without connection variables.</param>
     public static ResolvedConfig LoadFile(string path, string? environment, Func<string, string?>? getEnvironmentVariable = null, bool projectOnly = false)
     {

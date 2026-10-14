@@ -28,6 +28,9 @@ public sealed class Workspace : IAsyncDisposable
     public IMongoDatabase Database => _client.GetDatabase(DatabaseName);
 
     /// <summary>Copies <c>tests/fixtures/{fixture}</c> into a new workspace with a migrate-mongo.yaml for it.</summary>
+    /// <param name="environment">The shared integration environment.</param>
+    /// <param name="fixture">The fixture folder name.</param>
+    /// <param name="lockWaitTimeout">The config's <c>lockWaitTimeout</c> in seconds.</param>
     /// <param name="client">Client for asserting on and cleaning up the database (default: the shared container).</param>
     public static Workspace FromFixture(IntegrationEnvironment environment, string fixture, int lockWaitTimeout = 5, IMongoClient? client = null)
     {

@@ -90,7 +90,7 @@ namespace Kevsoft.MigrateMongo.Hosting
                 }
                 else
                 {
-                    logger.LogWarning("Assembly {Assembly} doesn't contain any migrations.", assembly.GetName().Name);
+                    Log.AssemblyHasNoMigrations(logger, assembly.GetName().Name);
                 }
             }
 

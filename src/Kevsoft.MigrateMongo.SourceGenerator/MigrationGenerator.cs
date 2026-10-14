@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -103,7 +104,7 @@ public sealed class MigrationGenerator : IIncrementalGenerator
         var builder = new StringBuilder("sha256:", 7 + (hash.Length * 2));
         foreach (var b in hash)
         {
-            builder.Append(b.ToString("x2"));
+            builder.Append(b.ToString("x2", CultureInfo.InvariantCulture));
         }
 
         return builder.ToString();

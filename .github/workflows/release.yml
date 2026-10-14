@@ -19,35 +19,36 @@ jobs:
     name: Publish to NuGet
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: nuget
     permissions:
       id-token: write # NuGet Trusted Publishing (OIDC); no long-lived API key
       attestations: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
           path: packages
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: tool-package-*
           path: packages
           merge-multiple: true
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
       - name: Attest build provenance
         # Attestations aren't available for private user-owned repositories.
         if: ${{ !github.event.repository.private }}
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: packages/*.nupkg
 
       - name: NuGet login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         id: login
         with:
           user: ${{ secrets.NUGET_USER }}
@@ -67,20 +68,21 @@ jobs:
     name: GitHub release
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
       # Archives, SHA256SUMS, install.sh and install.ps1, built and tested by CI.
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: release
 
       - name: Attest build provenance
         if: ${{ !github.event.repository.private }}
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release/migrate-mongo-*
 
@@ -96,6 +98,7 @@ jobs:
     name: Publish Docker images (ghcr.io)
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -104,21 +107,23 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/migrate-mongo
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: aot-linux-x64
           path: docker/bin/amd64
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: aot-linux-arm64
           path: docker/bin/arm64
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -127,7 +132,7 @@ jobs:
       # 1.2.3 → 1.2.3, 1.2, 1 and latest; prereleases (1.2.3-beta.1) only get their own tag.
       - name: Tool image tags
         id: tool
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -137,7 +142,7 @@ jobs:
 
       - name: Bundle image tags
         id: bundle
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
           flavor: |
@@ -149,7 +154,7 @@ jobs:
 
       - name: Push tool image
         id: push-tool
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker
           target: tool
@@ -160,7 +165,7 @@ jobs:
 
       - name: Push bundle image
         id: push-bundle
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker
           target: bundle
@@ -171,7 +176,7 @@ jobs:
 
       - name: Attest build provenance
         if: ${{ !github.event.repository.private }}
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.push-tool.outputs.digest }}
@@ -179,7 +184,7 @@ jobs:
 
       - name: Attest build provenance (bundle)
         if: ${{ !github.event.repository.private }}
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.push-bundle.outputs.digest }}
