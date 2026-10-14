@@ -63,6 +63,25 @@ on x64 and arm64), which starts instantly and doesn't need a .NET runtime; other
 build. Older SDKs can't install platform-specific tools, so they get a framework-dependent build that runs on any .NET
 runtime from 8 upwards. `migrate-mongo version` shows which one you have (`aot` or `.NET x`).
 
+Without .NET (e.g. a deploy agent), install the standalone Native AOT binary from GitHub Releases. The scripts pick
+your platform, verify the download against `SHA256SUMS` and install to `~/.local/bin` (`/usr/local/bin` as root) or
+`%LOCALAPPDATA%\Programs\migrate-mongo`:
+
+```bash
+curl -fsSL https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.sh | sh
+# a specific version / location
+curl -fsSL https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.sh | sh -s -- --version 0.2.0 --install-dir ./bin
+```
+
+```powershell
+irm https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.ps1 | iex
+```
+
+Both read `MIGRATE_MONGO_VERSION` and `MIGRATE_MONGO_INSTALL_DIR` too (`MIGRATE_MONGO_NO_PATH=1` stops `install.ps1`
+changing your user `PATH`).
+
+Or use the Docker image, `ghcr.io/kevbite/migrate-mongo` (see [Running in CI](#running-in-ci)).
+
 Check it's working:
 
 ```bash
@@ -404,6 +423,26 @@ jobs:
       - run: dotnet tool run migrate-mongo up --env prod
         env:
           PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
+```
+
+#### Docker
+
+`ghcr.io/kevbite/migrate-mongo` (`linux/amd64` and `linux/arm64`) is tagged with the version (`0.2.0`, `0.2`) and
+`latest`:
+
+* `ghcr.io/kevbite/migrate-mongo:<version>` is the AOT tool on the .NET 10 SDK, with the .NET 8 and 9 runtimes, so it
+  can build and run your migrations project. A `global.json` pinning an older SDK won't work in it.
+* `ghcr.io/kevbite/migrate-mongo:<version>-bundle` is the AOT tool on `runtime-deps` (no .NET) for running
+  [bundles](#bundles) with `--runner`.
+
+The working directory is `/src`. Run as your user so build output in the mount isn't owned by root:
+
+```bash
+docker run --rm -v "$PWD:/src" --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -e PROD_MONGODB_URL ghcr.io/kevbite/migrate-mongo:latest up --env prod
+
+docker run --rm -v "$PWD:/src" -e PROD_MONGODB_URL \
+  ghcr.io/kevbite/migrate-mongo:latest-bundle up --env prod --runner ./bundle/Migrations
 ```
 
 ### Tunnelling Through a Bastion

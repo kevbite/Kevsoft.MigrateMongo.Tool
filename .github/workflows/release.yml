@@ -72,27 +72,11 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      # Archives, SHA256SUMS, install.sh and install.ps1, built and tested by CI.
       - uses: actions/download-artifact@v8
         with:
-          pattern: aot-*
-          path: aot
-
-      - name: Archive binaries
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          mkdir release
-          for dir in aot/aot-*; do
-            rid="${dir#aot/aot-}"
-            name="migrate-mongo-${version}-${rid}"
-            if [[ "$rid" == win-* ]]; then
-              (cd "$dir" && zip -q "../../release/${name}.zip" migrate-mongo.exe)
-            else
-              chmod +x "$dir/migrate-mongo"
-              tar -czf "release/${name}.tar.gz" -C "$dir" migrate-mongo
-            fi
-          done
-          (cd release && sha256sum * > SHA256SUMS)
-          ls -la release
+          name: release
+          path: release
 
       - name: Attest build provenance
         if: ${{ !github.event.repository.private }}
@@ -107,3 +91,96 @@ jobs:
           prerelease=""
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease="--prerelease"; fi
           gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes $prerelease
+
+  docker:
+    name: Publish Docker images (ghcr.io)
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/migrate-mongo
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: aot-linux-x64
+          path: docker/bin/amd64
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: aot-linux-arm64
+          path: docker/bin/arm64
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # 1.2.3 → 1.2.3, 1.2, 1 and latest; prereleases (1.2.3-beta.1) only get their own tag.
+      - name: Tool image tags
+        id: tool
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Bundle image tags
+        id: bundle
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            suffix=-bundle,onlatest=true
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Push tool image
+        id: push-tool
+        uses: docker/build-push-action@v7
+        with:
+          context: docker
+          target: tool
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tool.outputs.tags }}
+          labels: ${{ steps.tool.outputs.labels }}
+
+      - name: Push bundle image
+        id: push-bundle
+        uses: docker/build-push-action@v7
+        with:
+          context: docker
+          target: bundle
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.bundle.outputs.tags }}
+          labels: ${{ steps.bundle.outputs.labels }}
+
+      - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push-tool.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest build provenance (bundle)
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push-bundle.outputs.digest }}
+          push-to-registry: true

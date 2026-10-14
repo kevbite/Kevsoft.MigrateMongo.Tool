@@ -488,3 +488,6 @@ $RECYCLE.BIN/
 
 artifacts/
 .test-work/
+
+# Prebuilt binaries copied in to build the Docker images
+docker/bin/

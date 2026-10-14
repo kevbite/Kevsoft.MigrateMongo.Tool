@@ -149,6 +149,130 @@ jobs:
             artifacts/aot/${{ matrix.rid }}/migrate-mongo.exe
           if-no-files-found: error
 
+  release-assets:
+    name: Release assets
+    runs-on: ubuntu-latest
+    needs: [aot]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: aot-*
+          path: aot
+
+      - name: Archive binaries
+        # Asset names don't include the version, so releases/latest/download/<asset> always works.
+        run: |
+          mkdir release
+          for dir in aot/aot-*; do
+            rid="${dir#aot/aot-}"
+            if [[ "$rid" == win-* ]]; then
+              (cd "$dir" && zip -q "$GITHUB_WORKSPACE/release/migrate-mongo-${rid}.zip" migrate-mongo.exe)
+            else
+              chmod +x "$dir/migrate-mongo"
+              tar -czf "release/migrate-mongo-${rid}.tar.gz" -C "$dir" migrate-mongo
+            fi
+          done
+          cp scripts/install.sh scripts/install.ps1 release/
+          (cd release && sha256sum * > SHA256SUMS)
+          ls -la release
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: release/*
+          if-no-files-found: error
+
+  install-script:
+    name: Install script (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    needs: [release-assets]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64, os: ubuntu-latest }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm }
+          - { rid: linux-musl-x64, os: ubuntu-latest, alpine: true }
+          - { rid: linux-musl-arm64, os: ubuntu-24.04-arm, alpine: true }
+          - { rid: osx-x64, os: macos-15-intel }
+          - { rid: osx-arm64, os: macos-latest }
+          - { rid: win-x64, os: windows-latest }
+          - { rid: win-arm64, os: windows-11-arm }
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: release
+
+      - name: Serve the release assets
+        if: ${{ !startsWith(matrix.rid, 'win-') }}
+        run: |
+          (cd release && python3 -m http.server 8080 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          sleep 2
+
+      - name: install.sh
+        if: ${{ !startsWith(matrix.rid, 'win-') && !matrix.alpine }}
+        run: |
+          sh release/install.sh --download-url http://127.0.0.1:8080 --install-dir "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/migrate-mongo" version | tee version.txt
+          grep -F '(${{ matrix.rid }}; aot)' version.txt
+
+      - name: install.sh (Alpine, wget only)
+        if: ${{ matrix.alpine }}
+        run: |
+          docker run --rm --network host -v "$PWD/release:/release:ro" alpine:3 sh -c '
+            set -e
+            MIGRATE_MONGO_DOWNLOAD_URL=http://127.0.0.1:8080 sh /release/install.sh
+            migrate-mongo version | grep -F "(${{ matrix.rid }}; aot)"'
+
+      - name: install.ps1 (Windows PowerShell)
+        if: ${{ startsWith(matrix.rid, 'win-') }}
+        shell: powershell
+        run: |
+          $env:MIGRATE_MONGO_DOWNLOAD_URL = "$PWD\release"
+          $env:MIGRATE_MONGO_INSTALL_DIR = "$env:RUNNER_TEMP\bin"
+          Get-Content -Raw release\install.ps1 | Invoke-Expression
+          $version = & "$env:RUNNER_TEMP\bin\migrate-mongo.exe" version
+          $version
+          if ($version -notlike '*(${{ matrix.rid }}; aot)*') { throw "Unexpected version output: $version" }
+          if (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -notcontains "$env:RUNNER_TEMP\bin") { throw 'The install directory was not added to the user PATH' }
+
+  docker:
+    name: Docker images (linux/amd64, linux/arm64)
+    runs-on: ubuntu-latest
+    needs: [aot]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: aot-linux-x64
+          path: docker/bin/amd64
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: aot-linux-arm64
+          path: docker/bin/arm64
+
+      - uses: docker/setup-buildx-action@v4
+
+      # The Dockerfile only copies the prebuilt binaries, so arm64 builds without QEMU.
+      - name: Build tool image
+        uses: docker/build-push-action@v7
+        with:
+          context: docker
+          target: tool
+          platforms: linux/amd64,linux/arm64
+
+      - name: Build bundle image
+        uses: docker/build-push-action@v7
+        with:
+          context: docker
+          target: bundle
+          platforms: linux/amd64,linux/arm64
+
   integration:
     name: Integration tests (MongoDB Atlas Local)
     # GitHub's Windows and macOS runners can't run Linux containers.
@@ -182,6 +306,18 @@ jobs:
           echo "Testing packages version $version"
           echo "MIGRATE_MONGO_PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
           echo "MIGRATE_MONGO_PACKAGE_FEED=$GITHUB_WORKSPACE/artifacts/packages" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: aot-linux-x64
+          path: docker/bin/amd64
+
+      - name: Build the Docker images under test
+        run: |
+          docker build --target tool -t migrate-mongo:ci docker
+          docker build --target bundle -t migrate-mongo:ci-bundle docker
+          echo "MIGRATE_MONGO_TEST_TOOL_IMAGE=migrate-mongo:ci" >> "$GITHUB_ENV"
+          echo "MIGRATE_MONGO_TEST_BUNDLE_IMAGE=migrate-mongo:ci-bundle" >> "$GITHUB_ENV"
 
       - name: Integration tests
         run: dotnet test --project tests/Kevsoft.MigrateMongo.IntegrationTests -c Release
@@ -297,7 +433,7 @@ jobs:
     name: CI success
     if: always()
     runs-on: ubuntu-latest
-    needs: [build, driver-compat, aot, integration, smoke]
+    needs: [build, driver-compat, aot, integration, smoke, release-assets, install-script, docker]
     steps:
       - name: Check all jobs passed
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

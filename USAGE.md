@@ -19,7 +19,13 @@ dotnet new tool-manifest
 dotnet tool install Kevsoft.MigrateMongo.Tool
 
 # Or without .NET at all (e.g. a deploy agent)
-curl -fsSL https://github.com/kevbite/Kevsoft.MigrateMongo/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.sh | sh
+# (add `-s -- --version 0.2.0 --install-dir ./bin` to choose; MIGRATE_MONGO_VERSION / MIGRATE_MONGO_INSTALL_DIR work too)
+```
+
+```powershell
+# Windows, without .NET
+irm https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.ps1 | iex
 ```
 
 ```bash
@@ -399,10 +405,18 @@ migrate-mongo up --env prod --runner ./Migrations
 ### Option C: Docker
 
 ```bash
-docker run --rm -v "$PWD:/src" -w /src \
+# The tool image has the .NET 10 SDK plus the 8 and 9 runtimes, so it builds the project itself.
+# Run as your user so bin/obj in the mount aren't owned by root.
+docker run --rm -v "$PWD:/src" --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -e PROD_MONGODB_URL -e BASTION_SSH_KEY \
-  ghcr.io/kevbite/migrate-mongo:1 up --env prod
+  ghcr.io/kevbite/migrate-mongo:latest up --env prod
+
+# Or the small `-bundle` image (no .NET) with a bundle from Option B
+docker run --rm -v "$PWD:/src" -e PROD_MONGODB_URL \
+  ghcr.io/kevbite/migrate-mongo:latest-bundle up --env prod --runner ./Migrations
 ```
+
+Pin a version (`ghcr.io/kevbite/migrate-mongo:0.2.0`, `0.2.0-bundle`) in real pipelines.
 
 ### PR gate: fail if someone edited an applied migration
 

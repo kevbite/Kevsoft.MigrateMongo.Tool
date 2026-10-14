@@ -40,7 +40,12 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * `Kevsoft.MigrateMongo.Tunnel` is done: the SSH code moved out of the tool behind `IMongoTunnelProvider`
 >   (Contracts). The standalone runner, bundles and hosting tunnel when `TunnelProvider = new SshTunnelProvider()`
 >   is set; without it they reject `tunnel:` configs with a hint. In protocol mode the tool still opens the tunnel.
-> * Deferred: scripting loaders, Docker images.
+> * `install.sh` / `install.ps1` and Docker images are done. Release archives are versionless
+>   (`migrate-mongo-<rid>.tar.gz|zip`) so `releases/latest/download/...` always works; the scripts verify
+>   `SHA256SUMS`. Images are `ghcr.io/kevbite/migrate-mongo:{version, major.minor, latest}` (tool: AOT binary on
+>   `sdk:10.0` + 8/9 runtimes) and `...-bundle` (`runtime-deps:10.0`), built from the prebuilt AOT binaries.
+>   CI tests the scripts on every RID and both images in the integration tests.
+> * Deferred: scripting loaders.
 
 ---
 
@@ -675,8 +680,8 @@ Test results are published as a PR summary (e.g. `dorny/test-reporter`), and cov
 4. **Supply chain**: `actions/attest-build-provenance` for binaries and packages; NuGet packages signed
    if a certificate is available later.
 5. **Docker**: multi-arch (`linux/amd64`, `linux/arm64`) images built from the **prebuilt** AOT binaries
-   (no QEMU compile), pushed to `ghcr.io/kevbite/migrate-mongo:{version, major, latest}`. Two variants:
-   SDK-based (builds projects) and `runtime-deps` (bundles only).
+   (no QEMU compile), pushed to `ghcr.io/kevbite/migrate-mongo:{version, major.minor, major, latest}` (no
+   `major` tag for 0.x). Two variants: SDK-based (builds projects) and `-bundle` on `runtime-deps` (bundles only).
 6. Prerelease tags (`v1.2.0-beta.1`) publish to NuGet as prerelease and skip the `latest` Docker tag.
 
 Pushes to `main` (no tag) publish `-alpha.0.N` packages to **GitHub Packages** so changes can be tried
