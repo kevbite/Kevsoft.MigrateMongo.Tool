@@ -49,6 +49,16 @@
       "parameters": { "sourceVariableName": "DatabaseName", "fallbackVariableName": "defaultDatabaseName" },
       "replaces": "mydatabase"
     },
+    "Auth": {
+      "type": "parameter",
+      "description": "Set the project up for an authentication mechanism.",
+      "datatype": "choice",
+      "choices": [
+        { "choice": "none", "description": "Username/password or anything else the driver supports out of the box" },
+        { "choice": "aws", "description": "MongoDB AWS IAM (MONGODB-AWS), e.g. Atlas with an IAM role" }
+      ],
+      "defaultValue": "none"
+    },
     "SkipConfig": {
       "type": "parameter",
       "description": "Don't create migrate-mongo.yaml (e.g. to create one at the repository root with `migrate-mongo init --project <dir>`).",

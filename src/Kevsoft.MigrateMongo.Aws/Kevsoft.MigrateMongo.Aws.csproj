@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <Description>MongoDB AWS IAM authentication (authMechanism=MONGODB-AWS, e.g. Atlas with an AWS IAM role) for Kevsoft.MigrateMongo. Reference it from a migrations project or an app using Kevsoft.MigrateMongo.Hosting and it's registered automatically; credentials come from the standard AWS sources (environment variables, web identity, ECS/EC2 roles).</Description>
+    <PackageTags>$(PackageTags);aws;iam;atlas</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.MongoDriver\Kevsoft.MigrateMongo.MongoDriver.csproj" />
+    <!-- Kept at the driver floor: this package requires MongoDB.Driver >= its own version. -->
+    <PackageReference Include="MongoDB.Driver.Authentication.AWS" />
+  </ItemGroup>
+
+</Project>

@@ -5,6 +5,7 @@
   <ItemGroup>
     <!-- Libraries -->
     <PackageVersion Include="MongoDB.Driver" Version="$(MongoDriverVersion)" />
+    <PackageVersion Include="MongoDB.Driver.Authentication.AWS" Version="$(MongoDriverVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />

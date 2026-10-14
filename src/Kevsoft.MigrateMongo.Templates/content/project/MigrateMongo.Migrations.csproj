@@ -9,6 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="Kevsoft.MigrateMongo.Runner" Version="KEVSOFT_MIGRATEMONGO_VERSION" />
+<!--#if (Auth == "aws") -->
+    <PackageReference Include="Kevsoft.MigrateMongo.Aws" Version="KEVSOFT_MIGRATEMONGO_VERSION" />
+<!--#endif -->
     <PackageReference Include="MongoDB.Driver" Version="3.12.0" />
   </ItemGroup>
 

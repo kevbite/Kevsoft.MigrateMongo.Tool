@@ -3,6 +3,7 @@
   "symbolInfo": {
     "Framework": { "longName": "framework" },
     "DatabaseName": { "longName": "database-name", "shortName": "" },
+    "Auth": { "longName": "auth", "shortName": "" },
     "SkipConfig": { "longName": "skip-config", "shortName": "" },
     "skipRestore": { "longName": "no-restore", "shortName": "" }
   }

@@ -1,6 +1,10 @@
 # Kevsoft.MigrateMongo configuration. See https://github.com/kevbite/Kevsoft.MigrateMongo.Tool
 project: .
 mongodb:
+#if (Auth == "aws")
+  # AWS IAM auth, e.g. mongodb+srv://cluster0.xxxxx.mongodb.net/?authSource=%24external&authMechanism=MONGODB-AWS
+  # Credentials come from the standard AWS sources: AWS_* environment variables, web identity, ECS/EC2 roles.
+#endif
   url: ${MONGODB_URL}
   databaseName: mydatabase
 stateCollection: _migrations

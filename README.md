@@ -105,6 +105,8 @@ dotnet add package MongoDB.Driver   # any version >= 3.5, your choice
 | `Kevsoft.MigrateMongo` | The migration engine: planning, locking, state and checksums. |
 | `Kevsoft.MigrateMongo.MongoDriver` | Engine adapter for the MongoDB C# driver. |
 | `Kevsoft.MigrateMongo.Hosting` | Run migrations from your own app on startup, or on demand with `IMongoMigrationRunner`. |
+| `Kevsoft.MigrateMongo.Tunnel` | Lets the runner, bundles and Hosting open [SSH tunnels](#tunnelling-through-a-bastion) themselves. |
+| `Kevsoft.MigrateMongo.Aws` | [AWS IAM authentication](#aws-iam-authentication-atlas) (`authMechanism=MONGODB-AWS`). |
 | `Kevsoft.MigrateMongo.Templates` | `dotnet new` templates for a migrations project and a migration class. |
 
 ### Creating Your First Project
@@ -158,6 +160,7 @@ cd src/MyApp.Migrations && migrate-mongo up        # or: migrate-mongo up -f src
 | `--framework` | `net10.0` | `net10.0`, `net9.0` or `net8.0`. |
 | `--database-name` | first part of the project name, lower-cased | The database written to `migrate-mongo.yaml`. |
 | `--skip-config` | `false` | Don't create `migrate-mongo.yaml`, e.g. to keep it at the repository root with `migrate-mongo init --project src/MyApp.Migrations`. |
+| `--auth` | `none` | `aws` references `Kevsoft.MigrateMongo.Aws` for [AWS IAM authentication](#aws-iam-authentication-atlas), like `migrate-mongo init --auth aws`. |
 | `--no-restore` | `false` | Don't restore the project after creating it. |
 
 `migratemongo-migration` uses `<project root namespace>.Migrations` as the namespace (read from the restored
@@ -504,6 +507,36 @@ return await MigrateMongoRunner.RunAsync(args, new MigrateMongoRunnerOptions
 
 The package is opt-in, so SSH.NET only ends up in your dependencies if you ask for it. When the `migrate-mongo`
 tool drives the runner, the tool opens the tunnel and the provider isn't used.
+
+### AWS IAM Authentication (Atlas)
+
+To connect without a password, using an AWS IAM role (MongoDB Atlas "AWS IAM" database users), reference the AWS
+package from the migrations project and use `authMechanism=MONGODB-AWS`:
+
+```bash
+dotnet add package Kevsoft.MigrateMongo.Aws     # or: migrate-mongo init --auth aws / dotnet new migratemongo --auth aws
+```
+
+```yaml
+environments:
+  prod:
+    mongodb:
+      url: mongodb+srv://cluster0.xxxxx.mongodb.net/?authSource=%24external&authMechanism=MONGODB-AWS
+      databaseName: shop
+```
+
+That's all: the runner, bundles and Hosting register the mechanism with the driver when the URL asks for it.
+Credentials come from the standard AWS sources, so nothing secret goes in the URL: the `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` environment variables (e.g. from assuming a role in CI), web identity
+(`AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`), or the ECS/EC2 instance role. The tool passes its environment to the
+runner, so set them wherever you run `migrate-mongo`. In Atlas, add a database user with AWS IAM authentication for
+the role's ARN (`arn:aws:iam::123456789012:role/deploy`), not the assumed-role session ARN.
+
+Without the package, a `MONGODB-AWS` URL fails before connecting with a message saying which package to add. The
+package is opt-in, so the AWS SDK only ends up in your dependencies if you need it. It works through a
+[tunnel](#tunnelling-through-a-bastion) too (the request is signed locally); use `mode: socks` for `mongodb+srv://`
+URLs. If you build your own `MongoClientSettings` and want to register the mechanism yourself, call
+`AwsAuthentication.Register()` (it's idempotent).
 
 ### Bundles
 

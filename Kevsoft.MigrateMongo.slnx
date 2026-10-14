@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Kevsoft.MigrateMongo.Abstractions/Kevsoft.MigrateMongo.Abstractions.csproj" />
+    <Project Path="src/Kevsoft.MigrateMongo.Aws/Kevsoft.MigrateMongo.Aws.csproj" />
     <Project Path="src/Kevsoft.MigrateMongo.Contracts/Kevsoft.MigrateMongo.Contracts.csproj" />
     <Project Path="src/Kevsoft.MigrateMongo.Hosting/Kevsoft.MigrateMongo.Hosting.csproj" />
     <Project Path="src/Kevsoft.MigrateMongo.MongoDriver/Kevsoft.MigrateMongo.MongoDriver.csproj" />

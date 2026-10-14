@@ -26,6 +26,9 @@ public sealed class CliInvocation
     /// <summary><c>init --project</c> path.</summary>
     public string? Project { get; init; }
 
+    /// <summary><c>init --auth</c>: the authentication to set the project up for (<c>aws</c>), if any.</summary>
+    public string? Auth { get; init; }
+
     /// <summary><c>create &lt;name&gt;</c>.</summary>
     public string? Name { get; init; }
 
@@ -92,8 +95,10 @@ public static class MigrateMongoCli
         if (includeToolCommands)
         {
             var projectOption = new Option<string?>("--project", "-p") { Description = "Where to create the migrations project.", DefaultValueFactory = _ => "Migrations" };
-            Add(new Command("init", "Create a config file and a migrations project.") { projectOption },
-                p => new CliInvocation { Command = "init", Project = p.GetValue(projectOption), ConfigFile = p.GetValue(file), Json = p.GetValue(json) });
+            var authOption = new Option<string?>("--auth") { Description = "Set the project up for an authentication mechanism: aws (MongoDB AWS IAM, e.g. Atlas with an IAM role)." };
+            authOption.AcceptOnlyFromAmong("aws");
+            Add(new Command("init", "Create a config file and a migrations project.") { projectOption, authOption },
+                p => new CliInvocation { Command = "init", Project = p.GetValue(projectOption), Auth = p.GetValue(authOption), ConfigFile = p.GetValue(file), Json = p.GetValue(json) });
 
             var nameArgument = new Argument<string>("name") { Description = "Name of the migration, e.g. AddEmailIndexToUsers." };
             Add(new Command("create", "Create a new migration file.") { nameArgument },

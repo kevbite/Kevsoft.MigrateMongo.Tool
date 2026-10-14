@@ -76,6 +76,7 @@ internal sealed class ToolCommands(string workingDirectory)
         }
 
         var projectDirectory = Path.GetFullPath(invocation.Project ?? "Migrations", workingDirectory);
+        var aws = invocation.Auth == "aws";
         var projectName = Path.GetFileName(projectDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         var created = new List<string>();
 
@@ -86,7 +87,7 @@ internal sealed class ToolCommands(string workingDirectory)
             Directory.CreateDirectory(Path.Combine(projectDirectory, "Migrations"));
             var projectFile = Path.Combine(projectDirectory, projectName + ".csproj");
             var targetFramework = await DetectTargetFrameworkAsync(cancellationToken);
-            await File.WriteAllTextAsync(projectFile, Scaffolding.ProjectFile(targetFramework, ToolInfo.Version, ToolInfo.DefaultDriverVersion), cancellationToken);
+            await File.WriteAllTextAsync(projectFile, Scaffolding.ProjectFile(targetFramework, ToolInfo.Version, ToolInfo.DefaultDriverVersion, aws), cancellationToken);
             created.Add(projectFile);
 
             var programFile = Path.Combine(projectDirectory, "Program.cs");
@@ -98,12 +99,13 @@ internal sealed class ToolCommands(string workingDirectory)
         }
         else
         {
-            _progress.Muted($"Using existing project {Relative(existingProject)}; add a reference to Kevsoft.MigrateMongo.Runner if it doesn't have one.");
+            var references = aws ? "Kevsoft.MigrateMongo.Runner and Kevsoft.MigrateMongo.Aws" : "Kevsoft.MigrateMongo.Runner";
+            _progress.Muted($"Using existing project {Relative(existingProject)}; add references to {references} if it doesn't have them.");
         }
 
         var databaseName = projectName.Split('.')[0].ToLowerInvariant();
         var projectRelative = Path.GetRelativePath(Path.GetDirectoryName(configPath)!, projectDirectory).Replace('\\', '/');
-        await File.WriteAllTextAsync(configPath, Scaffolding.ConfigFile(projectRelative, databaseName), cancellationToken);
+        await File.WriteAllTextAsync(configPath, Scaffolding.ConfigFile(projectRelative, databaseName, aws), cancellationToken);
         created.Insert(0, configPath);
 
         foreach (var file in created)

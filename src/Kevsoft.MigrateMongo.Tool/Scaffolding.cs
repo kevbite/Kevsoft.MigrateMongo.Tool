@@ -5,11 +5,11 @@ namespace Kevsoft.MigrateMongo.Tool;
 
 internal static class Scaffolding
 {
-    public static string ConfigFile(string projectRelativePath, string databaseName) => $"""
+    public static string ConfigFile(string projectRelativePath, string databaseName, bool aws = false) => $"""
         # Kevsoft.MigrateMongo configuration. See https://github.com/kevbite/Kevsoft.MigrateMongo.Tool
         project: {projectRelativePath}
         mongodb:
-          url: ${"{"}MONGODB_URL{"}"}
+        {(aws ? AwsUrlComment : "")}  url: ${"{"}MONGODB_URL{"}"}
           databaseName: {databaseName}
         stateCollection: _migrations
         lockTtl: 300
@@ -23,7 +23,13 @@ internal static class Scaffolding
 
         """;
 
-    public static string ProjectFile(string targetFramework, string runnerVersion, string driverVersion) => $"""
+    private const string AwsUrlComment = """
+          # AWS IAM auth, e.g. mongodb+srv://cluster0.xxxxx.mongodb.net/?authSource=%24external&authMechanism=MONGODB-AWS
+          # Credentials come from the standard AWS sources: AWS_* environment variables, web identity, ECS/EC2 roles.
+
+        """;
+
+    public static string ProjectFile(string targetFramework, string runnerVersion, string driverVersion, bool aws = false) => $"""
         <Project Sdk="Microsoft.NET.Sdk">
 
           <PropertyGroup>
@@ -35,10 +41,15 @@ internal static class Scaffolding
 
           <ItemGroup>
             <PackageReference Include="Kevsoft.MigrateMongo.Runner" Version="{runnerVersion}" />
-            <PackageReference Include="MongoDB.Driver" Version="{driverVersion}" />
+        {(aws ? AwsPackageReference(runnerVersion) : "")}    <PackageReference Include="MongoDB.Driver" Version="{driverVersion}" />
           </ItemGroup>
 
         </Project>
+
+        """;
+
+    private static string AwsPackageReference(string version) => $"""
+            <PackageReference Include="Kevsoft.MigrateMongo.Aws" Version="{version}" />
 
         """;
 

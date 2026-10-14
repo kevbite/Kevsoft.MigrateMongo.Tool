@@ -14,4 +14,8 @@
     <PackageReference Include="MongoDB.Driver" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
+  </ItemGroup>
+
 </Project>

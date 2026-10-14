@@ -35,4 +35,18 @@ public sealed class ScaffoldingTests
                 "namespace {{namespace}};\n[Migration(\"{{id}}\", \"{{name}}\")]\nclass {{className}} : BaseMigration { string S => $$\"\"\"{{other}}\"\"\"; }",
                 "Shop.Migrations", "20261013091500", "AddProducts", "add-products")
             .ShouldBe("namespace Shop.Migrations;\n[Migration(\"20261013091500\", \"add-products\")]\nclass AddProducts : BaseMigration { string S => $$\"\"\"{{other}}\"\"\"; }");
+
+    [Fact]
+    public void ProjectFile_references_the_aws_package_at_the_runner_version_when_asked()
+    {
+        Scaffolding.ProjectFile("net10.0", "1.2.3", "3.5.0").ShouldNotContain("Kevsoft.MigrateMongo.Aws");
+        Scaffolding.ProjectFile("net10.0", "1.2.3", "3.5.0", aws: true).ShouldContain("""<PackageReference Include="Kevsoft.MigrateMongo.Aws" Version="1.2.3" />""");
+    }
+
+    [Fact]
+    public void ConfigFile_shows_an_aws_url_when_asked()
+    {
+        Scaffolding.ConfigFile(".", "shop").ShouldNotContain("MONGODB-AWS");
+        Scaffolding.ConfigFile(".", "shop", aws: true).ShouldContain("authSource=%24external&authMechanism=MONGODB-AWS");
+    }
 }

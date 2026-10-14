@@ -40,6 +40,10 @@ public sealed class MongoDriverBackend
     /// <summary>Uses an existing client (e.g. the application's own); the caller owns its lifetime.</summary>
     public static MongoDriverBackend Create(IMongoClient client, string databaseName, string stateCollection, IServiceProvider services, ILoggerFactory loggerFactory)
     {
+        ArgumentNullException.ThrowIfNull(client);
+
+        // Connections are opened lazily, so registering the mechanism now still applies to this client.
+        MongoAuthentication.EnsureSupported(client.Settings);
         var database = client.GetDatabase(databaseName);
         var store = new MongoMigrationStore(database, stateCollection);
         var executor = new MongoMigrationExecutor(client, database, services, loggerFactory);

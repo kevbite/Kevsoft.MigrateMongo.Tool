@@ -418,6 +418,42 @@ docker run --rm -v "$PWD:/src" -e PROD_MONGODB_URL \
 
 Pin a version (`ghcr.io/kevbite/migrate-mongo:0.2.0`, `0.2.0-bundle`) in real pipelines.
 
+### Passwordless: Atlas with an AWS IAM role
+
+Add `Kevsoft.MigrateMongo.Aws` to the migrations project (`migrate-mongo init --auth aws` does it for new projects),
+point the URL at `authMechanism=MONGODB-AWS`, and give the job AWS credentials. No database secret is needed:
+
+```yaml
+# migrate-mongo.yaml
+environments:
+  prod:
+    mongodb:
+      url: mongodb+srv://cluster0.xxxxx.mongodb.net/?authSource=%24external&authMechanism=MONGODB-AWS
+```
+
+```yaml
+# GitHub Actions: OIDC → assumed role → AWS_* env vars the driver picks up
+    permissions: { id-token: write, contents: read }
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: { role-to-assume: arn:aws:iam::123456789012:role/deploy, aws-region: eu-west-2 }
+      - run: dotnet tool run migrate-mongo up --env prod
+```
+
+```yaml
+# Bitbucket Pipelines: OIDC web identity (or any script that exports AWS_ACCESS_KEY_ID / _SECRET_ACCESS_KEY / _SESSION_TOKEN)
+- step:
+    oidc: true
+    script:
+      - export AWS_ROLE_ARN=arn:aws:iam::123456789012:role/deploy
+      - export AWS_WEB_IDENTITY_TOKEN_FILE=$(pwd)/web-identity-token
+      - echo $BITBUCKET_STEP_OIDC_TOKEN > $(pwd)/web-identity-token
+      - ./Migrations up --env prod          # a bundle; or dotnet tool run migrate-mongo up --env prod
+```
+
+The Atlas database user is the role's ARN. Atlas still checks its IP access list against where the connection comes
+from: the CI runners' addresses, or the bastion's if you go through a `tunnel:` (or private networking).
+
 ### PR gate: fail if someone edited an applied migration
 
 ```yaml

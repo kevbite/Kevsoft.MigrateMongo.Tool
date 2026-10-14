@@ -45,6 +45,10 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 >   `SHA256SUMS`. Images are `ghcr.io/kevbite/migrate-mongo:{version, major.minor, latest}` (tool: AOT binary on
 >   `sdk:10.0` + 8/9 runtimes) and `...-bundle` (`runtime-deps:10.0`), built from the prebuilt AOT binaries.
 >   CI tests the scripts on every RID and both images in the integration tests.
+> * `Kevsoft.MigrateMongo.Aws` is done: `MongoDriverBackend.Create` checks the URL's `authMechanism`; for
+>   `MONGODB-AWS` it registers the driver's AWS mechanism through the package (found by name, so no code changes),
+>   or fails up front saying which package to add. `init --auth aws` / `dotnet new migratemongo --auth aws` add it.
+>   X.509 and OIDC need no package (built into the driver), so they're just a URL.
 > * Deferred: scripting loaders.
 
 ---
