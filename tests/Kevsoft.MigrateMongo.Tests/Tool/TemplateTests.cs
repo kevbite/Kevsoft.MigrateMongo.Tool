@@ -35,10 +35,12 @@ public sealed class TemplateTests
         RenderAuth(Read("project", "migrate-mongo.yaml"), aws).Replace("mydatabase", "shop")
             .ShouldBe(Normalize(Scaffolding.ConfigFile(".", "shop", aws)));
 
-    [Fact]
-    public void Migration_matches_create()
+    [Theory]
+    [InlineData("migration", false)]
+    [InlineData("migration-minimal", true)]
+    public void Migration_matches_create(string templateDirectory, bool minimal)
     {
-        var template = Read("migration", "MMIGRATIONID_MigrationName.cs");
+        var template = Read(templateDirectory, "MMIGRATIONID_MigrationName.cs");
 
         var rendered = template
             .Replace("MIGRATIONID", "20261013091500")
@@ -46,7 +48,10 @@ public sealed class TemplateTests
             .Replace("MigrationName", "ImportCSVData")
             .Replace("Company.Migrations", "Shop.Migrations.Migrations");
 
-        rendered.ShouldBe(Normalize(Scaffolding.MigrationFile("Shop.Migrations.Migrations", "20261013091500", "ImportCSVData", "import-csv-data")));
+        var create = minimal
+            ? Scaffolding.MinimalMigrationFile("Shop.Migrations.Migrations", "20261013091500", "ImportCSVData", "import-csv-data")
+            : Scaffolding.MigrationFile("Shop.Migrations.Migrations", "20261013091500", "ImportCSVData", "import-csv-data");
+        rendered.ShouldBe(Normalize(create));
     }
 
     private static string Read(params string[] parts) => Normalize(File.ReadAllText(Path.Combine([Content, .. parts])));

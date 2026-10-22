@@ -32,6 +32,19 @@ public sealed class MigrateMongoCliTests
         invocation.NoBuild.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData(false, "create", "AddProducts")]
+    [InlineData(true, "create", "AddProducts", "--minimal")]
+    public async Task Create_accepts_minimal(bool minimal, params string[] args)
+    {
+        var (exitCode, invocation) = await Parse(true, args);
+
+        exitCode.ShouldBe(0);
+        invocation.ShouldNotBeNull();
+        invocation.Name.ShouldBe("AddProducts");
+        invocation.Minimal.ShouldBe(minimal);
+    }
+
     [Fact]
     public async Task Tool_accepts_insecure_skip_host_key_check()
     {

@@ -34,6 +34,7 @@ public sealed class GettingStartedTests(IntegrationEnvironment environment)
         var source = File.ReadAllText(migrationFile);
         source.ShouldContain($"[Migration(\"{id}\", \"add-products\")]");
         source.ShouldContain("namespace Shop.Migrations.Migrations;");
+        source.ShouldContain($"// See what ran with `migrate-mongo show {id}`.");
         var upBody = """return context.Database.GetCollection<BsonDocument>("products").InsertOneAsync(new BsonDocument("_id", "widget"), cancellationToken: cancellationToken);""";
         var notImplemented = "throw new NotImplementedException();";
         var firstThrow = source.IndexOf(notImplemented, StringComparison.Ordinal);
@@ -95,6 +96,14 @@ public sealed class GettingStartedTests(IntegrationEnvironment environment)
 
         up.ExitCode.ShouldBe(0, up.ToString());
         workspace.Find("templated").ShouldBe([new BsonDocument("_id", "AddProducts")]);
+
+        // --minimal skips the custom template.
+        var minimal = await workspace.RunAsync("create", "AddPrices", "--minimal");
+        minimal.ExitCode.ShouldBe(0, minimal.ToString());
+        var minimalSource = File.ReadAllText(Directory.GetFiles(workspace.PathOf("src", "Shop.Migrations", "Migrations"), "M*_AddPrices.cs").ShouldHaveSingleItem());
+        minimalSource.ShouldNotContain("// Team template");
+        minimalSource.ShouldNotContain("context.Track");
+        minimalSource.ShouldContain("public sealed class AddPrices : IMigration");
     }
 
     [Fact]

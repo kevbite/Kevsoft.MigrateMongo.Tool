@@ -108,6 +108,7 @@ dotnet new migratemongo-migration -n AddEmailIndexToUsers -o src/MyApp.Migration
 |---|---|---|
 | MongoDB Migrations Project | `migratemongo` | The same project as `init`, with `migrate-mongo.yaml` next to it (`project: .`). |
 | MongoDB Migration | `migratemongo-migration` | The same `M<timestamp>_<Name>.cs` file as `create`. |
+| MongoDB Migration, minimal | `migratemongo-migration-minimal` | The same file as `create --minimal`. |
 
 `migratemongo` options:
 
@@ -119,8 +120,9 @@ dotnet new migratemongo-migration -n AddEmailIndexToUsers -o src/MyApp.Migration
 | `--auth` | `none` | `aws` references `Kevsoft.MigrateMongo.Aws`, like `init --auth aws`. |
 | `--no-restore` | `false` | Don't restore the project after creating it. |
 
-`migratemongo-migration` uses `<project root namespace>.Migrations` as the namespace (read from the restored project,
-falling back to `Migrations`). Pass `--namespace` to choose your own. It always uses the built-in migration template.
+`migratemongo-migration` and `migratemongo-migration-minimal` use `<project root namespace>.Migrations` as the
+namespace (read from the restored project, falling back to `Migrations`). Pass `--namespace` to choose your own. They
+always use the built-in templates, not `migrationTemplate`.
 
 ### Packages
 
@@ -198,8 +200,9 @@ $ migrate-mongo create AddEmailIndexToUsers
 Created src/MyApp.Migrations/Migrations/M20261014164028_AddEmailIndexToUsers.cs
 ```
 
-The id is the current UTC time (`yyyyMMddHHmmss`), and migrations run in id order. Fill in `UpAsync` and `DownAsync`
-with the normal driver API:
+The id is the current UTC time (`yyyyMMddHHmmss`), and migrations run in id order. The new file contains commented
+examples of [tracking operations and recording results](#recording-results); pass `--minimal` for bare `UpAsync` and
+`DownAsync` methods instead. Fill them in with the normal driver API:
 
 ```csharp
 using Kevsoft.MigrateMongo;
@@ -397,6 +400,7 @@ public sealed class {{className}} : IMigration
 ```
 
 If the template lives inside the migrations project, don't give it a `.cs` extension, or it'll be compiled.
+`create --minimal` ignores `migrationTemplate` and writes the minimal built-in template.
 
 ### Build errors
 

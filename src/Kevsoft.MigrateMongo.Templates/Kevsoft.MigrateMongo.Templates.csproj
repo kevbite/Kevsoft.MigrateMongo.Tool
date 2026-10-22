@@ -6,7 +6,7 @@
     <PackageId>Kevsoft.MigrateMongo.Templates</PackageId>
     <PackageType>Template</PackageType>
     <PackageTags>$(PackageTags);dotnet-new;templates</PackageTags>
-    <Description>dotnet new templates for Kevsoft.MigrateMongo: a MongoDB migrations project (migratemongo) and a migration class (migratemongo-migration).</Description>
+    <Description>dotnet new templates for Kevsoft.MigrateMongo: a MongoDB migrations project (migratemongo) and a migration class (migratemongo-migration, or migratemongo-migration-minimal).</Description>
     <EnableDefaultItems>false</EnableDefaultItems>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <IncludeSymbols>false</IncludeSymbols>

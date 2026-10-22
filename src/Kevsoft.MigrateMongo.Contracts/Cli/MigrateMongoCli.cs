@@ -32,6 +32,9 @@ public sealed class CliInvocation
     /// <summary><c>create &lt;name&gt;</c>.</summary>
     public string? Name { get; init; }
 
+    /// <summary><c>create --minimal</c>: use the minimal built-in template instead of the default or <c>migrationTemplate</c>.</summary>
+    public bool Minimal { get; init; }
+
     /// <summary><c>bundle --runtime</c>: the runtime identifier to publish for (default: the current one).</summary>
     public string? RuntimeIdentifier { get; init; }
 
@@ -101,8 +104,9 @@ public static class MigrateMongoCli
                 p => new CliInvocation { Command = "init", Project = p.GetValue(projectOption), Auth = p.GetValue(authOption), ConfigFile = p.GetValue(file), Json = p.GetValue(json) });
 
             var nameArgument = new Argument<string>("name") { Description = "Name of the migration, e.g. AddEmailIndexToUsers." };
-            Add(new Command("create", "Create a new migration file.") { nameArgument },
-                p => new CliInvocation { Command = "create", Name = p.GetValue(nameArgument), ConfigFile = p.GetValue(file), Environment = p.GetValue(env), Json = p.GetValue(json) });
+            var minimal = new Option<bool>("--minimal") { Description = "Use the minimal template, without the results and tracking examples." };
+            Add(new Command("create", "Create a new migration file.") { nameArgument, minimal },
+                p => new CliInvocation { Command = "create", Name = p.GetValue(nameArgument), Minimal = p.GetValue(minimal), ConfigFile = p.GetValue(file), Environment = p.GetValue(env), Json = p.GetValue(json) });
 
             var runtime = new Option<string?>("--runtime", "-r") { Description = "Runtime identifier to bundle for, e.g. linux-x64 (default: this machine's)." };
             var output = new Option<string>("--output", "-o") { Description = "Directory to write the bundle to.", DefaultValueFactory = _ => "bundle" };
