@@ -17,9 +17,9 @@ public static class ExitCodes
 
 public static class ProtocolVersions
 {
-    public const int Current = 2;
+    public const int Current = 1;
 
-    public static readonly int[] Supported = [2];
+    public static readonly int[] Supported = [1];
 
     public const string HandshakeArgument = "--mm-handshake";
     public const string ProtocolArgument = "--mm-protocol";

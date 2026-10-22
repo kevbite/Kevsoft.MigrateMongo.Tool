@@ -431,7 +431,7 @@ The tool builds the project, then prints the runner's versions:
 
 ```
 Built src/MyApp.Migrations/MyApp.Migrations.csproj (3.6s)
-Runner: Kevsoft.MigrateMongo 0.2.0 · MongoDB.Driver 3.12.0 · .NET 10.0.12 · protocol 2
+Runner: Kevsoft.MigrateMongo 0.2.0 · MongoDB.Driver 3.12.0 · .NET 10.0.12 · protocol 1
 ```
 
 Running the project directly (`dotnet run --project src/MyApp.Migrations -- up`) or a bundle accepts the same commands
