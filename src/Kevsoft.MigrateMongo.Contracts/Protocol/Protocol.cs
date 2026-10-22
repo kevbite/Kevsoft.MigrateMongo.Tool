@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Kevsoft.MigrateMongo.Config;
 
@@ -16,9 +17,9 @@ public static class ExitCodes
 
 public static class ProtocolVersions
 {
-    public const int Current = 1;
+    public const int Current = 2;
 
-    public static readonly int[] Supported = [1];
+    public static readonly int[] Supported = [2];
 
     public const string HandshakeArgument = "--mm-handshake";
     public const string ProtocolArgument = "--mm-protocol";
@@ -77,6 +78,12 @@ public sealed class CommandArguments
 
     /// <summary>For <c>up</c> and <c>down</c>: report what would run without changing anything.</summary>
     public bool DryRun { get; set; }
+
+    /// <summary>For <c>up</c> and <c>down</c>: don't record the statements run through <c>context.Track(...)</c>.</summary>
+    public bool NoCaptureStatements { get; set; }
+
+    /// <summary>For <c>show</c>: leave the recorded statements out.</summary>
+    public bool NoStatements { get; set; }
 }
 
 public static class EventTypes
@@ -111,6 +118,9 @@ public sealed class RunnerEvent
 
     public string? Error { get; set; }
 
+    /// <summary>On <c>migrationCompleted</c> and <c>migrationFailed</c>: what the migration recorded.</summary>
+    public MigrationOutputInfo? Output { get; set; }
+
     public CommandResult? Result { get; set; }
 }
 
@@ -135,6 +145,9 @@ public sealed class CommandResult
     public List<HistoryRecord>? History { get; set; }
 
     public LockInfo? Lock { get; set; }
+
+    /// <summary>The <c>show</c> command's result.</summary>
+    public ShowResult? Show { get; set; }
 }
 
 public sealed class MigrationStatusInfo
@@ -163,6 +176,9 @@ public sealed class MigrationStatusInfo
     public string? RunId { get; set; }
 
     public string? Host { get; set; }
+
+    /// <summary>What the last run recorded. <c>status</c> leaves out the operations; <c>show</c> includes them.</summary>
+    public MigrationOutputInfo? Output { get; set; }
 }
 
 public sealed class PlannedMigration
@@ -213,6 +229,103 @@ public sealed class HistoryRecord
     public string? Error { get; set; }
 
     public string? Host { get; set; }
+
+    /// <summary>What the migration recorded during this run, if anything.</summary>
+    public MigrationOutputInfo? Output { get; set; }
+}
+
+/// <summary>
+/// What a migration recorded with <c>context.Results</c> and <c>context.Track(...)</c>. Values are MongoDB Extended
+/// JSON: canonical in-process, relaxed (plain numbers, ISO dates) on the runner's JSON output.
+/// </summary>
+public sealed class MigrationOutputInfo
+{
+    /// <summary>The named results, as an Extended JSON document (keys in the order they were first set).</summary>
+    public JsonElement? Results { get; set; }
+
+    public List<ResultNoteInfo>? Notes { get; set; }
+
+    /// <summary>How many notes were dropped after the limit was reached.</summary>
+    public int? NotesTruncated { get; set; }
+
+    public List<OperationRecord>? Operations { get; set; }
+
+    /// <summary>How many operations weren't recorded after the limit was reached.</summary>
+    public int? OperationsTruncated { get; set; }
+
+    /// <summary>
+    /// Whether the migration's changes were persisted: always true on success; on failure true only when the migration
+    /// wasn't transactional (a failed transaction is rolled back).
+    /// </summary>
+    public bool Committed { get; set; }
+}
+
+public sealed class ResultNoteInfo
+{
+    public DateTime At { get; set; }
+
+    /// <summary><c>info</c> or <c>warning</c>.</summary>
+    public string Level { get; set; } = "info";
+
+    public string Message { get; set; } = "";
+}
+
+/// <summary>An operation run through <c>context.Track(...)</c>.</summary>
+public sealed class OperationRecord
+{
+    /// <summary>e.g. <c>updateMany</c>, <c>deleteOne</c>, <c>insertMany</c>, <c>bulkWrite</c>, <c>createIndex</c>, <c>dropIndex</c>, <c>runCommand</c>.</summary>
+    public string Kind { get; set; } = "";
+
+    public string? Collection { get; set; }
+
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// The statement as an Extended JSON document with any of <c>filter</c>, <c>update</c>, <c>replacement</c>,
+    /// <c>pipeline</c>, <c>keys</c>, <c>index</c>, <c>indexes</c>, <c>requests</c>, <c>command</c> and <c>options</c>.
+    /// Null when statements aren't captured.
+    /// </summary>
+    public JsonElement? Statement { get; set; }
+
+    /// <summary>True when the statement was too large to keep.</summary>
+    public bool? StatementTruncated { get; set; }
+
+    /// <summary>e.g. <c>matched</c>, <c>modified</c>, <c>upserted</c>, <c>deleted</c>, <c>inserted</c>, <c>created</c>, <c>dropped</c>.</summary>
+    public Dictionary<string, long>? Counts { get; set; }
+
+    public long DurationMs { get; set; }
+
+    public DateTime At { get; set; }
+}
+
+/// <summary>Everything known about one migration (the <c>show</c> command).</summary>
+public sealed class ShowResult
+{
+    /// <summary>The migration's state; <see cref="MigrationStatusInfo.Output"/> includes the operations.</summary>
+    public MigrationStatusInfo Migration { get; set; } = new();
+
+    public string? Source { get; set; }
+
+    public string? Origin { get; set; }
+
+    /// <summary>Direction of the last operation (<c>up</c> or <c>down</c>).</summary>
+    public string? Direction { get; set; }
+
+    public long? DurationMs { get; set; }
+
+    /// <summary>The checksum of the migration in the code, when it's still there.</summary>
+    public string? CodeChecksum { get; set; }
+
+    public string? User { get; set; }
+
+    public string? Tool { get; set; }
+
+    public string? Library { get; set; }
+
+    public string? Driver { get; set; }
+
+    /// <summary>The most recent history entries for the migration, oldest first.</summary>
+    public List<HistoryRecord> History { get; set; } = [];
 }
 
 public sealed class LockInfo

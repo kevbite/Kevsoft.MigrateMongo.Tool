@@ -35,7 +35,7 @@ public sealed class UpAndDownTests(IntegrationEnvironment environment)
         runId.ShouldMatch("^[0-9a-f]{32}$");
         foreach (var state in states)
         {
-            state["v"].AsInt32.ShouldBe(1);
+            state["v"].AsInt32.ShouldBe(2);
             state["source"].AsString.ShouldBe("csharp");
             state["checksum"].AsString.ShouldMatch(Checksum);
             state["state"].AsString.ShouldBe("applied");

@@ -214,7 +214,7 @@ public sealed class MigrationEngineTests
     [Fact]
     public async Task State_written_by_a_newer_schema_version_is_refused()
     {
-        _store.States["20260101000001"] = new StoredMigrationState { Id = "20260101000001", V = 2, State = "applied", Batch = 1 };
+        _store.States["20260101000001"] = new StoredMigrationState { Id = "20260101000001", V = 3, State = "applied", Batch = 1 };
 
         var result = await Engine([Migrations.Create("20260101000001", "a")]).UpAsync(null, CancellationToken.None);
 

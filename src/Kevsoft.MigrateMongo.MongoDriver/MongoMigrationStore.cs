@@ -86,6 +86,7 @@ public sealed class MongoMigrationStore : IMigrationStore
         AddIfNotNull(document, "checksum", record.Checksum);
         AddIfNotNull(document, "error", record.Error);
         AddIfNotNull(document, "host", record.Host);
+        MigrationOutputMapper.Write(document, record.Output);
 
         return SessionOf(scope) is { } session
             ? _history.InsertOneAsync(session, document, options: null, cancellationToken)
@@ -113,6 +114,7 @@ public sealed class MongoMigrationStore : IMigrationStore
             Checksum = GetString(d, "checksum"),
             Error = GetString(d, "error"),
             Host = GetString(d, "host"),
+            Output = MigrationOutputMapper.Read(d),
         }).ToList();
     }
 
@@ -221,6 +223,7 @@ public sealed class MongoMigrationStore : IMigrationStore
         appliedBy.Add("driver", state.AppliedBy.Driver);
         appliedBy.Add("runtime", state.AppliedBy.Runtime);
         document.Add("appliedBy", appliedBy);
+        MigrationOutputMapper.Write(document, state.Output);
         return document;
     }
 
@@ -253,6 +256,7 @@ public sealed class MongoMigrationStore : IMigrationStore
                 Driver = GetString(appliedBy, "driver") ?? "",
                 Runtime = GetString(appliedBy, "runtime") ?? "",
             },
+            Output = MigrationOutputMapper.Read(d),
         };
     }
 

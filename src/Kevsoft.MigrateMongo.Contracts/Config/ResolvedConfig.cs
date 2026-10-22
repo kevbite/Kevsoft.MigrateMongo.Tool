@@ -34,6 +34,12 @@ public sealed class ResolvedConfig
 
     public string? Environment { get; set; }
 
+    /// <summary>Record the filters, updates and commands run through <c>context.Track(...)</c> (<c>results.captureStatements</c>).</summary>
+    public bool ResultsCaptureStatements { get; set; } = true;
+
+    /// <summary>The largest a migration's named results may be, in BSON bytes (<c>results.maxBytes</c>).</summary>
+    public int ResultsMaxBytes { get; set; } = 64 * 1024;
+
     /// <summary>
     /// SSH tunnel to open before connecting. Never serialised: the tool opens the tunnel and only passes the rewritten
     /// <see cref="MongoUrl"/> to the runner, so SSH credentials never leave the tool process. A standalone runner or bundle

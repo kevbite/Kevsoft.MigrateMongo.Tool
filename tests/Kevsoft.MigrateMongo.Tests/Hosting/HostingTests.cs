@@ -77,11 +77,12 @@ public sealed class HostingTests
             o.LockTtl = TimeSpan.Zero;
             o.LockWaitTimeout = TimeSpan.FromSeconds(-1);
             o.TransactionRetryTimeout = TimeSpan.FromSeconds(-1);
+            o.ResultsMaxBytes = 0;
         }).AddSource(new EmptySource()));
 
         var error = await Should.ThrowAsync<InvalidOperationException>(() => runner.UpAsync());
 
-        error.Message.ShouldBe("Invalid Kevsoft.MigrateMongo options: LockTtl must be positive. LockWaitTimeout can't be negative. TransactionRetryTimeout can't be negative.");
+        error.Message.ShouldBe("Invalid Kevsoft.MigrateMongo options: LockTtl must be positive. LockWaitTimeout can't be negative. TransactionRetryTimeout can't be negative. ResultsMaxBytes must be positive.");
     }
 
     [Fact]
@@ -234,6 +235,8 @@ public sealed class HostingTests
         public Task<CommandResult> PlanAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<CommandResult> ValidateAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<CommandResult> ShowAsync(string id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

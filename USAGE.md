@@ -154,6 +154,9 @@ transaction: auto
 transactionRetryTimeout: 120
 allowOutOfOrder: false
 migrationTemplate: templates/migration.cs.template
+results:
+  captureStatements: true
+  maxBytes: 65536
 environments:
   staging:
     mongodb:
@@ -181,6 +184,8 @@ environments:
 | `transactionRetryTimeout` | `120` | Seconds to keep retrying transient transaction errors. `0` disables retries. |
 | `allowOutOfOrder` | `false` | Allow pending migrations older than the newest applied one (e.g. from a merged branch). |
 | `migrationTemplate` | | A file `create` uses instead of the built-in template. See [custom templates](#custom-templates). |
+| `results.captureStatements` | `true` | Record each [tracked operation](#recording-results)'s filter, update or index keys. `false` keeps only the kind, counts and timings. |
+| `results.maxBytes` | `65536` | The most a migration's named results can take up. A migration that records more fails. |
 | `tunnel` | | See [Tunnelling through a bastion](#tunnelling-through-a-bastion). |
 | `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings. |
 
@@ -232,6 +237,8 @@ public sealed class AddEmailIndexToUsers : IMigration
 | `Logger` | An `ILogger`. Output appears in the tool's output (`info: ...`) or your app's logs. |
 | `Services` | The `IServiceProvider` for the run. |
 | `Run` | The run id, batch, direction and environment. |
+| `Results` | Named values and notes to store with this run. See [Recording results](#recording-results). |
+| `Track(collection)`, `Track(database)` | Wrappers that run operations and record what they did. |
 
 A migration's checksum is taken from its source code (ignoring whitespace and comments), so editing an applied
 migration is detected. Write a new migration instead.
@@ -277,6 +284,75 @@ On a `TransientTransactionError` (e.g. a write conflict or a primary election), 
 migration runs again from the start. On an `UnknownTransactionCommitResult`, only the commit is retried. Retries back
 off from 100ms to 5s and stop after `transactionRetryTimeout`. **A transactional migration can run more than once**,
 so keep any side effects outside the database (HTTP calls, files) idempotent.
+
+### Recording results
+
+A migration can record what it did. Results are stored on the migration's state document and its history entry, shown
+after the `✔` line, and listed in full by [`show`](#show).
+
+```csharp
+[Migration("20261022120000", "tier-customers")]
+public sealed class TierCustomers : IMigration
+{
+    public async Task UpAsync(MigrationContext context, CancellationToken cancellationToken)
+    {
+        var customers = context.Track(context.Database.GetCollection<BsonDocument>("customers"), "gold");
+        await customers.UpdateManyAsync(
+            Builders<BsonDocument>.Filter.Gte("spend", 10_000),
+            Builders<BsonDocument>.Update.Set("tier", "gold"),
+            cancellationToken: cancellationToken);
+
+        var untiered = await context.Database.GetCollection<BsonDocument>("customers")
+            .Find(context.Session, Builders<BsonDocument>.Filter.Exists("spend", false))
+            .Project(c => c["_id"]).ToListAsync(cancellationToken);
+        context.Results.Set("untiered", untiered);
+        context.Results.Set("cutoff", DateTime.UtcNow);
+        if (untiered.Count > 0)
+        {
+            context.Results.Note($"{untiered.Count} customers have no spend and were left untiered.", NoteLevel.Warning);
+        }
+    }
+
+    // ...
+}
+```
+
+```
+✔ 20261022120000 tier-customers   (0.84s, transaction)
+    gold      matched 1520 · modified 1518 · upserted 0
+    untiered  [2 items]
+    cutoff    2026-10-22T12:31:03Z
+    1 operation(s) recorded – migrate-mongo show 20261022120000
+```
+
+`context.Results` holds:
+
+- **Named values.** `Set(key, value)` takes strings, numbers, booleans, dates, `Guid`s, `ObjectId`s, `BsonValue`s,
+  lists and any object the driver can serialize (records, anonymous types, ...). `Increment(key)` keeps a count, and
+  `Remove(key)` takes a value away. Keys follow MongoDB field-name rules (no `.`, no leading `$`, up to 64
+  characters). `Track(result, label)` adds an `UpdateResult`, `ReplaceOneResult`, `DeleteResult` or
+  `BulkWriteResult`'s counts to a value.
+- **Notes.** `Note(message, level)` records a timestamped `Info` or `Warning`, which is also logged. The first 100 are
+  kept, each up to 1,024 characters.
+
+`context.Track(collection, label?)` wraps a collection: its update, replace, delete, insert, bulk write and index
+methods pass `context.Session` for you and record each operation's kind, statement (filter, update, index keys and
+options), counts and duration. With a label, the counts are also added to that named value. Dropping an index records
+its full definition first, so you can see what to recreate. Inserted documents are never recorded, only how many.
+`context.Track(database)` does the same for `RunCommandAsync`. `Collection` and `Database` give you the unwrapped
+objects for anything else.
+
+Statements can hold data from your filters. Turn them off with `results.captureStatements: false`,
+`--no-capture-statements` for one run, or `context.Track(collection, captureStatement: false)` for one collection.
+
+Limits keep the state documents small: the named values can take up to `results.maxBytes` (64 KB), and a migration
+that records more fails with `MM-RESULTS-TOO-LARGE`, listing the largest keys. Put large data in your own collection.
+The first 200 operations are kept, and a statement over 4 KB is left out (`statementTruncated: true`).
+
+Results are kept when a migration fails. If its transaction was aborted, they're marked as not committed
+(`resultsCommitted: false`): they show what the migration got up to, but none of it was saved. On a transaction
+retry, only the last attempt's results are kept. `DownAsync` can record results too; they're stored on the
+`rolledBack` history entry.
 
 ### Dependency injection
 
@@ -351,7 +427,7 @@ The tool builds the project, then prints the runner's versions:
 
 ```
 Built src/MyApp.Migrations/MyApp.Migrations.csproj (3.6s)
-Runner: Kevsoft.MigrateMongo 0.2.0 · MongoDB.Driver 3.12.0 · .NET 10.0.12 · protocol 1
+Runner: Kevsoft.MigrateMongo 0.2.0 · MongoDB.Driver 3.12.0 · .NET 10.0.12 · protocol 2
 ```
 
 Running the project directly (`dotnet run --project src/MyApp.Migrations -- up`) or a bundle accepts the same commands
@@ -395,7 +471,8 @@ Acquired lock (run ba6b5b60f25e4861a4ba25597d63fd8d).
 Applied 2 migration(s) in batch 2.
 ```
 
-Applies every pending migration as one batch. `--to <id>` stops after that migration.
+Applies every pending migration as one batch. `--to <id>` stops after that migration. `--no-capture-statements`
+records [tracked operations](#recording-results) without their statements (also on `down`).
 
 ### `down`
 
@@ -476,7 +553,42 @@ $ migrate-mongo history
  2026-10-14 16:40:54  20261014164029  split-full-name           rolledBack  2      ff621741  kev-laptop
 ```
 
-Pass an id to see one migration, and `--limit <n>` to change the number of entries (default 50).
+Pass an id to see one migration, and `--limit <n>` to change the number of entries (default 50). When any entry has
+[results](#recording-results), a `Results` column summarises them (`status` has one too).
+
+### `show`
+
+```
+$ migrate-mongo show 20261022
+20261022120000 tier-customers
+  State     applied (batch 4, up, transaction)
+  Applied   2026-10-22 12:31:03 by runner@build-agent-12 (0.84s)
+  Checksum  sha256:253b18c7...
+  Source    csharp MyApp.Migrations.Migrations.TierCustomers
+  Versions  tool 0.2.0, library 0.2.0, driver 3.12.0
+  Run       ba6b5b60f25e4861a4ba25597d63fd8d
+
+Results
+  gold      { matched: 1520, modified: 1518, upserted: 0 }
+  untiered  [ObjectId("64b7f0c2a1b2c3d4e5f60718"), ObjectId("64b7f0c2a1b2c3d4e5f60719")]
+  cutoff    2026-10-22T12:31:03Z
+
+Notes
+  12:31:03  warning  2 customers have no spend and were left untiered.
+
+Operations
+  1. updateMany customers [gold]  matched 1520 · modified 1518 · upserted 0  (0.61s)
+       filter: { spend: { $gte: 10000 } }
+       update: { $set: { tier: "gold" } }
+
+History
+ At                   ID              Name            Event    Batch  Run       Host            Error  Results
+ 2026-10-22 12:31:03  20261022120000  tier-customers  applied  4      ba6b5b60  build-agent-12         gold: matched 1520 · modified 1518 · upserted 0, untiered: …
+```
+
+Shows everything about one migration: its state, who applied it, its results, notes and operations, and its history.
+The id can be a unique prefix. `--history <n>` changes how many history entries are shown (default 10), and
+`--no-statements` leaves the operations' statements out. A rolled-back migration is still found through its history.
 
 ### `bundle` and `version`
 
@@ -504,7 +616,7 @@ Pass an id to see one migration, and `--limit <n>` to change the number of entri
 
 ```js
 {
-  _id: "20261014164028", v: 1, name: "add-email-index-to-users", source: "csharp",
+  _id: "20261014164028", v: 2, name: "add-email-index-to-users", source: "csharp",
   origin: "MyApp.Migrations.Migrations.AddEmailIndexToUsers",
   checksum: "sha256:253b18c7...", state: "applied", direction: "up", batch: 2, transactional: false,
   appliedAt: ISODate("2026-10-14T16:40:51.567Z"), durationMs: 119, runId: "ba6b5b60...",
@@ -512,6 +624,27 @@ Pass an id to see one migration, and `--limit <n>` to change the number of entri
                library: "0.2.0", driver: "3.12.0", runtime: "10.0.12" }
 }
 ```
+
+A migration that [records results](#recording-results) also has these fields, on its state document and its history
+entry. Values are stored as native BSON, so you can query them:
+
+```js
+{
+  results: { gold: { matched: Long(1520), modified: Long(1518), upserted: Long(0) },
+             untiered: [ObjectId("64b7f0c2..."), ObjectId("64b7f0c2...")], cutoff: ISODate("2026-10-22T12:31:03Z") },
+  notes: [ { at: ISODate("2026-10-22T12:31:03Z"), level: "warning", message: "2 customers have no spend and..." } ],
+  resultsCommitted: true,
+  operations: [
+    { kind: "updateMany", collection: "customers", label: "gold",
+      filter: { spend: { $gte: 10000 } }, update: { $set: { tier: "gold" } },
+      counts: { matched: Long(1520), modified: Long(1518), upserted: Long(0) },
+      durationMs: Long(611), at: ISODate("2026-10-22T12:31:03Z") }
+  ]
+}
+```
+
+`notesTruncated` and `operationsTruncated` count what went over the limits, and `statementTruncated: true` marks an
+operation whose statement was too large to keep.
 
 Before running a migration, its state is set to `applying` (or `rollingBack`). If the process dies part-way through a
 migration that isn't in a transaction, the state stays there and later runs stop until you resolve it.
@@ -795,6 +928,7 @@ The defaults match the config file's.
 | `OnChecksumMismatch` | `onChecksumMismatch` |
 | `Transaction`, `TransactionRetryTimeout` | `transaction`, `transactionRetryTimeout` |
 | `AllowOutOfOrder` | `allowOutOfOrder` |
+| `CaptureStatements`, `ResultsMaxBytes` | `results.captureStatements`, `results.maxBytes` |
 | `Environment` | Recorded with each run. |
 | `Tunnel`, `TunnelProvider` | `tunnel` (needs `Kevsoft.MigrateMongo.Tunnel`) |
 
@@ -803,7 +937,7 @@ and use `IMongoMigrationRunner`:
 
 ```csharp
 var runner = app.Services.GetRequiredService<IMongoMigrationRunner>();
-var result = await runner.UpAsync();   // also StatusAsync, PlanAsync, DryRunUpAsync, ValidateAsync and ExecuteAsync("down", ...)
+var result = await runner.UpAsync();   // also StatusAsync, PlanAsync, DryRunUpAsync, ValidateAsync, ShowAsync(id) and ExecuteAsync("down", ...)
 if (result.ExitCode != 0) { /* result.Message says why */ }
 ```
 

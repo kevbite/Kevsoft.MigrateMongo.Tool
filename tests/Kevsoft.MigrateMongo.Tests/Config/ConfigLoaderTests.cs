@@ -96,6 +96,8 @@ public sealed class ConfigLoaderTests
     [InlineData("mongodb:\n  uri: x", "mongodb.uri")]
     [InlineData("transaction: sometimes", "transaction")]
     [InlineData("lockTtl: soon", "lockTtl")]
+    [InlineData("results:\n  maxSize: 10", "results.maxSize")]
+    [InlineData("results: 5", "results")]
     public void Invalid_settings_are_reported(string yaml, string expected)
     {
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message.ShouldContain(expected);
@@ -204,6 +206,45 @@ public sealed class ConfigLoaderTests
         {
             directory.Delete(recursive: true);
         }
+    }
+
+    [Fact]
+    public void Results_capture_statements_up_to_64_KB_by_default_and_can_be_changed_per_environment()
+    {
+        var yaml = Yaml + """
+
+            results:
+              maxBytes: 1000
+            """;
+        yaml = yaml.Replace("lockWaitTimeout: 5", "lockWaitTimeout: 5\n    results:\n      captureStatements: false", StringComparison.Ordinal);
+
+        var defaults = ConfigLoader.Load(Yaml, null, Env);
+        defaults.ResultsCaptureStatements.ShouldBeTrue();
+        defaults.ResultsMaxBytes.ShouldBe(65536);
+
+        var local = ConfigLoader.Load(yaml, null, Env);
+        local.ResultsCaptureStatements.ShouldBeTrue();
+        local.ResultsMaxBytes.ShouldBe(1000);
+
+        var prod = ConfigLoader.Load(yaml, "prod", Env);
+        prod.ResultsCaptureStatements.ShouldBeFalse();
+        prod.ResultsMaxBytes.ShouldBe(1000);
+    }
+
+    [Fact]
+    public void Unknown_results_settings_in_an_environment_are_reported()
+    {
+        var yaml = Yaml.Replace("lockWaitTimeout: 5", "lockWaitTimeout: 5\n    results:\n      capture: false", StringComparison.Ordinal);
+
+        Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, "prod", Env)).Message
+            .ShouldBe("Unknown config setting 'environments.prod.results.capture'.");
+    }
+
+    [Fact]
+    public void Results_max_bytes_must_be_positive()
+    {
+        Should.Throw<ConfigException>(() => ConfigLoader.EnsureConnectable(new ResolvedConfig { MongoUrl = "mongodb://x", DatabaseName = "db", ResultsMaxBytes = 0 }))
+            .Message.ShouldBe("'results.maxBytes' must be positive.");
     }
 
     [Fact]

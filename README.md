@@ -9,6 +9,8 @@ line, your build server or your application.
   either side doesn't break the other.
 - **Safe to run anywhere.** A distributed lock stops concurrent runs, migrations run in transactions where possible,
   and checksums catch migrations edited after they were applied.
+- **An audit trail of what changed.** Migrations can record results and notes, and `context.Track(...)` records each
+  operation's filter, update and counts. `migrate-mongo show <id>` lists it all, alongside who ran it and when.
 - **Built for CI.** Meaningful exit codes, `--json` output, per-environment config with `${ENV_VAR}` secrets, dry
   runs, SSH tunnels through a bastion, AWS IAM authentication, and self-contained bundles for agents without .NET.
 - **Mistakes caught at compile time.** A source generator finds migrations without reflection and reports duplicate
@@ -122,7 +124,7 @@ builder.Services
   [setting up a project](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#setting-up-a-project)
 - [Configuration](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#configuration)
 - [Writing migrations](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#writing-migrations):
-  transactions, dependency injection and custom templates
+  transactions, recording results, dependency injection and custom templates
 - [Commands](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#commands) and
   [exit codes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#exit-codes)
 - [When something goes wrong](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#when-something-goes-wrong)
