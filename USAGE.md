@@ -620,7 +620,7 @@ The id can be a unique prefix. `--history <n>` changes how many history entries 
 
 ```js
 {
-  _id: "20261014164028", v: 2, name: "add-email-index-to-users", source: "csharp",
+  _id: "20261014164028", v: 1, name: "add-email-index-to-users", source: "csharp",
   origin: "MyApp.Migrations.Migrations.AddEmailIndexToUsers",
   checksum: "sha256:253b18c7...", state: "applied", direction: "up", batch: 2, transactional: false,
   appliedAt: ISODate("2026-10-14T16:40:51.567Z"), durationMs: 119, runId: "ba6b5b60...",

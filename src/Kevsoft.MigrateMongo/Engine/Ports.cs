@@ -41,7 +41,7 @@ public sealed class Provenance
 public sealed class StoredMigrationState
 {
     /// <summary>The schema version this library writes. Documents with a higher version are refused.</summary>
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 1;
 
     public string Id { get; set; } = "";
 
