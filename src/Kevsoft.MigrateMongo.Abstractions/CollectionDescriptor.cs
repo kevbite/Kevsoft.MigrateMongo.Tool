@@ -85,7 +85,7 @@ internal static class CollectionRendering
                 indexes.Add(new IndexDeclaration
                 {
                     Keys = declared.Keys.Render(args),
-                    Options = Options(declared.Options, args),
+                    Options = IndexOptions(declared.Options, args),
                     OnRebuild = declared.OnRebuild,
                 });
             }
@@ -105,8 +105,11 @@ internal static class CollectionRendering
         };
     }
 
-    /// <summary>The options under the names <c>createIndexes</c> and <c>listIndexes</c> use. False booleans are left out.</summary>
-    private static BsonDocument Options<TDocument>(CreateIndexOptions<TDocument>? options, RenderArgs<TDocument> args)
+    /// <summary>
+    /// Index options under the names <c>createIndexes</c> and <c>listIndexes</c> use, for declarations and for the index
+    /// operations <c>context.Track(...)</c> records. False booleans are left out.
+    /// </summary>
+    internal static BsonDocument IndexOptions<TDocument>(CreateIndexOptions? options, RenderArgs<TDocument> args)
     {
         var document = new BsonDocument();
         if (options is null)
@@ -132,9 +135,9 @@ internal static class CollectionRendering
             document.Add("collation", options.Collation.ToBsonDocument());
         }
 
-        if (options.PartialFilterExpression is not null)
+        if (options is CreateIndexOptions<TDocument> { PartialFilterExpression: { } partial })
         {
-            document.Add("partialFilterExpression", options.PartialFilterExpression.Render(args));
+            document.Add("partialFilterExpression", partial.Render(args));
         }
 
         if (options.Weights is not null)
@@ -149,9 +152,9 @@ internal static class CollectionRendering
         AddIfNotNull(document, "bits", options.Bits);
         AddIfNotNull(document, "min", options.Min);
         AddIfNotNull(document, "max", options.Max);
-        if (options.WildcardProjection is not null)
+        if (options is CreateIndexOptions<TDocument> { WildcardProjection: { } projection })
         {
-            document.Add("wildcardProjection", options.WildcardProjection.Render(args));
+            document.Add("wildcardProjection", projection.Render(args));
         }
 
         if (options.StorageEngine is not null)

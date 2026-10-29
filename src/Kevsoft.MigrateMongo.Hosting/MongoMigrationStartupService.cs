@@ -18,7 +18,14 @@ internal sealed class MongoMigrationStartupService(IMongoMigrationRunner runner,
 {
     public async Task StartingAsync(CancellationToken cancellationToken)
     {
-        var arguments = new CommandArguments { Only = registration.Startup.Collections ? null : OnlyScopes.Migrations };
+        var startup = registration.Startup;
+        var arguments = new CommandArguments
+        {
+            Only = startup.Collections ? null : OnlyScopes.Migrations,
+            AllowRebuild = [.. startup.AllowRebuild],
+            AllowUnmatched = [.. startup.AllowUnmatched],
+            AllowSuperseded = startup.AllowSuperseded,
+        };
         var result = await runner.ExecuteAsync("up", arguments, cancellationToken);
         if (result.ExitCode != ExitCodes.Success)
         {

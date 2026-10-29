@@ -143,6 +143,20 @@ internal static class IndexPlanner
             rebuilds.Add(Rebuild(declaration, index, server, IdentityChange(server, index), policy, plan.Problems));
         }
 
+        // A rebuild under a new name creates it before anything else is dropped, so the name has to be free already.
+        foreach (var rebuild in rebuilds)
+        {
+            var newName = rebuild.Create!["name"].AsString;
+            if (newName != rebuild.DropName && candidates.FirstOrDefault(c => c.Name == newName) is { } taken)
+            {
+                var what = claimed.Contains(taken) ? "another declared index" : IsIgnored(taken.Name) ? "ignored" : "not declared";
+                rebuild.Info.Blocked = true;
+                rebuild.Info.Reason = $"{newName} is taken";
+                plan.Problems.Add($"{name}: {rebuild.DropName} is rebuilt as {newName}, but the server already has an index called {newName} ({what}). " +
+                                  $"Give the declared index a different name, or drop the server's {newName} first.");
+            }
+        }
+
         foreach (var index in unmatched)
         {
             creates.Add(new PlannedChange
@@ -191,8 +205,13 @@ internal static class IndexPlanner
                     }
 
                     break;
+                // An index hidden under prune: hide stays hidden, and keeps the time it was hidden for if hide comes back.
+                case "report" when server.Hidden && policy.Hidden.TryGetValue(server.Name, out var hiddenSince):
+                    plan.Hidden[server.Name] = hiddenSince;
+                    keeps.Add(new PlannedChange { Info = Info(IndexActions.Keep, server.Name, server.Keys, $"not declared (prune: report); hidden since {Format(hiddenSince)}") });
+                    break;
                 default:
-                    keeps.Add(new PlannedChange { Info = Info(IndexActions.Keep, server.Name, server.Keys, "not declared (prune: report)") });
+                    keeps.Add(new PlannedChange { Info = Info(IndexActions.Keep, server.Name, server.Keys, server.Hidden ? "not declared (prune: report); hidden" : "not declared (prune: report)") });
                     break;
             }
         }

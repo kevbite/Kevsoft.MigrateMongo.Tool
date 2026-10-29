@@ -163,6 +163,24 @@ public sealed class TrackedCollection<T>
             _ => new Dictionary<string, long> { ["created"] = 1 });
     }
 
+    /// <summary>
+    /// Creates an index from a <c>createIndexes</c> index document (<c>key</c>, <c>name</c> and options, as
+    /// <c>listIndexes</c> lists them), and records its keys and options.
+    /// </summary>
+    public Task<BsonDocument> CreateIndexAsync(BsonDocument index, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        var command = new BsonDocument { { "createIndexes", Name }, { "indexes", new BsonArray { index } } };
+        var options = new BsonDocument(index.Where(e => e.Name is not ("v" or "key" or "ns")));
+        return RunAsync(
+            "createIndex",
+            () => Statement(("keys", index.GetValue("key", null)), ("options", options.ElementCount > 0 ? options : null)),
+            () => _session is null
+                ? Collection.Database.RunCommandAsync<BsonDocument>(command, cancellationToken: cancellationToken)
+                : Collection.Database.RunCommandAsync<BsonDocument>(_session, command, cancellationToken: cancellationToken),
+            _ => new Dictionary<string, long> { ["created"] = 1 });
+    }
+
     /// <summary>Creates indexes and records each one's keys and options.</summary>
     public Task<IEnumerable<string>> CreateIndexesAsync(IEnumerable<CreateIndexModel<T>> models, CreateManyIndexesOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -391,41 +409,9 @@ public sealed class TrackedCollection<T>
         return options.ElementCount == 0 ? null : options;
     }
 
-    private BsonDocument? IndexOptions(CreateIndexOptions? options)
-    {
-        if (options is null)
-        {
-            return null;
-        }
-
-        var document = new BsonDocument();
-        Add(document, "name", options.Name);
-        Add(document, "unique", options.Unique);
-        Add(document, "sparse", options.Sparse);
-        Add(document, "hidden", options.Hidden);
-        Add(document, "expireAfterSeconds", options.ExpireAfter is { } expireAfter ? (long)expireAfter.TotalSeconds : null);
-        Add(document, "defaultLanguage", options.DefaultLanguage);
-        Add(document, "weights", options.Weights);
-        if (options.Collation is not null)
-        {
-            document.Add("collation", options.Collation.ToBsonDocument());
-        }
-
-        if (options is CreateIndexOptions<T> { PartialFilterExpression: { } partial })
-        {
-            document.Add("partialFilterExpression", Render(partial) ?? BsonNull.Value);
-        }
-
-        return document.ElementCount == 0 ? null : document;
-    }
-
-    private static void Add(BsonDocument document, string name, object? value)
-    {
-        if (value is not null)
-        {
-            document.Add(name, BsonValue.Create(value));
-        }
-    }
+    /// <summary>Recorded under the names <c>createIndexes</c> takes, as collection definitions declare them.</summary>
+    private BsonValue? IndexOptions(CreateIndexOptions? options) =>
+        options is null ? null : TryRender(() => CollectionRendering.IndexOptions(options, Args) is { ElementCount: > 0 } document ? document : null);
 
     private static BsonDocument? Statement(params (string Name, BsonValue? Value)[] parts)
     {

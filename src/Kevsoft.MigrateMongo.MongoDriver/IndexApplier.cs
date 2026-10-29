@@ -19,7 +19,7 @@ internal static class IndexApplier
             switch (change.Info.Action)
             {
                 case IndexActions.Create:
-                    await CreateAsync(collection, change.Create!, cancellationToken);
+                    await collection.CreateIndexAsync(change.Create!, cancellationToken);
                     break;
                 case IndexActions.Modify or IndexActions.Hide:
                     foreach (var collMod in change.CollMods)
@@ -34,7 +34,7 @@ internal static class IndexApplier
 
                     break;
                 case IndexActions.Rebuild:
-                    await RebuildAsync(collection, database, collectionName, change, cancellationToken);
+                    await RebuildAsync(collection, collectionName, change, cancellationToken);
                     break;
                 case IndexActions.Drop:
                     await collection.DropIndexAsync(change.DropName!, cancellationToken: cancellationToken);
@@ -42,9 +42,6 @@ internal static class IndexApplier
             }
         }
     }
-
-    private static Task<string> CreateAsync(TrackedCollection<BsonDocument> collection, BsonDocument spec, CancellationToken cancellationToken) =>
-        collection.CreateIndexAsync(new CreateIndexModel<BsonDocument>(spec["key"].AsBsonDocument, Options(spec)), cancellationToken: cancellationToken);
 
     private static Task<BsonDocument> CollModAsync(TrackedDatabase database, string collection, BsonDocument index, CancellationToken cancellationToken) =>
         database.RunCommandAsync(new BsonDocument { { "collMod", collection }, { "index", index } }, cancellationToken: cancellationToken);
@@ -84,7 +81,6 @@ internal static class IndexApplier
     /// </summary>
     private static async Task RebuildAsync(
         TrackedCollection<BsonDocument> collection,
-        TrackedDatabase database,
         string collectionName,
         PlannedChange change,
         CancellationToken cancellationToken)
@@ -94,16 +90,14 @@ internal static class IndexApplier
         await collection.DropIndexAsync(change.DropName!, cancellationToken: CancellationToken.None);
         try
         {
-            await CreateAsync(collection, change.Create!, cancellationToken);
+            await collection.CreateIndexAsync(change.Create!, cancellationToken);
         }
         catch (Exception e)
         {
-            var restore = new BsonDocument(change.Existing!.Where(element => element.Name is not ("v" or "ns")));
             try
             {
-                await database.RunCommandAsync(
-                    new BsonDocument { { "createIndexes", collectionName }, { "indexes", new BsonArray { restore } } },
-                    cancellationToken: CancellationToken.None);
+                var restore = new BsonDocument(change.Existing!.Where(element => element.Name is not ("v" or "ns")));
+                await collection.CreateIndexAsync(restore, CancellationToken.None);
             }
             catch (Exception restoreError) when (restoreError is MongoException or TimeoutException)
             {
@@ -115,68 +109,4 @@ internal static class IndexApplier
         }
     }
 
-    /// <summary>The options of a <c>createIndexes</c> index document, as the driver takes them.</summary>
-    internal static CreateIndexOptions<BsonDocument> Options(BsonDocument spec)
-    {
-        var options = new CreateIndexOptions<BsonDocument> { Name = spec["name"].AsString };
-        foreach (var element in spec.Where(e => e.Name is not ("key" or "name")))
-        {
-            var value = element.Value;
-            switch (element.Name)
-            {
-                case "unique":
-                    options.Unique = value.ToBoolean();
-                    break;
-                case "sparse":
-                    options.Sparse = value.ToBoolean();
-                    break;
-                case "hidden":
-                    options.Hidden = value.ToBoolean();
-                    break;
-                case "expireAfterSeconds":
-                    options.ExpireAfter = TimeSpan.FromSeconds(value.ToDouble());
-                    break;
-                case "collation":
-                    options.Collation = Collation.FromBsonDocument(value.AsBsonDocument);
-                    break;
-                case "partialFilterExpression":
-                    options.PartialFilterExpression = value.AsBsonDocument;
-                    break;
-                case "weights":
-                    options.Weights = value.AsBsonDocument;
-                    break;
-                case "default_language":
-                    options.DefaultLanguage = value.AsString;
-                    break;
-                case "language_override":
-                    options.LanguageOverride = value.AsString;
-                    break;
-                case "textIndexVersion":
-                    options.TextIndexVersion = value.ToInt32();
-                    break;
-                case "2dsphereIndexVersion":
-                    options.SphereIndexVersion = value.ToInt32();
-                    break;
-                case "bits":
-                    options.Bits = value.ToInt32();
-                    break;
-                case "min":
-                    options.Min = value.ToDouble();
-                    break;
-                case "max":
-                    options.Max = value.ToDouble();
-                    break;
-                case "wildcardProjection":
-                    options.WildcardProjection = value.AsBsonDocument;
-                    break;
-                case "storageEngine":
-                    options.StorageEngine = value.AsBsonDocument;
-                    break;
-                default:
-                    throw new InvalidOperationException($"Index option '{element.Name}' isn't supported.");
-            }
-        }
-
-        return options;
-    }
 }

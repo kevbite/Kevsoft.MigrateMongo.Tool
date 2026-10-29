@@ -1144,7 +1144,17 @@ The defaults match the config file's.
   grace period, and the instance is restarted part-way through.
 - **A change that isn't allowed stops startup.** For example, `IndexRebuild.Fail` with a definition that needs a
   rebuild: `RunOnStartup()` throws a `MongoMigrationException`, and every instance fails to start until the definition
-  or the option changes.
+  or the option changes. To get one deploy past it, set the same allowances as the CLI's `--allow-*` options, then
+  remove them once it has run:
+
+  ```csharp
+  .RunOnStartup(o =>
+  {
+      o.AllowRebuild = ["orders.reference_1"];   // --allow-rebuild
+      o.AllowUnmatched = ["customers"];          // --allow-unmatched
+      o.AllowSuperseded = true;                  // --allow-superseded
+  });
+  ```
 - **Older builds don't undo newer definitions.** During a rolling deploy, an instance still on the previous build skips
   any definition a newer build replaced within `SupersededDefinitionWindow`, and logs a warning.
 

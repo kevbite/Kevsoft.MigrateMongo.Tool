@@ -201,6 +201,43 @@ public sealed class IndexPlannerTests
     }
 
     [Fact]
+    public void Under_report_hidden_indexes_are_shown_as_hidden_and_keep_the_time_they_were_hidden()
+    {
+        var hiddenAt = Now.AddDays(-3);
+        BsonDocument[] existing =
+        [
+            IdIndex,
+            Server("status_1", new BsonDocument("status", 1)),
+            Server("old_1", new BsonDocument("old", 1), new BsonDocument("hidden", true)),
+            Server("other_1", new BsonDocument("other", 1), new BsonDocument("hidden", true)),
+        ];
+
+        var plan = Plan([Declared(new BsonDocument("status", 1))], existing, Policy(prune: "report", hidden: new() { ["old_1"] = hiddenAt }));
+
+        Summary(plan).ShouldBe([
+            "keep old_1 (not declared (prune: report); hidden since 2026-10-26 12:00)",
+            "keep other_1 (not declared (prune: report); hidden)",
+        ]);
+        plan.Hidden.ShouldBe(new Dictionary<string, DateTime> { ["old_1"] = hiddenAt });
+    }
+
+    [Fact]
+    public void A_rebuild_under_a_name_another_server_index_has_is_a_problem()
+    {
+        var plan = Plan(
+            [Declared(new BsonDocument("email", 1), new BsonDocument { { "name", "email_lookup" }, { "sparse", true } })],
+            [IdIndex, Server("by_email", new BsonDocument("email", 1)), Server("email_lookup", new BsonDocument { { "email", 1 }, { "x", 1 } })],
+            Policy(prune: "drop"));
+
+        var rebuild = plan.Changes.Single(c => c.Info.Action == "rebuild");
+        (rebuild.Info.Blocked, rebuild.Info.Reason).ShouldBe((true, "email_lookup is taken"));
+        plan.Problems.ShouldBe([
+            "users: by_email is rebuilt as email_lookup, but the server already has an index called email_lookup (not declared). " +
+            "Give the declared index a different name, or drop the server's email_lookup first.",
+        ]);
+    }
+
+    [Fact]
     public void Ignored_indexes_are_left_alone()
     {
         var declaration = new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("status", 1))], Ignored = ["adhoc_*"] };

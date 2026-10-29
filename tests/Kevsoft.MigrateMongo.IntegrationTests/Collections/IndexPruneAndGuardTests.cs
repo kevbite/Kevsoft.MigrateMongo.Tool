@@ -59,6 +59,22 @@ public sealed class IndexPruneAndGuardTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task Switching_from_hide_to_report_shows_the_indexes_left_hidden()
+    {
+        await using var mongo = await WithLegacyIndexAsync();
+        var collection = Define(i => i.Add(k => k.Ascending("status")));
+        await mongo.ApplyAsync(collection, Prune("hide", TimeSpan.FromDays(1)));
+        var hiddenAt = mongo.State()["hidden"]["legacy_1"].ToUniversalTime();
+
+        var plan = await mongo.PlanAsync(collection);
+
+        plan.Collections!.Single().Changes.Single().Detail.ShouldStartWith("not declared (prune: report); hidden since ");
+        await mongo.ShouldBeInSyncAsync(collection);
+        mongo.Indexes()["legacy_1"]["hidden"].ToBoolean().ShouldBeTrue();
+        mongo.State()["hidden"]["legacy_1"].ToUniversalTime().ShouldBe(hiddenAt);
+    }
+
+    [Fact]
     public async Task Hidden_indexes_named_with_dots_or_a_dollar_are_recorded()
     {
         await using var mongo = new CollectionHarness(environment);

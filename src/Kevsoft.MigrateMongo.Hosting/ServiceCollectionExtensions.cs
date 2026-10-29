@@ -59,11 +59,32 @@ namespace Kevsoft.MigrateMongo.Hosting
         }
     }
 
-    /// <summary>What <see cref="MongoMigrationsBuilder.RunOnStartup"/> applies.</summary>
+    /// <summary>
+    /// What <see cref="MongoMigrationsBuilder.RunOnStartup"/> applies. The <c>Allow…</c> options are the CLI's <c>--allow-…</c>
+    /// options, for getting one deploy past a change that's refused; remove them once it has run.
+    /// </summary>
     public sealed class MongoMigrationStartupOptions
     {
         /// <summary>Also bring collections in line with their <c>[ManagedCollection]</c> definitions (default true).</summary>
         public bool Collections { get; set; } = true;
+
+        /// <summary>
+        /// Rebuilds to allow although <see cref="IndexRebuild.Fail"/> refuses them, as <c>collection.index</c>
+        /// (<c>--allow-rebuild</c>).
+        /// </summary>
+        public IReadOnlyList<string> AllowRebuild { get; set; } = [];
+
+        /// <summary>
+        /// Collections whose declared indexes may use none of the fields the existing ones use (<c>--allow-unmatched</c>), e.g.
+        /// when replacing every index on purpose.
+        /// </summary>
+        public IReadOnlyList<string> AllowUnmatched { get; set; } = [];
+
+        /// <summary>
+        /// Apply definitions a newer run replaced less than <see cref="MongoMigrationOptions.SupersededDefinitionWindow"/> ago
+        /// (<c>--allow-superseded</c>), e.g. when rolling back on purpose.
+        /// </summary>
+        public bool AllowSuperseded { get; set; }
     }
 
     internal sealed class MongoMigrationRegistration

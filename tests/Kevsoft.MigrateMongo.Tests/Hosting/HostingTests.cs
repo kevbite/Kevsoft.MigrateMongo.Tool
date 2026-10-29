@@ -156,6 +156,25 @@ public sealed class HostingTests
     }
 
     [Fact]
+    public async Task Startup_service_passes_allowances_for_refused_collection_changes()
+    {
+        var runner = new FakeRunner(new CommandResult { ExitCode = 0 });
+        var service = StartupService(runner, o =>
+        {
+            o.AllowRebuild = ["orders.reference_1"];
+            o.AllowUnmatched = ["customers"];
+            o.AllowSuperseded = true;
+        });
+
+        await service.StartingAsync(CancellationToken.None);
+
+        var arguments = runner.UpArguments!;
+        arguments.AllowRebuild.ShouldBe(["orders.reference_1"]);
+        arguments.AllowUnmatched.ShouldBe(["customers"]);
+        arguments.AllowSuperseded.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Startup_service_stops_the_host_when_migrations_fail()
     {
         var result = new CommandResult { ExitCode = 3, Message = "Timed out waiting for the lock." };

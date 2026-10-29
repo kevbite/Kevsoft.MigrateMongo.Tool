@@ -90,6 +90,31 @@ public sealed class IndexChangeTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task A_failure_part_way_through_records_what_ran_and_the_next_run_finishes_the_rest()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.Collection().InsertManyAsync([new BsonDocument("email", "a@example.com"), new BsonDocument("email", "a@example.com")]);
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("email"))));
+        var next = Define(i => i.Add(k => k.Ascending("email"), new() { Unique = true }).Add(k => k.Ascending("status")));
+
+        // New indexes are created first, so status_1 is built before making email_1 unique fails on the duplicates.
+        var failed = await mongo.UpAsync(next);
+
+        failed.ExitCode.ShouldBe(ExitCodes.Failure);
+        mongo.Indexes().Keys.ShouldBe(["_id_", "email_1", "status_1"], ignoreOrder: true);
+        var history = mongo.History().Last();
+        history["event"].AsString.ShouldBe("failed");
+        history["operations"].AsBsonArray.Select(o => o["kind"].AsString).ShouldBe(["createIndex", "runCommand", "runCommand"]);
+
+        // Nothing records the half-applied definition, so the next run works from the server and does only what's left.
+        CollectionHarness.Changes(await mongo.PlanAsync(next)).ShouldBe(["modify email_1"]);
+        await mongo.Collection().DeleteOneAsync(new BsonDocument("email", "a@example.com"));
+        await mongo.ApplyAsync(next);
+        mongo.Operations().ShouldBe(["runCommand", "runCommand"]);
+        mongo.Indexes()["email_1"]["unique"].ToBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Several_in_place_changes_to_one_index_are_made_together()
     {
         await using var mongo = new CollectionHarness(environment);
@@ -164,7 +189,7 @@ public sealed class IndexChangeTests(IntegrationEnvironment environment)
         var index = mongo.Indexes()["email_1"];
         index["sparse"].ToBoolean().ShouldBeTrue();
         index.Contains("unique").ShouldBeFalse();
-        mongo.History().Last()["operations"].AsBsonArray.Select(o => o["kind"].AsString).ShouldBe(["dropIndex", "runCommand"]);
+        mongo.History().Last()["operations"].AsBsonArray.Select(o => o["kind"].AsString).ShouldBe(["dropIndex", "createIndex"]);
     }
 
     [Fact]
