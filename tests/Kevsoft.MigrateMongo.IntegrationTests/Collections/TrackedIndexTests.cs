@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Shouldly;
@@ -13,8 +12,7 @@ public sealed class TrackedIndexTests(IntegrationEnvironment environment)
     {
         await using var mongo = new CollectionHarness(environment);
         var results = new MigrationResults();
-        var context = new MigrationContext(mongo.Database, null, NullLogger.Instance, new NoServices(), new MigrationRunInfo("run", 1, MigrationDirection.Up, false, null), results);
-        var collection = context.Track(mongo.Collection());
+        var collection = mongo.Context(results).Track(mongo.Collection());
 
         await collection.CreateIndexAsync(new CreateIndexModel<BsonDocument>(
             Builders<BsonDocument>.IndexKeys.Text("title"),
@@ -34,10 +32,5 @@ public sealed class TrackedIndexTests(IntegrationEnvironment environment)
             }),
         ]);
         mongo.Indexes().Keys.ShouldBe(["_id_", "search", "by_code"], ignoreOrder: true);
-    }
-
-    private sealed class NoServices : IServiceProvider
-    {
-        public object? GetService(Type serviceType) => null;
     }
 }

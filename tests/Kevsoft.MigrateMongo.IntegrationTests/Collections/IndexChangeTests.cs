@@ -256,6 +256,25 @@ public sealed class IndexChangeTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task On_a_collection_with_a_default_collation_an_index_without_one_gets_the_default_and_stays_in_line()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.Database.CreateCollectionAsync(CollectionHarness.Things, new CreateCollectionOptions { Collation = new Collation("fr", strength: CollationStrength.Secondary) });
+
+        // ApplyAsync checks that a second run finds nothing to change, rather than rebuilding name_1 every time.
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("name")).Add(k => k.Ascending("code"), new() { Collation = Collation.Simple })));
+
+        var indexes = mongo.Indexes();
+        indexes["name_1"]["collation"]["locale"].AsString.ShouldBe("fr");
+        indexes["code_1"].Contains("collation").ShouldBeFalse();
+
+        var next = Define(i => i.Add(k => k.Ascending("name"), new() { Collation = Collation.Simple }).Add(k => k.Ascending("code"), new() { Collation = Collation.Simple }));
+        (await mongo.PlanAsync(next)).Collections!.Single().Changes.Single().Detail.ShouldStartWith("collation { locale: \"fr\"");
+        await mongo.ApplyAsync(next);
+        mongo.Indexes()["name_1"].Contains("collation").ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Changing_the_partial_filter_of_a_named_index_rebuilds_it()
     {
         await using var mongo = new CollectionHarness(environment);

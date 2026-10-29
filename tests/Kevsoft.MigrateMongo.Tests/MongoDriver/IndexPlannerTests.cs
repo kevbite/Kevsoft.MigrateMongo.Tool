@@ -425,6 +425,61 @@ public sealed class IndexPlannerTests
     }
 
     [Fact]
+    public void An_index_declared_without_a_collation_has_the_collections_default()
+    {
+        var french = FilledCollation("fr", ("strength", 2));
+        BsonDocument[] existing =
+        [
+            Server("_id_", new BsonDocument("_id", 1), new BsonDocument("collation", french)),
+            Server("name_1", new BsonDocument("name", 1), new BsonDocument("collation", french)),
+            Server("code_1", new BsonDocument("code", 1)),
+        ];
+        IndexDeclaration[] declared =
+        [
+            Declared(new BsonDocument("name", 1)),
+            Declared(new BsonDocument("code", 1), new BsonDocument("collation", new BsonDocument("locale", "simple"))),
+        ];
+
+        Plan(declared, existing, defaultCollation: french).Changes.ShouldBeEmpty();
+
+        // Without the default, name_1 has a collation nothing declares.
+        Summary(Plan(declared, existing)).ShouldBe(["rebuild name_1"]);
+    }
+
+    [Fact]
+    public void Declaring_the_simple_collation_is_a_different_declaration_from_none()
+    {
+        var none = IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("code", 1))] }, [IdIndex], Policy(), true);
+        var simple = IndexPlanner.Plan(
+            new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("code", 1), new BsonDocument("collation", new BsonDocument("locale", "simple")))] },
+            [IdIndex],
+            Policy(),
+            true);
+
+        simple.Declaration.ShouldNotBe(none.Declaration);
+    }
+
+    [Fact]
+    public void A_text_index_replaces_the_collections_text_index_rather_than_one_with_its_name()
+    {
+        var plan = Plan(
+            [Declared(new BsonDocument { { "category", 1 }, { "title", "text" } }, new BsonDocument("name", "search"))],
+            [
+                IdIndex,
+                Server("search", new BsonDocument("title", 1)),
+                Server("body_text", new BsonDocument { { "_fts", "text" }, { "_ftsx", 1 } }, new BsonDocument("weights", new BsonDocument("body", 1))),
+            ],
+            Policy(allowUnmatched: true));
+
+        var rebuild = plan.Changes.Single(c => c.Info.Action == "rebuild");
+        (rebuild.DropName, rebuild.Info.Blocked).ShouldBe(("body_text", true));
+        plan.Problems.ShouldBe([
+            "users: body_text is rebuilt as search, but the server already has an index called search (not declared). " +
+            "Give the declared index a different name, or drop the server's search first.",
+        ]);
+    }
+
+    [Fact]
     public void A_collation_the_server_did_not_fill_in_is_compared_by_the_fields_it_sets()
     {
         var plan = Plan(
@@ -511,8 +566,9 @@ public sealed class IndexPlannerTests
         BsonDocument[] existing,
         CollectionPolicy? policy = null,
         bool canConvertToUnique = true,
-        Dictionary<string, BsonDocument>? filledCollations = null) =>
-        IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = declared }, existing, policy ?? Policy(), canConvertToUnique, filledCollations);
+        Dictionary<string, BsonDocument>? filledCollations = null,
+        BsonDocument? defaultCollation = null) =>
+        IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = declared }, existing, policy ?? Policy(), canConvertToUnique, filledCollations, defaultCollation);
 
     private static Dictionary<string, BsonDocument> Filled(params (BsonDocument Declared, BsonDocument Filled)[] collations) =>
         collations.ToDictionary(c => IndexPlanner.CollationKey(c.Declared), c => c.Filled);

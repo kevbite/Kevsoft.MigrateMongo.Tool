@@ -26,20 +26,22 @@ internal static class IndexPlanner
 
     /// <summary>
     /// Plans the changes. <paramref name="filledCollations"/> has the declared collations as the server fills them in, by
-    /// <see cref="CollationKey"/>; one that's missing is compared only by the fields it sets.
+    /// <see cref="CollationKey"/>; one that's missing is compared only by the fields it sets. <paramref name="defaultCollation"/>
+    /// is the collection's default collation, which the server gives an index declared without one.
     /// </summary>
     public static IndexPlan Plan(
         CollectionDeclaration declaration,
         IReadOnlyList<BsonDocument> existingIndexes,
         CollectionPolicy policy,
         bool canConvertToUnique,
-        IReadOnlyDictionary<string, BsonDocument>? filledCollations = null)
+        IReadOnlyDictionary<string, BsonDocument>? filledCollations = null,
+        BsonDocument? defaultCollation = null)
     {
         var name = declaration.Name;
         List<IndexSpec> declared;
         try
         {
-            declared = declaration.Indexes.Select(i => FromDeclaration(i, filledCollations)).ToList();
+            declared = declaration.Indexes.Select(i => FromDeclaration(i, filledCollations, defaultCollation)).ToList();
         }
         catch (Exception e) when (e is InvalidOperationException or FormatException or InvalidCastException)
         {
@@ -79,13 +81,15 @@ internal static class IndexPlanner
             }
         }
 
-        // 2. Same name (or the collection's one text index) but a different identity: it has to be rebuilt. An ignored index
-        // is never replaced.
+        // 2. Same name (or the collection's one text index) but a different identity: it has to be rebuilt. A declared text
+        // index can only replace the existing text index, whatever the names. An ignored index is never replaced.
         var clashes = new Dictionary<IndexSpec, IndexSpec>();
         foreach (var index in unmatched.ToList())
         {
-            var free = candidates.Where(c => !matched.ContainsValue(c) && !clashes.ContainsValue(c) && !IsIgnored(c.Name)).ToList();
-            var clash = free.FirstOrDefault(c => c.Name == index.Name) ?? (index.IsText ? free.FirstOrDefault(c => c.IsText) : null);
+            var unclaimed = candidates.Where(c => !matched.ContainsValue(c) && !clashes.ContainsValue(c)).ToList();
+            var clash = index.IsText && unclaimed.FirstOrDefault(c => c.IsText) is { } text
+                ? IsIgnored(text.Name) ? null : text
+                : unclaimed.FirstOrDefault(c => c.Name == index.Name && !IsIgnored(c.Name));
             if (clash is not null)
             {
                 clashes[index] = clash;
@@ -96,18 +100,18 @@ internal static class IndexPlanner
         var claimed = matched.Values.Concat(clashes.Values).ToHashSet();
         foreach (var index in unmatched)
         {
-            if (candidates.FirstOrDefault(c => c.Name == index.Name) is { } taken)
+            if (index.IsText && candidates.FirstOrDefault(c => c.IsText && !claimed.Contains(c)) is { } text)
+            {
+                plan.Problems.Add($"{name}: a collection can only have one text index, and the server's {text.Name} is ignored, so the declared " +
+                                  $"{Display(index.Keys)} can't be created. Stop ignoring {text.Name} to replace it.");
+            }
+            else if (candidates.FirstOrDefault(c => c.Name == index.Name) is { } taken)
             {
                 plan.Problems.Add(claimed.Contains(taken)
                     ? $"{name}: the declared index {Display(index.Keys)} is named {index.Name}, but the server's {index.Name} is another declared index. " +
                       "Give one of them a different name."
                     : $"{name}: the declared index {Display(index.Keys)} is named {index.Name}, but the server's {index.Name} is ignored, so it isn't replaced. " +
                       $"Give the declared index a different name, or stop ignoring {index.Name}.");
-            }
-            else if (index.IsText && candidates.FirstOrDefault(c => c.IsText && !claimed.Contains(c)) is { } text)
-            {
-                plan.Problems.Add($"{name}: a collection can only have one text index, and the server's {text.Name} is ignored, so the declared " +
-                                  $"{Display(index.Keys)} can't be created. Stop ignoring {text.Name} to replace it.");
             }
         }
 
@@ -400,23 +404,26 @@ internal static class IndexPlanner
     /// The server fills in every collation field an index isn't given, with defaults that depend on the locale. When both
     /// collations are filled in (the server lists its own, and explains a declared one), they're compared in full, so leaving
     /// out a field that was set before, e.g. going back from <c>strength: 2</c> to the default, is a change. Otherwise only the
-    /// fields the declaration sets are compared.
+    /// fields the declaration sets are compared. An index declared without a collation has the collection's default, if it
+    /// has one.
     /// </summary>
     private static bool CollationMatches(IndexSpec declared, IndexSpec server)
     {
-        if (declared.Collation is null || server.Collation is null)
+        if (EffectiveCollation(declared) is null || EffectiveCollation(server) is null)
         {
-            return declared.Collation is null && server.Collation is null;
+            return EffectiveCollation(declared) is null && EffectiveCollation(server) is null;
         }
 
         return CollationDifferences(declared, server).Count == 0;
     }
 
+    private static BsonDocument? EffectiveCollation(IndexSpec index) => index.Collation ?? index.FullCollation;
+
     /// <summary>The collation fields whose values differ, apart from the ICU version.</summary>
     private static List<string> CollationDifferences(IndexSpec declared, IndexSpec server)
     {
         var full = declared.FullCollation is not null && server.FullCollation is not null;
-        var (from, to) = full ? (declared.FullCollation!, server.FullCollation!) : (declared.Collation!, server.Collation!);
+        var (from, to) = full ? (declared.FullCollation!, server.FullCollation!) : (EffectiveCollation(declared)!, EffectiveCollation(server)!);
         return (full ? from.Names.Union(to.Names) : from.Names)
             .Where(n => n != "version" && !Equals(from.GetValue(n, null), to.GetValue(n, null)))
             .ToList();
@@ -447,12 +454,12 @@ internal static class IndexPlanner
     /// <summary>e.g. <c>collation strength 2 → 3</c>.</summary>
     private static string CollationChange(IndexSpec server, IndexSpec index)
     {
-        if (index.Collation is null || server.Collation is null)
+        if (EffectiveCollation(index) is not { } declaredCollation || server.Collation is null)
         {
-            return $"collation {DisplayOrNone(server.Collation)} → {DisplayOrNone(index.Collation)}";
+            return $"collation {DisplayOrNone(server.Collation)} → {DisplayOrNone(EffectiveCollation(index))}";
         }
 
-        var declared = index.FullCollation ?? index.Collation;
+        var declared = index.FullCollation ?? declaredCollation;
         return "collation " + string.Join(", ", CollationDifferences(index, server)
             .Select(n => $"{n} {DisplayOrNone(server.Collation.GetValue(n, null))} → {DisplayOrNone(declared.GetValue(n, null))}"));
     }
@@ -508,7 +515,10 @@ internal static class IndexPlanner
         _ => false,
     };
 
-    internal static IndexSpec FromDeclaration(IndexDeclaration declaration, IReadOnlyDictionary<string, BsonDocument>? filledCollations = null)
+    internal static IndexSpec FromDeclaration(
+        IndexDeclaration declaration,
+        IReadOnlyDictionary<string, BsonDocument>? filledCollations = null,
+        BsonDocument? defaultCollation = null)
     {
         var options = declaration.Options;
         var key = new BsonDocument();
@@ -545,6 +555,14 @@ internal static class IndexPlanner
 
         var name = options.GetValue("name", null)?.AsString;
         var collation = Collation(options);
+        var fullCollation = options.GetValue("collation", null) switch
+        {
+            // Declaring { locale: "simple" } opts out of the collection's default.
+            null => defaultCollation is not null ? Collation(new BsonDocument("collation", defaultCollation)) : null,
+            _ when collation is not null && filledCollations?.GetValueOrDefault(CollationKey(options["collation"].AsBsonDocument)) is { } filled =>
+                Normalise(filled).AsBsonDocument,
+            _ => null,
+        };
         return new IndexSpec
         {
             Name = name ?? DefaultName(declaration.Keys),
@@ -552,9 +570,7 @@ internal static class IndexPlanner
             Keys = declaration.Keys,
             Key = key,
             Collation = collation,
-            FullCollation = collation is not null && filledCollations?.GetValueOrDefault(CollationKey(options["collation"].AsBsonDocument)) is { } filled
-                ? Normalise(filled).AsBsonDocument
-                : null,
+            FullCollation = fullCollation,
             PartialFilter = options.GetValue("partialFilterExpression", null) is BsonDocument partial ? Normalise(partial).AsBsonDocument : null,
             Attributes = Attributes(attributeSource, key.Contains("_fts")),
             Source = declaration.Keys,
@@ -670,6 +686,11 @@ internal static class IndexPlanner
                 if (d.Collation is not null)
                 {
                     document.Add("collation", d.Collation);
+                }
+                else if (d.Options?.Contains("collation") == true)
+                {
+                    // Simple, which differs from none on a collection with a default collation.
+                    document.Add("collation", "simple");
                 }
 
                 if (d.PartialFilter is not null)

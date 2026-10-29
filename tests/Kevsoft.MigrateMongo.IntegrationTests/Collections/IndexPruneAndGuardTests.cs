@@ -173,6 +173,23 @@ public sealed class IndexPruneAndGuardTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task A_text_index_named_like_another_index_replaces_the_text_index_not_that_one()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.Collection().Indexes.CreateManyAsync([
+            new CreateIndexModel<BsonDocument>(new BsonDocument("title", 1), new CreateIndexOptions { Name = "search" }),
+            new CreateIndexModel<BsonDocument>(new BsonDocument("body", "text")),
+        ]);
+
+        // Rebuilding search into a text index would fail on every run while body_text exists.
+        var up = await mongo.UpAsync(Define(i => i.Add(k => k.Ascending("category").Text("title"), new() { Name = "search" })));
+
+        up.ExitCode.ShouldBe(ExitCodes.ValidationFailed);
+        up.Issues!.ShouldHaveSingleItem().Message.ShouldStartWith("things: body_text is rebuilt as search, but the server already has an index called search (not declared).");
+        mongo.Indexes().Keys.ShouldBe(["_id_", "search", "body_text"], ignoreOrder: true);
+    }
+
+    [Fact]
     public async Task A_rebuild_is_refused_before_anything_changes_when_onRebuild_is_fail()
     {
         await using var mongo = new CollectionHarness(environment);

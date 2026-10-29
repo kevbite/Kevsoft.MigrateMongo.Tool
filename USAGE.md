@@ -468,6 +468,8 @@ databases are adopted as they are. Names are optional; a new index without one g
 MongoDB fills in every collation field an index isn't given, with defaults that depend on the locale (`da` puts upper
 case first, for example). Each declared collation is compared with the server's after the server has filled it in the
 same way (`explain` shows it without changing anything), so going back from `strength: 2` to the default is a change.
+On a collection created with a default collation, an index declared without a collation gets the collection's, and is
+compared with it; declare `Collation.Simple` for an index without one.
 
 Once matched, the other options are compared:
 

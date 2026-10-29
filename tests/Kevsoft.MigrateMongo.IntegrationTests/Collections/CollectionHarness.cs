@@ -115,6 +115,10 @@ internal sealed class CollectionHarness(IntegrationEnvironment environment) : IA
     public static List<string> Changes(CommandResult result) =>
         result.Collections.ShouldNotBeNull().Single().Changes.Select(c => $"{c.Action} {c.Index}").ToList();
 
+    /// <summary>A context for running operations in this database as a migration would, recording them in <paramref name="results"/>.</summary>
+    public MigrationContext Context(MigrationResults results) =>
+        new(Database, null, NullLogger.Instance, new NoServices(), new MigrationRunInfo("run", 1, MigrationDirection.Up, false, null), results);
+
     public async ValueTask DisposeAsync() => await environment.Client.DropDatabaseAsync(DatabaseName);
 
     private sealed class Definition<T>(Action<CollectionBuilder<T>> define) : ICollectionDefinition<T>

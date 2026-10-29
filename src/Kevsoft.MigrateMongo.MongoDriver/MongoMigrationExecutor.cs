@@ -77,7 +77,21 @@ public sealed class MongoMigrationExecutor(
         }
 
         var canConvertToUnique = await MaxWireVersionAsync(cancellationToken) >= UniqueConversionWireVersion;
-        return IndexPlanner.Plan(declaration, existing, policy, canConvertToUnique, await FilledCollationsAsync(declaration, cancellationToken));
+        return IndexPlanner.Plan(
+            declaration,
+            existing,
+            policy,
+            canConvertToUnique,
+            await FilledCollationsAsync(declaration, cancellationToken),
+            await DefaultCollationAsync(declaration.Name, cancellationToken));
+    }
+
+    /// <summary>The collection's default collation, which the server gives an index created without one.</summary>
+    private async Task<BsonDocument?> DefaultCollationAsync(string collection, CancellationToken cancellationToken)
+    {
+        using var cursor = await database.ListCollectionsAsync(new ListCollectionsOptions { Filter = new BsonDocument("name", collection) }, cancellationToken);
+        var info = await cursor.FirstOrDefaultAsync(cancellationToken);
+        return info?.GetValue("options", null) is BsonDocument options && options.GetValue("collation", null) is BsonDocument collation ? collation : null;
     }
 
     /// <summary>
