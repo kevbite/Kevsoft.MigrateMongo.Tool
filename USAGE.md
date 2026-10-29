@@ -212,7 +212,7 @@ Created src/MyApp.Migrations/Migrations/M20261014164028_AddEmailIndexToUsers.cs
 
 The id is the current UTC time (`yyyyMMddHHmmss`), and migrations run in id order. The new file contains commented
 examples of [tracking operations and recording results](#recording-results); pass `--minimal` for bare `UpAsync` and
-`DownAsync` methods instead. Fill them in with the normal driver API:
+`DownAsync` methods instead. Fill them in with the normal driver API, through `context.Track(...)` to record what ran:
 
 ```csharp
 using Kevsoft.MigrateMongo;
@@ -227,7 +227,7 @@ public sealed class AddEmailIndexToUsers : IMigration
 {
     public async Task UpAsync(MigrationContext context, CancellationToken cancellationToken)
     {
-        await context.Database.GetCollection<BsonDocument>("users").Indexes.CreateOneAsync(
+        await Users(context).CreateIndexAsync(
             new CreateIndexModel<BsonDocument>(
                 Builders<BsonDocument>.IndexKeys.Ascending("email"),
                 new CreateIndexOptions { Unique = true, Name = "email_1" }),
@@ -237,7 +237,11 @@ public sealed class AddEmailIndexToUsers : IMigration
     }
 
     public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) =>
-        context.Database.GetCollection<BsonDocument>("users").Indexes.DropOneAsync("email_1", cancellationToken);
+        Users(context).DropIndexAsync("email_1", cancellationToken: cancellationToken);
+
+    // Records each operation, so `migrate-mongo show 20261014164028` lists what ran.
+    private static TrackedCollection<BsonDocument> Users(MigrationContext context) =>
+        context.Track(context.Database.GetCollection<BsonDocument>("users"));
 }
 ```
 
