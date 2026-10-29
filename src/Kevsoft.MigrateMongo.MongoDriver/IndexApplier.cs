@@ -51,23 +51,37 @@ internal static class IndexApplier
 
     /// <summary>
     /// <c>prepareUnique</c> first (new duplicates are rejected), then <c>unique</c>, which fails if duplicates already exist.
-    /// On failure the index is left as it was.
+    /// On failure, including cancellation, the index is left as it was.
     /// </summary>
     private static async Task ConvertToUniqueAsync(TrackedDatabase database, string collection, string index, CancellationToken cancellationToken)
     {
-        await CollModAsync(database, collection, new BsonDocument { { "name", index }, { "prepareUnique", true } }, cancellationToken);
+        var prepared = false;
         try
         {
+            await CollModAsync(database, collection, new BsonDocument { { "name", index }, { "prepareUnique", true } }, cancellationToken);
+            prepared = true;
             await CollModAsync(database, collection, new BsonDocument { { "name", index }, { "unique", true } }, cancellationToken);
         }
-        catch (MongoCommandException)
+        // A prepareUnique the server rejected changed nothing; one that was cancelled or lost may still have been applied.
+        catch (Exception e) when (prepared || e is not MongoCommandException)
         {
-            await CollModAsync(database, collection, new BsonDocument { { "name", index }, { "prepareUnique", false } }, CancellationToken.None);
+            try
+            {
+                await CollModAsync(database, collection, new BsonDocument { { "name", index }, { "prepareUnique", false } }, CancellationToken.None);
+            }
+            catch (Exception revertError) when (revertError is MongoException or TimeoutException)
+            {
+                throw new InvalidOperationException(
+                    $"Making {collection}.{index} unique failed ({e.Message}), and turning prepareUnique off again failed too ({revertError.Message}).", e);
+            }
+
             throw;
         }
     }
 
-    /// <summary>Drops the index and creates the declared one. If creating fails, the dropped index is created again.</summary>
+    /// <summary>
+    /// Drops the index and creates the declared one. If creating fails or is cancelled, the dropped index is created again.
+    /// </summary>
     private static async Task RebuildAsync(
         TrackedCollection<BsonDocument> collection,
         TrackedDatabase database,
@@ -75,12 +89,14 @@ internal static class IndexApplier
         PlannedChange change,
         CancellationToken cancellationToken)
     {
-        await collection.DropIndexAsync(change.DropName!, cancellationToken: cancellationToken);
+        // The drop itself isn't cancellable, so once it's sent the index is known to be gone and is restored on any failure.
+        cancellationToken.ThrowIfCancellationRequested();
+        await collection.DropIndexAsync(change.DropName!, cancellationToken: CancellationToken.None);
         try
         {
             await CreateAsync(collection, change.Create!, cancellationToken);
         }
-        catch (Exception e) when (e is MongoException or TimeoutException)
+        catch (Exception e)
         {
             var restore = new BsonDocument(change.Existing!.Where(element => element.Name is not ("v" or "ns")));
             try
@@ -89,7 +105,7 @@ internal static class IndexApplier
                     new BsonDocument { { "createIndexes", collectionName }, { "indexes", new BsonArray { restore } } },
                     cancellationToken: CancellationToken.None);
             }
-            catch (MongoException restoreError)
+            catch (Exception restoreError) when (restoreError is MongoException or TimeoutException)
             {
                 throw new InvalidOperationException(
                     $"Rebuilding {collectionName}.{change.DropName} failed ({e.Message}), and restoring the previous index failed too ({restoreError.Message}).", e);

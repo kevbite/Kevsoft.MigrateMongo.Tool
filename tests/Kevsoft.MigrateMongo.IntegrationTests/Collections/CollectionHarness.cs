@@ -4,6 +4,7 @@ using Kevsoft.MigrateMongo.Protocol;
 using Microsoft.Extensions.Logging.Abstractions;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using MongoDB.Driver.Core.Events;
 using Shouldly;
 
 namespace Kevsoft.MigrateMongo.IntegrationTests.Collections;
@@ -37,7 +38,13 @@ internal sealed class CollectionHarness(IntegrationEnvironment environment) : IA
     public Task<CommandResult> PlanAsync(CollectionDescriptor collection, Action<EngineOptions>? options = null, CommandArguments? arguments = null) =>
         RunAsync("plan", [collection], options, arguments);
 
-    public Task<CommandResult> RunAsync(string command, IEnumerable<CollectionDescriptor> collections, Action<EngineOptions>? options = null, CommandArguments? arguments = null)
+    public Task<CommandResult> RunAsync(
+        string command,
+        IEnumerable<CollectionDescriptor> collections,
+        Action<EngineOptions>? options = null,
+        CommandArguments? arguments = null,
+        IMongoClient? client = null,
+        CancellationToken cancellationToken = default)
     {
         var engineOptions = new EngineOptions
         {
@@ -45,9 +52,26 @@ internal sealed class CollectionHarness(IntegrationEnvironment environment) : IA
             Provenance = new Provenance { Host = "it-host", User = "it", Library = "test", Driver = "test", Runtime = "test" },
         };
         options?.Invoke(engineOptions);
-        var backend = MongoDriverBackend.Create(environment.Client, DatabaseName, "_migrations", new NoServices(), NullLoggerFactory.Instance);
+        var backend = MongoDriverBackend.Create(client ?? environment.Client, DatabaseName, "_migrations", new NoServices(), NullLoggerFactory.Instance);
         var engine = new MigrationEngine(backend.Store, backend.Executor, [], engineOptions, new Sink(Events), collections: collections);
-        return engine.ExecuteAsync(command, arguments ?? new CommandArguments(), CancellationToken.None);
+        return engine.ExecuteAsync(command, arguments ?? new CommandArguments(), cancellationToken);
+    }
+
+    /// <summary>
+    /// A client that cancels <paramref name="cancel"/> as soon as a <paramref name="commandName"/> command on this database
+    /// succeeds, so a run can be cancelled between two of its operations.
+    /// </summary>
+    public MongoClient CancellingAfter(string commandName, CancellationTokenSource cancel)
+    {
+        var settings = MongoClientSettings.FromConnectionString(environment.MongoUrl);
+        settings.ClusterConfigurator = builder => builder.Subscribe<CommandSucceededEvent>(e =>
+        {
+            if (e.CommandName == commandName && e.DatabaseNamespace.DatabaseName == DatabaseName)
+            {
+                cancel.Cancel();
+            }
+        });
+        return new MongoClient(settings);
     }
 
     /// <summary>Applies <paramref name="collection"/> and checks that it changed something and that it's in line afterwards.</summary>

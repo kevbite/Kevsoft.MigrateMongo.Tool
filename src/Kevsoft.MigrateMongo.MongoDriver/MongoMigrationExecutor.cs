@@ -76,7 +76,47 @@ public sealed class MongoMigrationExecutor(
             existing = [];
         }
 
-        return IndexPlanner.Plan(declaration, existing, policy, await MaxWireVersionAsync(cancellationToken) >= UniqueConversionWireVersion);
+        var canConvertToUnique = await MaxWireVersionAsync(cancellationToken) >= UniqueConversionWireVersion;
+        return IndexPlanner.Plan(declaration, existing, policy, canConvertToUnique, await FilledCollationsAsync(declaration, cancellationToken));
+    }
+
+    /// <summary>
+    /// Each declared collation as the server fills it in for an index, which depends on the locale (e.g. <c>da</c> puts upper
+    /// case first). Explaining a query with the collation shows it without changing anything. One the server won't explain,
+    /// e.g. an invalid locale that creating the index will report, is left out.
+    /// </summary>
+    private async Task<Dictionary<string, BsonDocument>> FilledCollationsAsync(CollectionDeclaration declaration, CancellationToken cancellationToken)
+    {
+        var filled = new Dictionary<string, BsonDocument>(StringComparer.Ordinal);
+        foreach (var collation in declaration.Indexes.Select(i => i.Options.GetValue("collation", null)).OfType<BsonDocument>())
+        {
+            var key = IndexPlanner.CollationKey(collation);
+            if (filled.ContainsKey(key) || collation.GetValue("locale", "simple") == "simple")
+            {
+                continue;
+            }
+
+            try
+            {
+                var explain = await database.RunCommandAsync<BsonDocument>(
+                    new BsonDocument
+                    {
+                        { "explain", new BsonDocument { { "find", declaration.Name }, { "filter", new BsonDocument() }, { "collation", collation } } },
+                        { "verbosity", "queryPlanner" },
+                    },
+                    cancellationToken: cancellationToken);
+                if (IndexPlanner.ExplainedCollation(explain, collation) is { } full)
+                {
+                    filled[key] = full;
+                }
+            }
+            catch (MongoCommandException)
+            {
+                // Compared by the fields it sets instead.
+            }
+        }
+
+        return filled;
     }
 
     private async Task<int> MaxWireVersionAsync(CancellationToken cancellationToken)

@@ -168,16 +168,66 @@ public sealed class IndexChangeTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task A_rebuild_cancelled_after_the_drop_restores_the_previous_index()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("email"), new() { Sparse = true })));
+        using var cancel = new CancellationTokenSource();
+        using var client = mongo.CancellingAfter("dropIndexes", cancel);
+
+        var up = await mongo.RunAsync("up", [Define(i => i.Add(k => k.Ascending("email"), new() { Unique = true }))], client: client, cancellationToken: cancel.Token);
+
+        up.ExitCode.ShouldBe(ExitCodes.Failure);
+        up.Message.ShouldBe("Collection things failed: InvalidOperationException: Rebuilding things.email_1 failed (The operation was canceled.); the previous index was restored.");
+        var index = mongo.Indexes()["email_1"];
+        index["sparse"].ToBoolean().ShouldBeTrue();
+        index.Contains("unique").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Making_an_index_unique_cancelled_after_prepare_unique_turns_it_off_again()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("email"))));
+        using var cancel = new CancellationTokenSource();
+        using var client = mongo.CancellingAfter("collMod", cancel);
+
+        var up = await mongo.RunAsync("up", [Define(i => i.Add(k => k.Ascending("email"), new() { Unique = true }))], client: client, cancellationToken: cancel.Token);
+
+        up.ExitCode.ShouldBe(ExitCodes.Failure);
+        up.Message.ShouldBe("Collection things failed: The operation was cancelled.");
+        var index = mongo.Indexes()["email_1"];
+        index.GetValue("unique", false).ToBoolean().ShouldBeFalse();
+        index.GetValue("prepareUnique", false).ToBoolean().ShouldBeFalse();
+        mongo.History().Last()["operations"].AsBsonArray.Select(o => o["command"]["index"]["prepareUnique"].AsBoolean).ShouldBe([true, false]);
+    }
+
+    [Fact]
     public async Task Changing_the_collation_rebuilds_the_index_because_its_name_stays_the_same()
     {
         await using var mongo = new CollectionHarness(environment);
         await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("name"), new() { Collation = new Collation("en", strength: CollationStrength.Secondary) })));
 
         var next = Define(i => i.Add(k => k.Ascending("name"), new() { Collation = new Collation("en", strength: CollationStrength.Primary) }));
-        CollectionHarness.Changes(await mongo.PlanAsync(next)).ShouldBe(["rebuild name_1"]);
+        var plan = await mongo.PlanAsync(next);
+        CollectionHarness.Changes(plan).ShouldBe(["rebuild name_1"]);
+        plan.Collections!.Single().Changes.Single().Detail.ShouldBe("collation strength 2 → 1 (drop, then create)");
         await mongo.ApplyAsync(next);
 
         mongo.Indexes()["name_1"]["collation"]["strength"].ToInt32().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Leaving_a_field_out_of_the_collation_rebuilds_the_index_with_the_default()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("name"), new() { Collation = new Collation("en", strength: CollationStrength.Secondary) })));
+
+        var next = Define(i => i.Add(k => k.Ascending("name"), new() { Collation = new Collation("en") }));
+        CollectionHarness.Changes(await mongo.PlanAsync(next)).ShouldBe(["rebuild name_1"]);
+        await mongo.ApplyAsync(next);
+
+        mongo.Indexes()["name_1"]["collation"]["strength"].ToInt32().ShouldBe(3);
     }
 
     [Fact]

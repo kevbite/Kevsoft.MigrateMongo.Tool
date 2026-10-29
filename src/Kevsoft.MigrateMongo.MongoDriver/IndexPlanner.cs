@@ -24,13 +24,22 @@ internal static class IndexPlanner
 
     private static readonly JsonWriterSettings Canonical = new() { OutputMode = JsonOutputMode.CanonicalExtendedJson };
 
-    public static IndexPlan Plan(CollectionDeclaration declaration, IReadOnlyList<BsonDocument> existingIndexes, CollectionPolicy policy, bool canConvertToUnique)
+    /// <summary>
+    /// Plans the changes. <paramref name="filledCollations"/> has the declared collations as the server fills them in, by
+    /// <see cref="CollationKey"/>; one that's missing is compared only by the fields it sets.
+    /// </summary>
+    public static IndexPlan Plan(
+        CollectionDeclaration declaration,
+        IReadOnlyList<BsonDocument> existingIndexes,
+        CollectionPolicy policy,
+        bool canConvertToUnique,
+        IReadOnlyDictionary<string, BsonDocument>? filledCollations = null)
     {
         var name = declaration.Name;
         List<IndexSpec> declared;
         try
         {
-            declared = declaration.Indexes.Select(FromDeclaration).ToList();
+            declared = declaration.Indexes.Select(i => FromDeclaration(i, filledCollations)).ToList();
         }
         catch (Exception e) when (e is InvalidOperationException or FormatException or InvalidCastException)
         {
@@ -113,7 +122,7 @@ internal static class IndexPlanner
 
         foreach (var (index, server) in clashes)
         {
-            rebuilds.Add(Rebuild(declaration, index, server, $"keys {Display(server.Keys)} → {Display(index.Keys)}", policy, plan.Problems));
+            rebuilds.Add(Rebuild(declaration, index, server, IdentityChange(server, index), policy, plan.Problems));
         }
 
         foreach (var index in unmatched)
@@ -347,17 +356,106 @@ internal static class IndexPlanner
 
     internal static bool SameIdentity(IndexSpec declared, IndexSpec server) =>
         declared.Key.Equals(server.Key) &&
-        CollationMatches(declared.Collation, server.Collation) &&
+        CollationMatches(declared, server) &&
         Equals(declared.PartialFilter, server.PartialFilter);
 
     /// <summary>
-    /// The server fills in every collation field (strength, caseLevel, …), so a declared collation matches when the fields it
-    /// sets agree.
+    /// The server fills in every collation field an index isn't given, with defaults that depend on the locale. When both
+    /// collations are filled in (the server lists its own, and explains a declared one), they're compared in full, so leaving
+    /// out a field that was set before, e.g. going back from <c>strength: 2</c> to the default, is a change. Otherwise only the
+    /// fields the declaration sets are compared.
     /// </summary>
-    private static bool CollationMatches(BsonDocument? declared, BsonDocument? server) =>
-        declared is null
-            ? server is null
-            : server is not null && declared.Where(e => e.Name != "version").All(e => server.TryGetValue(e.Name, out var value) && value.Equals(e.Value));
+    private static bool CollationMatches(IndexSpec declared, IndexSpec server)
+    {
+        if (declared.Collation is null || server.Collation is null)
+        {
+            return declared.Collation is null && server.Collation is null;
+        }
+
+        return CollationDifferences(declared, server).Count == 0;
+    }
+
+    /// <summary>The collation fields whose values differ, apart from the ICU version.</summary>
+    private static List<string> CollationDifferences(IndexSpec declared, IndexSpec server)
+    {
+        var full = declared.FullCollation is not null && server.FullCollation is not null;
+        var (from, to) = full ? (declared.FullCollation!, server.FullCollation!) : (declared.Collation!, server.Collation!);
+        return (full ? from.Names.Union(to.Names) : from.Names)
+            .Where(n => n != "version" && !Equals(from.GetValue(n, null), to.GetValue(n, null)))
+            .ToList();
+    }
+
+    /// <summary>What differs between a declared index and the server's one of the same name, e.g. <c>keys { a: 1 } → { b: 1 }</c>.</summary>
+    private static string IdentityChange(IndexSpec server, IndexSpec index)
+    {
+        var parts = new List<string>();
+        if (!index.Key.Equals(server.Key))
+        {
+            parts.Add($"keys {Display(server.Keys)} → {Display(index.Keys)}");
+        }
+
+        if (!CollationMatches(index, server))
+        {
+            parts.Add(CollationChange(server, index));
+        }
+
+        if (!Equals(index.PartialFilter, server.PartialFilter))
+        {
+            parts.Add($"partialFilterExpression {DisplayOrNone(server.PartialFilter)} → {DisplayOrNone(index.PartialFilter)}");
+        }
+
+        return parts.Count > 0 ? string.Join("; ", parts) : $"keys {Display(server.Keys)} → {Display(index.Keys)}";
+    }
+
+    /// <summary>e.g. <c>collation strength 2 → 3</c>.</summary>
+    private static string CollationChange(IndexSpec server, IndexSpec index)
+    {
+        if (index.Collation is null || server.Collation is null)
+        {
+            return $"collation {DisplayOrNone(server.Collation)} → {DisplayOrNone(index.Collation)}";
+        }
+
+        var declared = index.FullCollation ?? index.Collation;
+        return "collation " + string.Join(", ", CollationDifferences(index, server)
+            .Select(n => $"{n} {DisplayOrNone(server.Collation.GetValue(n, null))} → {DisplayOrNone(declared.GetValue(n, null))}"));
+    }
+
+    private static string DisplayOrNone(BsonValue? value) => value is null ? "none" : Display(value);
+
+    /// <summary>
+    /// Finds a query's collation, as the server filled it in, in what <c>explain</c> returned. It's nested on a sharded cluster
+    /// or a time-series collection, and <c>command</c> echoes the collation as it was sent.
+    /// </summary>
+    internal static BsonDocument? ExplainedCollation(BsonDocument explain, BsonDocument declared)
+    {
+        var queue = new Queue<BsonDocument>([explain]);
+        while (queue.TryDequeue(out var document))
+        {
+            foreach (var element in document.Where(e => e.Name != "command"))
+            {
+                if (element is { Name: "collation", Value: BsonDocument collation } && collation.GetValue("locale", null) == declared.GetValue("locale", null))
+                {
+                    return collation;
+                }
+
+                IEnumerable<BsonDocument> children = element.Value switch
+                {
+                    BsonDocument child => [child],
+                    BsonArray array => array.OfType<BsonDocument>(),
+                    _ => [],
+                };
+                foreach (var child in children)
+                {
+                    queue.Enqueue(child);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>How a declared collation is looked up in the ones the server filled in.</summary>
+    internal static string CollationKey(BsonDocument collation) => collation.ToJson(Canonical);
 
     private static List<Difference> Differences(BsonDocument declared, BsonDocument server) =>
         declared.Names.Union(server.Names)
@@ -373,7 +471,7 @@ internal static class IndexPlanner
         _ => false,
     };
 
-    internal static IndexSpec FromDeclaration(IndexDeclaration declaration)
+    internal static IndexSpec FromDeclaration(IndexDeclaration declaration, IReadOnlyDictionary<string, BsonDocument>? filledCollations = null)
     {
         var options = declaration.Options;
         var key = new BsonDocument();
@@ -409,13 +507,17 @@ internal static class IndexPlanner
         }
 
         var name = options.GetValue("name", null)?.AsString;
+        var collation = Collation(options);
         return new IndexSpec
         {
             Name = name ?? DefaultName(declaration.Keys),
             NameDeclared = name is not null,
             Keys = declaration.Keys,
             Key = key,
-            Collation = Collation(options),
+            Collation = collation,
+            FullCollation = collation is not null && filledCollations?.GetValueOrDefault(CollationKey(options["collation"].AsBsonDocument)) is { } filled
+                ? Normalise(filled).AsBsonDocument
+                : null,
             PartialFilter = options.GetValue("partialFilterExpression", null) is BsonDocument partial ? Normalise(partial).AsBsonDocument : null,
             Attributes = Attributes(attributeSource, key.Contains("_fts")),
             Source = declaration.Keys,
@@ -429,13 +531,15 @@ internal static class IndexPlanner
         var keys = index["key"].AsBsonDocument;
         var key = Normalise(keys).AsBsonDocument;
         var isText = key.Contains("_fts");
+        var collation = Collation(index);
         return new IndexSpec
         {
             Name = index["name"].AsString,
             NameDeclared = true,
             Keys = keys,
             Key = key,
-            Collation = Collation(index),
+            Collation = collation,
+            FullCollation = collation,
             PartialFilter = index.GetValue("partialFilterExpression", null) is BsonDocument partial ? Normalise(partial).AsBsonDocument : null,
             Attributes = Attributes(index, isText),
             Source = index,
@@ -594,7 +698,11 @@ internal sealed class IndexSpec
     /// <summary>The keys as the server stores them, numbers normalised (text indexes become <c>{ _fts: "text", _ftsx: 1 }</c>).</summary>
     public required BsonDocument Key { get; init; }
 
+    /// <summary>The collation as declared or listed.</summary>
     public BsonDocument? Collation { get; init; }
+
+    /// <summary>The collation with every field filled in: the server's own, or a declared one the server explained.</summary>
+    public BsonDocument? FullCollation { get; init; }
 
     public BsonDocument? PartialFilter { get; init; }
 

@@ -126,6 +126,21 @@ public sealed class IndexOptionTests(IntegrationEnvironment environment)
                 collation["caseFirst"].AsString.ShouldBe("upper");
             });
 
+    // The fields the server fills in depend on the locale, e.g. da puts upper case first and th ignores punctuation.
+    [Theory]
+    [InlineData("en")]
+    [InlineData("da")]
+    [InlineData("fr_CA")]
+    [InlineData("fr_CA@collation=search")]
+    [InlineData("th")]
+    [InlineData("hi")]
+    [InlineData("de@collation=phonebook")]
+    public Task Collation_with_only_a_locale(string locale) =>
+        RoundTripAsync(
+            i => i.Add(k => k.Ascending("name"), new() { Collation = new Collation(locale) }),
+            "name_1",
+            index => index["collation"]["locale"].AsString.ShouldBe(locale));
+
     [Fact]
     public Task Unique_with_a_case_insensitive_collation() =>
         RoundTripAsync(

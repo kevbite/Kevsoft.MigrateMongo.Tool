@@ -461,13 +461,17 @@ those differ. A declared index matches an existing one with the same identity wh
 databases are adopted as they are. Names are optional; a new index without one gets MongoDB's default name
 (`companyId_1_createdAt_-1`).
 
+MongoDB fills in every collation field an index isn't given, with defaults that depend on the locale (`da` puts upper
+case first, for example). Each declared collation is compared with the server's after the server has filled it in the
+same way (`explain` shows it without changing anything), so going back from `strength: 2` to the default is a change.
+
 Once matched, the other options are compared:
 
 | Change | What `up` does |
 |---|---|
 | Declared, not on the server | Creates it. |
 | TTL or `hidden` changed | `collMod`, in place. |
-| Made unique | `collMod` with `prepareUnique`, then `unique` (MongoDB 6.0+). Fails, leaving the index as it was, if there are duplicates. |
+| Made unique | `collMod` with `prepareUnique`, then `unique` (MongoDB 6.0+). Fails, leaving the index as it was, if there are duplicates; `prepareUnique` is turned off again, also when the run is cancelled part-way. |
 | Any other option changed | Drops the index and creates it again, under the same name. |
 | Same name, different keys | Drops it and creates the declared one. (Creating it would fail with `IndexKeySpecsConflict`.) |
 | Different keys, no name | The new index is created alongside, and the old one is pruned. |
@@ -475,7 +479,7 @@ Once matched, the other options are compared:
 
 Changes run in that order: new indexes first, removals last. Every operation is recorded like a migration's
 [tracked operations](#recording-results), including the full definition of anything dropped. If creating the
-replacement in a rebuild fails, the dropped index is restored.
+replacement in a rebuild fails or is cancelled (Ctrl+C, or the lock is lost), the dropped index is restored.
 
 ### Rebuilds
 
@@ -542,8 +546,8 @@ while later migrations are still pending.
 
 `--only migrations` and `--only collections` split the two, e.g. migrations at startup and collection definitions from
 a deploy step where long index builds don't matter. A definition that's invalid, or a change that isn't allowed, stops
-`up` before any migration runs, unless pending migrations could change the indexes first (then it's checked again
-after them).
+`up` before any migration runs, unless migrations run first in the same `up` and could change the indexes (then it's
+checked again after them). With `--only collections` no migration runs first, so `up` stops before changing anything.
 
 During a rolling deploy, an instance of the previous build can start after the new one has run. Each collection
 remembers the definition it replaced, and for `indexes.supersededWindow` (an hour by default) a run that would bring

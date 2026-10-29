@@ -39,12 +39,12 @@ public sealed partial class MigrationEngine
     }
 
     /// <summary>
-    /// Plans every collection definition without changing anything, adding an issue for each one that can't be applied. While
-    /// migrations are pending, a blocked change is only a warning: the migrations may change the indexes first.
+    /// Plans every collection definition without changing anything, adding an issue for each one that can't be applied. When
+    /// migrations run before the definitions, a blocked change is only a warning: the migrations may change the indexes first.
     /// </summary>
     private async Task<List<CollectionInfo>?> PreviewCollectionsAsync(
         CommandArguments arguments,
-        bool migrationsPending,
+        bool migrationsRunFirst,
         List<ValidationIssue> issues,
         CancellationToken cancellationToken)
     {
@@ -76,8 +76,8 @@ public sealed partial class MigrationEngine
 
             foreach (var problem in plan.Problems)
             {
-                var severity = plan.Invalid || !migrationsPending ? "error" : "warning";
-                var message = plan.Invalid || !migrationsPending ? problem : problem + " (The pending migrations may change this.)";
+                var severity = plan.Invalid || !migrationsRunFirst ? "error" : "warning";
+                var message = plan.Invalid || !migrationsRunFirst ? problem : problem + " (The pending migrations may change this.)";
                 issues.Add(Issue(severity, plan.Invalid ? "invalidCollection" : "collectionBlocked", collection.Name, message));
             }
         }

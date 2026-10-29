@@ -91,7 +91,7 @@ public sealed partial class MigrationEngine
         var status = BuildStatus(states);
         var pending = status.Count(s => s.State == MigrationStates.Pending);
         var issues = Analyse(states, status);
-        var collections = await PreviewCollectionsAsync(new CommandArguments(), migrationsPending: pending > 0, issues, cancellationToken);
+        var collections = await PreviewCollectionsAsync(new CommandArguments(), migrationsRunFirst: pending > 0, issues, cancellationToken);
         var changing = collections?.Count(c => c.State is CollectionStates.Changes or CollectionStates.Blocked) ?? 0;
         return new CommandResult
         {
@@ -204,7 +204,7 @@ public sealed partial class MigrationEngine
         List<CollectionInfo>? collections = null;
         if (arguments.Only != OnlyScopes.Migrations && CollectionsRunAfter(to, pendingCount, plan.Count, arguments, issues))
         {
-            collections = await PreviewCollectionsAsync(arguments, migrationsPending: pendingCount > 0, issues, cancellationToken);
+            collections = await PreviewCollectionsAsync(arguments, migrationsRunFirst: plan.Count > 0, issues, cancellationToken);
         }
 
         var holder = await ReportHeldLockAsync(issues, cancellationToken);
@@ -294,12 +294,12 @@ public sealed partial class MigrationEngine
             var pendingCount = PendingMigrations(states, null).Count;
             var runCollections = arguments.Only != OnlyScopes.Migrations && CollectionsRunAfter(to, pendingCount, pending.Count, arguments, issues);
 
-            // Stop before any migration runs if a collection definition is invalid, or (when no migration could change
-            // the indexes first) would make a change that isn't allowed.
+            // Stop before any migration runs if a collection definition is invalid, or (when no migration runs first that
+            // could change the indexes, e.g. with --only collections) would make a change that isn't allowed.
             if (runCollections)
             {
                 var precheckIssues = new List<ValidationIssue>();
-                var precheck = await PreviewCollectionsAsync(arguments, migrationsPending: pendingCount > 0, precheckIssues, ct);
+                var precheck = await PreviewCollectionsAsync(arguments, migrationsRunFirst: pending.Count > 0, precheckIssues, ct);
                 var errors = precheckIssues.Count(i => i.Severity == "error");
                 if (errors > 0)
                 {

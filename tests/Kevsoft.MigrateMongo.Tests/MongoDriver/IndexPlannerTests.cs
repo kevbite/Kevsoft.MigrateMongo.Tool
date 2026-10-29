@@ -264,15 +264,64 @@ public sealed class IndexPlannerTests
     [Fact]
     public void A_declared_collation_matches_the_servers_filled_in_one()
     {
+        var collation = new BsonDocument { { "locale", "en" }, { "strength", 2 } };
         var plan = Plan(
-            [Declared(new BsonDocument("name", 1), new BsonDocument("collation", new BsonDocument { { "locale", "en" }, { "strength", 2 } }))],
-            [IdIndex, Server("name_1", new BsonDocument("name", 1), new BsonDocument("collation", new BsonDocument
-            {
-                { "locale", "en" }, { "caseLevel", false }, { "caseFirst", "off" }, { "strength", 2 }, { "numericOrdering", false },
-                { "alternate", "non-ignorable" }, { "maxVariable", "punct" }, { "normalization", false }, { "backwards", false }, { "version", "57.1" },
-            }))]);
+            [Declared(new BsonDocument("name", 1), new BsonDocument("collation", collation))],
+            [IdIndex, Server("name_1", new BsonDocument("name", 1), new BsonDocument("collation", FilledCollation("en", ("strength", 2))))],
+            filledCollations: Filled((collation, FilledCollation("en", ("strength", 2)))));
 
         plan.Changes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Leaving_a_field_out_of_a_collation_rebuilds_the_index()
+    {
+        var collation = new BsonDocument("locale", "en");
+        var plan = Plan(
+            [Declared(new BsonDocument("name", 1), new BsonDocument("collation", collation))],
+            [IdIndex, Server("name_1", new BsonDocument("name", 1), new BsonDocument("collation", FilledCollation("en", ("strength", 2))))],
+            filledCollations: Filled((collation, FilledCollation("en"))));
+
+        var change = plan.Changes.ShouldHaveSingleItem();
+        change.Info.Action.ShouldBe("rebuild");
+        change.Info.Detail.ShouldBe("collation strength 2 → 3 (drop, then create)");
+    }
+
+    [Fact]
+    public void A_locales_own_defaults_are_not_a_difference()
+    {
+        var collation = new BsonDocument("locale", "da");
+        var plan = Plan(
+            [Declared(new BsonDocument("name", 1), new BsonDocument("collation", collation))],
+            [IdIndex, Server("name_1", new BsonDocument("name", 1), new BsonDocument("collation", FilledCollation("da", ("caseFirst", "upper"))))],
+            filledCollations: Filled((collation, FilledCollation("da", ("caseFirst", "upper")))));
+
+        plan.Changes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_collation_the_server_did_not_fill_in_is_compared_by_the_fields_it_sets()
+    {
+        var plan = Plan(
+            [Declared(new BsonDocument("name", 1), new BsonDocument("collation", new BsonDocument("locale", "en")))],
+            [IdIndex, Server("name_1", new BsonDocument("name", 1), new BsonDocument("collation", FilledCollation("en", ("strength", 2))))]);
+
+        plan.Changes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void The_filled_in_collation_is_found_in_an_explain_but_not_in_its_command()
+    {
+        var declared = new BsonDocument("locale", "th");
+        var filled = FilledCollation("th", ("alternate", "shifted"));
+        var explain = new BsonDocument
+        {
+            { "stages", new BsonArray { new BsonDocument("$cursor", new BsonDocument("queryPlanner", new BsonDocument("collation", filled))) } },
+            { "command", new BsonDocument { { "find", "things" }, { "collation", declared } } },
+        };
+
+        IndexPlanner.ExplainedCollation(explain, declared).ShouldBe(filled);
+        IndexPlanner.ExplainedCollation(new BsonDocument("command", new BsonDocument("collation", declared)), declared).ShouldBeNull();
     }
 
     [Fact]
@@ -332,8 +381,16 @@ public sealed class IndexPlannerTests
         plan.Changes.Select(c => c.Info.Action).ShouldBe(["create", "modify", "rebuild", "drop"]);
     }
 
-    private static IndexPlan Plan(IndexDeclaration[] declared, BsonDocument[] existing, CollectionPolicy? policy = null, bool canConvertToUnique = true) =>
-        IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = declared }, existing, policy ?? Policy(), canConvertToUnique);
+    private static IndexPlan Plan(
+        IndexDeclaration[] declared,
+        BsonDocument[] existing,
+        CollectionPolicy? policy = null,
+        bool canConvertToUnique = true,
+        Dictionary<string, BsonDocument>? filledCollations = null) =>
+        IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = declared }, existing, policy ?? Policy(), canConvertToUnique, filledCollations);
+
+    private static Dictionary<string, BsonDocument> Filled(params (BsonDocument Declared, BsonDocument Filled)[] collations) =>
+        collations.ToDictionary(c => IndexPlanner.CollationKey(c.Declared), c => c.Filled);
 
     private static CollectionPolicy Policy(
         string prune = "report",
@@ -359,6 +416,22 @@ public sealed class IndexPlannerTests
         var index = new BsonDocument { { "v", 2 }, { "key", keys }, { "name", name } };
         index.AddRange(options ?? []);
         return index;
+    }
+
+    /// <summary>A collation as the server lists it, with every field filled in.</summary>
+    private static BsonDocument FilledCollation(string locale, params (string Name, BsonValue Value)[] fields)
+    {
+        var collation = new BsonDocument
+        {
+            { "locale", locale }, { "caseLevel", false }, { "caseFirst", "off" }, { "strength", 3 }, { "numericOrdering", false },
+            { "alternate", "non-ignorable" }, { "maxVariable", "punct" }, { "normalization", false }, { "backwards", false }, { "version", "57.1" },
+        };
+        foreach (var (name, value) in fields)
+        {
+            collation[name] = value;
+        }
+
+        return collation;
     }
 
     private static List<string> Summary(IndexPlan plan) =>

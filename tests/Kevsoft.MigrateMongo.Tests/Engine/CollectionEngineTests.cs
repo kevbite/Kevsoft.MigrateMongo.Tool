@@ -134,6 +134,27 @@ public sealed class CollectionEngineTests
     }
 
     [Fact]
+    public async Task Only_collections_stops_on_a_blocked_change_before_changing_anything_though_migrations_are_pending()
+    {
+        _executor.CollectionPlans = (c, _) => c.Name == "orders"
+            ? Collections.Plan("sha256:orders", CreateStatus)
+            : new CollectionPlan { Declaration = "sha256:users", Problems = ["users: rebuild blocked."] };
+        var engine = Engine([Migrations.Create("20260101000001", "seed")], "orders", "users");
+        var only = new CommandArguments { Only = "collections" };
+
+        // The pending migration doesn't run first, so it can't change what's blocked.
+        var plan = await engine.ExecuteAsync("plan", only, CancellationToken.None);
+        plan.ExitCode.ShouldBe(ExitCodes.ValidationFailed);
+        plan.Issues!.Single(i => i.Kind == "collectionBlocked").Message.ShouldBe("users: rebuild blocked.");
+
+        var up = await engine.ExecuteAsync("up", only, CancellationToken.None);
+        up.ExitCode.ShouldBe(ExitCodes.ValidationFailed);
+        up.Message.ShouldBe("Stopped before changing anything: 1 problem(s) with collection definitions.");
+        _executor.Calls.ShouldBeEmpty();
+        _store.CollectionStates.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_blocked_change_found_after_the_migrations_fails_the_run()
     {
         _executor.CollectionPlans = (_, _) => new CollectionPlan { Declaration = "sha256:a", Problems = ["users: rebuild blocked."] };
