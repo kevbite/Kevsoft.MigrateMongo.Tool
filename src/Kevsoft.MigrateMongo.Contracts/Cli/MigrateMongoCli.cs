@@ -193,7 +193,7 @@ public static class MigrateMongoCli
             p => Common(p, "history", new CommandArguments { Id = p.GetValue(historyId), Limit = p.GetValue(limit) }));
 
         var showId = new Argument<string>("id") { Description = "Migration id, or a unique prefix of one (e.g. its timestamp)." };
-        var showHistory = new Option<int?>("--history") { Description = "Number of history entries to show (default 10)." };
+        var showHistory = new Option<int?>("--history") { Description = "Number of history entries to show (default 10, 0 for none)." };
         var noStatements = new Option<bool>("--no-statements") { Description = "Leave out the recorded filters, updates and commands." };
         var show = new Command("show", "Show one migration in detail: its state, results, notes, operations and history.") { showId, showHistory, noStatements };
         show.Validators.Add(r =>

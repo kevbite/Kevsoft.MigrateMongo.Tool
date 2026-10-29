@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Kevsoft.MigrateMongo.Engine;
 using Kevsoft.MigrateMongo.Protocol;
 using MongoDB.Bson;
@@ -116,6 +117,14 @@ public sealed class MongoMigrationStore : IMigrationStore
             Host = GetString(d, "host"),
             Output = MigrationOutputMapper.Read(d),
         }).ToList();
+    }
+
+    public async Task<IReadOnlyList<string>> GetHistoryIdsAsync(string prefix, CancellationToken cancellationToken)
+    {
+        // An anchored prefix match can use the migrationId index.
+        var filter = new BsonDocument("migrationId", new BsonRegularExpression("^" + Regex.Escape(prefix)));
+        using var cursor = await _history.DistinctAsync<string>("migrationId", filter, cancellationToken: cancellationToken);
+        return await cursor.ToListAsync(cancellationToken);
     }
 
     public async Task<bool> TryAcquireLockAsync(LockInfo lockInfo, DateTime now, CancellationToken cancellationToken)

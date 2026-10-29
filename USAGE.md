@@ -612,8 +612,9 @@ History
 ```
 
 Shows everything about one migration: its state, who applied it, its results, notes and operations, and its history.
-The id can be a unique prefix. `--history <n>` changes how many history entries are shown (default 10), and
-`--no-statements` leaves the operations' statements out. A rolled-back migration is still found through its history.
+The id can be a unique prefix. `--history <n>` changes how many history entries are shown (default 10, `0` for none),
+and `--no-statements` leaves the operations' statements out. A rolled-back migration is still found through its
+history, by its id or a unique prefix, even once its code has been deleted.
 
 ### `bundle` and `version`
 

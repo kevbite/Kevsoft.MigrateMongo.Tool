@@ -188,6 +188,38 @@ public sealed class MigrationOutputTests
     }
 
     [Fact]
+    public async Task Show_finds_a_rolled_back_migration_whose_code_has_gone_by_prefix()
+    {
+        var first = Engine([Migrations.Create("20260101000001", "first")], new FakeExecutor());
+        await first.UpAsync(null, CancellationToken.None);
+        await first.ExecuteAsync("down", new CommandArguments(), CancellationToken.None);
+        var engine = Engine([Migrations.Create("20260202000001", "second")], new FakeExecutor());
+
+        var show = (await engine.ExecuteAsync("show", new CommandArguments { Id = "202601" }, CancellationToken.None)).Show.ShouldNotBeNull();
+        var ambiguous = await engine.ExecuteAsync("show", new CommandArguments { Id = "2026" }, CancellationToken.None);
+
+        show.Migration.Id.ShouldBe("20260101000001");
+        show.Migration.Name.ShouldBe("first");
+        show.Migration.InCode.ShouldBeFalse();
+        show.History.Select(h => h.Event).ShouldBe([HistoryEvents.Applied, HistoryEvents.RolledBack]);
+        ambiguous.Message.ShouldBe("'2026' matches more than one migration: 20260101000001, 20260202000001.");
+    }
+
+    [Fact]
+    public async Task Show_with_a_history_of_0_leaves_the_history_out()
+    {
+        var first = Engine([Migrations.Create("20260101000001", "first")], new FakeExecutor());
+        await first.UpAsync(null, CancellationToken.None);
+        await first.ExecuteAsync("down", new CommandArguments(), CancellationToken.None);
+        var engine = Engine([], new FakeExecutor());
+
+        var show = (await engine.ExecuteAsync("show", new CommandArguments { Id = "20260101000001", Limit = 0 }, CancellationToken.None)).Show.ShouldNotBeNull();
+
+        show.Migration.Name.ShouldBe("first");
+        show.History.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Show_lists_the_last_10_history_entries_unless_asked_for_more()
     {
         var engine = Engine([Migrations.Create("20260101000001", "first")], new FakeExecutor());

@@ -47,6 +47,9 @@ internal sealed class FakeStore : IMigrationStore
     public Task<IReadOnlyList<HistoryRecord>> GetHistoryAsync(string? migrationId, int limit, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<HistoryRecord>>(History.Where(h => migrationId is null || h.MigrationId == migrationId).TakeLast(limit).ToList());
 
+    public Task<IReadOnlyList<string>> GetHistoryIdsAsync(string prefix, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<string>>(History.Select(h => h.MigrationId).Where(id => id.StartsWith(prefix, StringComparison.Ordinal)).Distinct().ToList());
+
     public Task<bool> TryAcquireLockAsync(LockInfo lockInfo, DateTime now, CancellationToken cancellationToken)
     {
         if (Lock is null || Lock.ExpiresAt < now)
