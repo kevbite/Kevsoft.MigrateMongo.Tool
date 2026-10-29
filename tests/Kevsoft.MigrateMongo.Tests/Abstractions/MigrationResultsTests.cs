@@ -45,6 +45,31 @@ public sealed class MigrationResultsTests
     }
 
     [Fact]
+    public void Guids_and_dates_in_lists_are_stored_like_single_values()
+    {
+        var results = new MigrationResults();
+        var id = Guid.Parse("0f8fad5b-d9cb-469f-a165-70867728950e");
+        var uuid = new BsonBinaryData(Convert.FromHexString("0f8fad5bd9cb469fa16570867728950e"), BsonBinarySubType.UuidStandard);
+
+        results.Set("ids", new List<Guid> { id });
+        results.Set("idArray", new[] { id });
+        results.Set("nested", new List<Guid[]> { new[] { id } });
+        results.Set("dates", new List<DateTime> { new(2026, 10, 1, 9, 0, 0, DateTimeKind.Unspecified) });
+        results.Set("byTier", new Dictionary<string, int> { ["gold"] = 1 });
+        results.Set("bytes", new byte[] { 1, 2 });
+
+        results.ToBsonDocument().ShouldBe(new BsonDocument
+        {
+            { "ids", new BsonArray { uuid } },
+            { "idArray", new BsonArray { uuid } },
+            { "nested", new BsonArray { new BsonArray { uuid } } },
+            { "dates", new BsonArray { new BsonDateTime(new DateTime(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc)) } },
+            { "byTier", new BsonDocument("gold", 1) },
+            { "bytes", new BsonBinaryData([1, 2]) },
+        });
+    }
+
+    [Fact]
     public void Objects_and_lists_are_serialised_like_documents_in_a_collection()
     {
         var results = new MigrationResults();

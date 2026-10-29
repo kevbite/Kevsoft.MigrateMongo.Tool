@@ -334,7 +334,9 @@ public sealed class TierCustomers : IMigration
   lists and any object the driver can serialize (records, anonymous types, ...). `Increment(key)` keeps a count, and
   `Remove(key)` takes a value away. Keys follow MongoDB field-name rules (no `.`, no leading `$`, up to 64
   characters). `Track(result, label)` adds an `UpdateResult`, `ReplaceOneResult`, `DeleteResult` or
-  `BulkWriteResult`'s counts to a value.
+  `BulkWriteResult`'s counts to a value. `Guid`s are stored as standard UUIDs (subtype 4), on their own or in lists
+  and arrays. Inside your own objects and dictionaries they go through the driver's serializer, which needs a
+  representation configured, e.g. `BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard))`.
 - **Notes.** `Note(message, level)` records a timestamped `Info` or `Warning`, which is also logged. The first 100 are
   kept, each up to 1,024 characters.
 

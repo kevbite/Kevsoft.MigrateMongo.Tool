@@ -187,7 +187,9 @@ public sealed partial class MigrationResults
 
     /// <summary>
     /// Stores an object (a record, class, anonymous type, list or dictionary) using the driver's serializer for it, so it
-    /// looks the same as it would in a collection (class maps, <c>[BsonElement]</c> and conventions apply).
+    /// looks the same as it would in a collection (class maps, <c>[BsonElement]</c> and conventions apply). Lists and
+    /// arrays are stored item by item, so the <see cref="Guid"/>s and <see cref="DateTime"/>s in them are stored like
+    /// <see cref="Set(string, Guid)"/> and <see cref="Set(string, DateTime)"/> store them.
     /// </summary>
     public void Set<T>(string key, T value) => Store(key, Serialize(value));
 
@@ -461,6 +463,14 @@ public sealed partial class MigrationResults
         }
 
         var serializer = loose ? BsonSerializer.LookupSerializer(value.GetType()) : BsonSerializer.LookupSerializer<T>();
+
+        // Lists and arrays are stored item by item, so Guids and dates in them are stored like single values. The driver's
+        // own Guid serializer throws unless a representation has been configured.
+        if (serializer is IBsonArraySerializer and not IBsonDictionarySerializer && value is IEnumerable sequence)
+        {
+            return new BsonArray(sequence.Cast<object?>().Select(Serialize));
+        }
+
         var wrapper = new BsonDocument();
         using (var writer = new BsonDocumentWriter(wrapper))
         {
