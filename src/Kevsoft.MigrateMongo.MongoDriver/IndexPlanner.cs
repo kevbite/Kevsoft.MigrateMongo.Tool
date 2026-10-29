@@ -70,8 +70,6 @@ internal static class IndexPlanner
             }
         }
 
-        var identityMatches = matched.Count;
-
         // 2. Same name (or the collection's one text index) but a different identity: it has to be rebuilt.
         var clashes = new Dictionary<IndexSpec, IndexSpec>();
         foreach (var index in unmatched.ToList())
@@ -172,11 +170,14 @@ internal static class IndexPlanner
             }
         }
 
-        // Guard against a whole collection's indexes being replaced, e.g. typed keys rendered without the app's class maps.
-        var considered = candidates.Count(c => !IsIgnored(c.Name));
-        if (considered > 0 && declared.Any(d => !IsIdIndex(d)) && identityMatches == 0 && !policy.AllowUnmatched)
+        // Guard against a whole collection's indexes being replaced because the declared keys name different fields, e.g.
+        // typed keys rendered without the app's class maps. Changing the keys of an index on the same fields doesn't trip it.
+        // (A text index matches whatever its fields, so this looks at fields rather than matches.)
+        var considered = candidates.Where(c => !IsIgnored(c.Name)).ToList();
+        var declaredFields = declared.Where(d => !IsIdIndex(d)).SelectMany(Fields).ToHashSet(StringComparer.Ordinal);
+        if (considered.Count > 0 && declaredFields.Count > 0 && !policy.AllowUnmatched && !declaredFields.Overlaps(considered.SelectMany(Fields)))
         {
-            plan.Problems.Add($"{name}: none of the {considered} existing index(es) match the declared ones, so every declared index would be new. " +
+            plan.Problems.Add($"{name}: none of the declared indexes use a field that the {considered.Count} existing index(es) use, so every declared index would be new. " +
                               "If the class maps or conventions that name the fields aren't registered in this process, typed keys render with different field names. " +
                               $"Check the plan, then run with --allow-unmatched {name}.");
         }
@@ -334,6 +335,11 @@ internal static class IndexPlanner
             .ToList();
         return parts.Count == 0 ? null : string.Join(", ", parts);
     }
+
+    /// <summary>The fields an index covers (a text index's come from its weights).</summary>
+    private static IEnumerable<string> Fields(IndexSpec index) =>
+        index.Keys.Names.Where(n => n is not ("_fts" or "_ftsx"))
+            .Concat(index.IsText && index.Attributes.GetValue("weights", null) is BsonDocument weights ? weights.Names : []);
 
     private static bool IsIdIndex(IndexSpec index) =>
         index.Key.ElementCount == 1 && index.Key.Contains("_id") && index.Key["_id"] is BsonInt64 { Value: 1 } &&

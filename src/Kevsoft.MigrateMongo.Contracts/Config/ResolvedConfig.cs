@@ -50,6 +50,12 @@ public sealed class ResolvedConfig
     public int IndexesDropHiddenAfterSeconds { get; set; } = 7 * 24 * 60 * 60;
 
     /// <summary>
+    /// Seconds after a collection definition is replaced during which a run bringing back the previous one is skipped as an
+    /// older build (<c>indexes.supersededWindow</c>; 0 turns it off).
+    /// </summary>
+    public int IndexesSupersededWindowSeconds { get; set; } = 60 * 60;
+
+    /// <summary>
     /// SSH tunnel to open before connecting. Never serialised: the tool opens the tunnel and only passes the rewritten
     /// <see cref="MongoUrl"/> to the runner, so SSH credentials never leave the tool process. A standalone runner or bundle
     /// opens it with its <see cref="IMongoTunnelProvider"/>.

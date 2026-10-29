@@ -145,6 +145,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             IndexesPrune = options.IndexPrune.ToString().ToLowerInvariant(),
             IndexesOnRebuild = options.IndexRebuild.ToString().ToLowerInvariant(),
             IndexesDropHiddenAfter = options.DropHiddenIndexesAfter,
+            IndexesSupersededWindow = options.SupersededDefinitionWindow,
             Provenance = new Provenance
             {
                 Host = System.Environment.MachineName,

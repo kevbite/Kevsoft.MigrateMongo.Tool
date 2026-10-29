@@ -311,6 +311,7 @@ public static class MigrateMongoRunner
         IndexesPrune = config.IndexesPrune,
         IndexesOnRebuild = config.IndexesOnRebuild,
         IndexesDropHiddenAfter = TimeSpan.FromSeconds(config.IndexesDropHiddenAfterSeconds),
+        IndexesSupersededWindow = TimeSpan.FromSeconds(config.IndexesSupersededWindowSeconds),
         Provenance = new Provenance
         {
             Host = Environment.MachineName,

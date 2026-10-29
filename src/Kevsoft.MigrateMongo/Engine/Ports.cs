@@ -105,8 +105,8 @@ public sealed class StoredCollectionState
     public string Declaration { get; set; } = "";
 
     /// <summary>
-    /// The declaration that one replaced. A run that brings it back (e.g. an instance of the previous build starting during a
-    /// rolling deploy) is skipped unless it's run with <c>--allow-superseded</c>.
+    /// The declaration that one replaced. A run that brings it back soon after (e.g. an instance of the previous build
+    /// starting during a rolling deploy) is skipped unless it's run with <c>--allow-superseded</c>.
     /// </summary>
     public string? PreviousDeclaration { get; set; }
 
@@ -320,6 +320,12 @@ public sealed class EngineOptions
 
     /// <summary>With <c>prune: hide</c>, how long an undeclared index stays hidden before it's dropped.</summary>
     public TimeSpan IndexesDropHiddenAfter { get; set; } = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// How long after a collection definition is replaced a run that brings back the previous one is skipped as an older
+    /// build (e.g. during a rolling deploy). <see cref="TimeSpan.Zero"/> turns the check off.
+    /// </summary>
+    public TimeSpan IndexesSupersededWindow { get; set; } = TimeSpan.FromHours(1);
 
     public Provenance Provenance { get; set; } = new();
 }

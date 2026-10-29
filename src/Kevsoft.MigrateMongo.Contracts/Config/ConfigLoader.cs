@@ -21,7 +21,7 @@ public static class ConfigLoader
 
     private static readonly HashSet<string> ResultsKeys = ["captureStatements", "maxBytes"];
 
-    private static readonly HashSet<string> IndexesKeys = ["prune", "onRebuild", "dropHiddenAfter"];
+    private static readonly HashSet<string> IndexesKeys = ["prune", "onRebuild", "dropHiddenAfter", "supersededWindow"];
 
     private static readonly HashSet<string> TunnelKeys =
     [
@@ -150,6 +150,7 @@ public static class ConfigLoader
                 config.IndexesPrune = OneOf(indexes, "prune", ["report", "hide", "drop"], getEnvironmentVariable) ?? config.IndexesPrune;
                 config.IndexesOnRebuild = OneOf(indexes, "onRebuild", ["allow", "fail"], getEnvironmentVariable) ?? config.IndexesOnRebuild;
                 config.IndexesDropHiddenAfterSeconds = OptionalInt(indexes, "dropHiddenAfter", getEnvironmentVariable) ?? config.IndexesDropHiddenAfterSeconds;
+                config.IndexesSupersededWindowSeconds = OptionalInt(indexes, "supersededWindow", getEnvironmentVariable) ?? config.IndexesSupersededWindowSeconds;
                 break;
             default:
                 throw new ConfigException("Config setting 'indexes' must be a mapping.");
@@ -245,6 +246,11 @@ public static class ConfigLoader
         if (config.IndexesDropHiddenAfterSeconds < 0)
         {
             throw new ConfigException("'indexes.dropHiddenAfter' must not be negative.");
+        }
+
+        if (config.IndexesSupersededWindowSeconds < 0)
+        {
+            throw new ConfigException("'indexes.supersededWindow' must not be negative.");
         }
     }
 

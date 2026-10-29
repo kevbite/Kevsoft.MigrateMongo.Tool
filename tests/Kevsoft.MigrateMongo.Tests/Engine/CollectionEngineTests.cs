@@ -163,17 +163,10 @@ public sealed class CollectionEngineTests
     }
 
     [Fact]
-    public async Task A_definition_that_a_newer_run_replaced_is_skipped()
+    public async Task A_definition_that_a_newer_run_replaced_moments_ago_is_skipped()
     {
-        _store.CollectionStates["users"] = new StoredCollectionState
-        {
-            Name = "users",
-            Declaration = "sha256:new",
-            PreviousDeclaration = "sha256:old",
-            RunId = "abcdef0123456789",
-            AppliedBy = new Provenance { Host = "deploy-1" },
-            ReconciledAt = new DateTime(2026, 10, 29, 10, 0, 0, DateTimeKind.Utc),
-        };
+        var replacedAt = DateTime.UtcNow.AddMinutes(-5);
+        _store.CollectionStates["users"] = Replaced(replacedAt);
         _executor.CollectionPlans = (_, _) => Collections.Plan("sha256:old", CreateStatus);
 
         var skipped = await Engine([], "users").UpAsync(null, CancellationToken.None);
@@ -181,7 +174,8 @@ public sealed class CollectionEngineTests
         skipped.ExitCode.ShouldBe(0);
         _executor.Calls.ShouldBeEmpty();
         _sink.Events.Single(e => e.Type == "collectionSkipped").Message.ShouldBe(
-            "users: this build's definition was replaced at 2026-10-29 10:00:00Z by run abcdef01 (deploy-1); skipping it. Run with --allow-superseded to apply it anyway.");
+            $"users: this build's definition was replaced at {replacedAt:u} by run abcdef01 (deploy-1); skipping it until {replacedAt.AddHours(1):u}. " +
+            "Run with --allow-superseded to apply it now.");
 
         var forced = await Engine([], "users").ExecuteAsync("up", new CommandArguments { AllowSuperseded = true }, CancellationToken.None);
 
@@ -189,6 +183,40 @@ public sealed class CollectionEngineTests
         _store.CollectionStates["users"].Declaration.ShouldBe("sha256:old");
         _store.CollectionStates["users"].PreviousDeclaration.ShouldBe("sha256:new");
     }
+
+    [Fact]
+    public async Task Going_back_to_a_previous_definition_after_the_window_is_a_deliberate_change()
+    {
+        _store.CollectionStates["users"] = Replaced(DateTime.UtcNow.AddHours(-2));
+        _executor.CollectionPlans = (_, _) => Collections.Plan("sha256:old", CreateStatus);
+
+        var result = await Engine([], "users").UpAsync(null, CancellationToken.None);
+
+        result.Reconciled.ShouldBe(["users"]);
+    }
+
+    [Fact]
+    public async Task The_superseded_check_can_be_turned_off()
+    {
+        _store.CollectionStates["users"] = Replaced(DateTime.UtcNow.AddMinutes(-5));
+        _executor.CollectionPlans = (_, _) => Collections.Plan("sha256:old", CreateStatus);
+        var engine = new MigrationEngine(_store, _executor, [], new EngineOptions { LockWaitTimeout = TimeSpan.Zero, IndexesSupersededWindow = TimeSpan.Zero }, _sink,
+            collections: [Collections.Create("users")]);
+
+        var result = await engine.UpAsync(null, CancellationToken.None);
+
+        result.Reconciled.ShouldBe(["users"]);
+    }
+
+    private static StoredCollectionState Replaced(DateTime at) => new()
+    {
+        Name = "users",
+        Declaration = "sha256:new",
+        PreviousDeclaration = "sha256:old",
+        RunId = "abcdef0123456789",
+        AppliedBy = new Provenance { Host = "deploy-1" },
+        ReconciledAt = at,
+    };
 
     [Fact]
     public async Task Allowances_and_hidden_indexes_are_passed_to_the_plan()

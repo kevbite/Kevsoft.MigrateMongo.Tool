@@ -216,13 +216,21 @@ public sealed class IndexPlannerTests
     }
 
     [Fact]
-    public void Nothing_changes_when_no_existing_index_matches_unless_that_is_allowed()
+    public void Nothing_changes_when_the_declared_indexes_share_no_field_with_the_existing_ones_unless_that_is_allowed()
     {
-        BsonDocument[] existing = [IdIndex, Server("CompanyId_1", new BsonDocument("CompanyId", 1))];
-        IndexDeclaration[] declared = [Declared(new BsonDocument("companyId", 1))];
+        BsonDocument[] existing = [IdIndex, Server("CompanyId_1", new BsonDocument("CompanyId", 1)), Server("Title_text", new BsonDocument { { "_fts", "text" }, { "_ftsx", 1 } }, new BsonDocument("weights", new BsonDocument("Title", 1)))];
+        IndexDeclaration[] declared = [Declared(new BsonDocument("companyId", 1)), Declared(new BsonDocument("title", "text"))];
 
-        Plan(declared, existing).Problems.ShouldHaveSingleItem().ShouldStartWith("users: none of the 1 existing index(es) match the declared ones");
+        Plan(declared, existing).Problems.ShouldHaveSingleItem().ShouldStartWith("users: none of the declared indexes use a field that the 2 existing index(es) use");
         Plan(declared, existing, Policy(allowUnmatched: true)).Problems.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Changing_the_keys_of_a_collections_only_index_isnt_mistaken_for_unregistered_class_maps()
+    {
+        var plan = Plan([Declared(new BsonDocument { { "companyId", 1 }, { "status", 1 } })], [IdIndex, Server("companyId_1", new BsonDocument("companyId", 1))]);
+
+        plan.Problems.ShouldBeEmpty();
     }
 
     [Fact]

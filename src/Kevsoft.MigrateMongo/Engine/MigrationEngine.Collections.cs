@@ -116,20 +116,22 @@ public sealed partial class MigrationEngine
     };
 
     /// <summary>
-    /// True when the code's declaration is the one a newer run replaced, e.g. an instance of the previous build starting
-    /// during a rolling deploy. Applying it would undo the newer one.
+    /// True when the code's declaration is the one a newer run replaced less than <see cref="EngineOptions.IndexesSupersededWindow"/>
+    /// ago, e.g. an instance of the previous build starting during a rolling deploy. Applying it would undo the newer one.
+    /// After the window, going back to it counts as a deliberate change.
     /// </summary>
-    private static bool IsSuperseded(CollectionPlan plan, StoredCollectionState? state, CommandArguments arguments) =>
+    private bool IsSuperseded(CollectionPlan plan, StoredCollectionState? state, CommandArguments arguments) =>
         !arguments.AllowSuperseded && !plan.Invalid && state is not null &&
-        plan.Declaration != state.Declaration && plan.Declaration == state.PreviousDeclaration;
+        plan.Declaration != state.Declaration && plan.Declaration == state.PreviousDeclaration &&
+        Now < state.ReconciledAt + _options.IndexesSupersededWindow;
 
-    private static string Superseded(CollectionDescriptor collection, StoredCollectionState state) =>
+    private string Superseded(CollectionDescriptor collection, StoredCollectionState state) =>
         $"{collection.Name}: this build's definition was replaced at {state.ReconciledAt:u} by run {ShortRun(state.RunId)} ({state.AppliedBy.Host}); " +
-        "skipping it. Run with --allow-superseded to apply it anyway.";
+        $"skipping it until {state.ReconciledAt + _options.IndexesSupersededWindow:u}. Run with --allow-superseded to apply it now.";
 
     private static string ShortRun(string runId) => runId.Length > 8 ? runId[..8] : runId;
 
-    private static CollectionInfo ToInfo(CollectionDescriptor collection, CollectionPlan plan, StoredCollectionState? state, CommandArguments arguments) => new()
+    private CollectionInfo ToInfo(CollectionDescriptor collection, CollectionPlan plan, StoredCollectionState? state, CommandArguments arguments) => new()
     {
         Name = collection.Name,
         Source = collection.Source,

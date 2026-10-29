@@ -164,6 +164,7 @@ indexes:
   prune: report
   onRebuild: allow
   dropHiddenAfter: 604800
+  supersededWindow: 3600
 environments:
   staging:
     mongodb:
@@ -196,6 +197,7 @@ environments:
 | `indexes.prune` | `report` | What happens to an index a [collection definition](#managing-collections) doesn't declare: `report`, `hide` or `drop`. |
 | `indexes.onRebuild` | `allow` | `fail` refuses to drop and re-create an index (the collection is without it while it builds). |
 | `indexes.dropHiddenAfter` | `604800` | With `prune: hide`, seconds an undeclared index stays hidden before it's dropped (7 days). |
+| `indexes.supersededWindow` | `3600` | Seconds after a collection definition is replaced during which a run bringing back the previous one is skipped as an older build. `0` turns this off. |
 | `tunnel` | | See [Tunnelling through a bastion](#tunnelling-through-a-bastion). |
 | `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings. |
 
@@ -523,9 +525,9 @@ MyAppMongoConfiguration.Register();
 return await MigrateMongoRunner.RunAsync(args);
 ```
 
-If they aren't registered, the field names render differently and every index looks new. As a guard, a collection whose
-existing indexes match none of the declared ones is blocked until you check the plan and run with
-`--allow-unmatched collection`.
+If they aren't registered, the field names render differently and every index looks new. As a guard, a collection where
+none of the declared indexes use a field that any existing index uses is blocked until you check the plan and run with
+`--allow-unmatched collection`. (Changing the keys of an index on the same fields doesn't trip it.)
 
 A typed definition follows the model: renaming a property that changes the stored field name changes the index too.
 That's usually a data change as well (existing documents still have the old field), so pair it with a migration that
@@ -544,8 +546,9 @@ a deploy step where long index builds don't matter. A definition that's invalid,
 after them).
 
 During a rolling deploy, an instance of the previous build can start after the new one has run. Each collection
-remembers the definition it replaced, and a run that would bring that one back is skipped with a warning instead of
-undoing the newer one. `--allow-superseded` applies it anyway, e.g. when rolling back on purpose.
+remembers the definition it replaced, and for `indexes.supersededWindow` (an hour by default) a run that would bring
+that one back is skipped with a warning instead of undoing the newer one. After that, going back to it is treated as a
+deliberate change. `--allow-superseded` applies it straight away, e.g. when rolling back on purpose.
 
 Atlas Search indexes, validators and other collection options aren't managed yet, and a definition covers a collection
 in the configured database only.
@@ -644,8 +647,8 @@ without their statements (also on `down`).
 | `--only migrations` | Apply migrations only. |
 | `--only collections` | Apply collection definitions only (warns if migrations are pending). |
 | `--allow-rebuild <collection.index>` | Let this index be rebuilt even with `onRebuild: fail`. Repeat for more. |
-| `--allow-unmatched <collection>` | Change this collection although none of its existing indexes match the declared ones. |
-| `--allow-superseded` | Apply definitions a newer run has replaced. |
+| `--allow-unmatched <collection>` | Change this collection although none of the declared indexes use a field its existing indexes use. |
+| `--allow-superseded` | Apply definitions a newer run replaced less than `supersededWindow` ago. |
 
 ### `down`
 
@@ -1123,7 +1126,7 @@ The defaults match the config file's.
 | `Transaction`, `TransactionRetryTimeout` | `transaction`, `transactionRetryTimeout` |
 | `AllowOutOfOrder` | `allowOutOfOrder` |
 | `CaptureStatements`, `ResultsMaxBytes` | `results.captureStatements`, `results.maxBytes` |
-| `IndexPrune`, `IndexRebuild`, `DropHiddenIndexesAfter` | `indexes.prune`, `indexes.onRebuild`, `indexes.dropHiddenAfter` |
+| `IndexPrune`, `IndexRebuild`, `DropHiddenIndexesAfter`, `SupersededDefinitionWindow` | `indexes.prune`, `indexes.onRebuild`, `indexes.dropHiddenAfter`, `indexes.supersededWindow` |
 | `Environment` | Recorded with each run. |
 | `Tunnel`, `TunnelProvider` | `tunnel` (needs `Kevsoft.MigrateMongo.Tunnel`) |
 
@@ -1136,7 +1139,7 @@ The defaults match the config file's.
   rebuild: `RunOnStartup()` throws a `MongoMigrationException`, and every instance fails to start until the definition
   or the option changes.
 - **Older builds don't undo newer definitions.** During a rolling deploy, an instance still on the previous build skips
-  any definition a newer build has replaced, and logs a warning.
+  any definition a newer build replaced within `SupersededDefinitionWindow`, and logs a warning.
 
 To avoid the first two, apply migrations at startup and collection definitions from your deploy step:
 

@@ -64,6 +64,12 @@ public sealed class MongoMigrationOptions
     public TimeSpan DropHiddenIndexesAfter { get; set; } = TimeSpan.FromDays(7);
 
     /// <summary>
+    /// How long after a collection definition is replaced an instance bringing back the previous one skips it as an older
+    /// build (<c>indexes.supersededWindow</c>). <see cref="TimeSpan.Zero"/> turns the check off.
+    /// </summary>
+    public TimeSpan SupersededDefinitionWindow { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// An SSH tunnel to connect through, like the <c>tunnel</c> config section. Needs <see cref="ConnectionString"/> and a
     /// <see cref="TunnelProvider"/>. The tunnel is open only while migrations run.
     /// </summary>
@@ -118,6 +124,11 @@ public sealed class MongoMigrationOptions
         if (DropHiddenIndexesAfter < TimeSpan.Zero)
         {
             errors.Add($"{nameof(DropHiddenIndexesAfter)} can't be negative.");
+        }
+
+        if (SupersededDefinitionWindow < TimeSpan.Zero)
+        {
+            errors.Add($"{nameof(SupersededDefinitionWindow)} can't be negative.");
         }
 
         if (errors.Count > 0)

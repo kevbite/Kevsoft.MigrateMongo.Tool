@@ -245,31 +245,44 @@ public sealed class ConfigLoaderTests
     }
 
     [Fact]
-    public void Index_settings_default_to_report_allow_and_7_days_and_can_be_changed_per_environment()
+    public void Index_settings_default_to_report_allow_7_days_and_1_hour_and_can_be_changed_per_environment()
     {
         var yaml = Yaml + """
 
             indexes:
               prune: hide
               dropHiddenAfter: 86400
+              supersededWindow: 600
             """;
         yaml = yaml.Replace("lockWaitTimeout: 5", "lockWaitTimeout: 5\n    indexes:\n      onRebuild: fail", StringComparison.Ordinal);
 
         var defaults = ConfigLoader.Load(Yaml, null, Env);
-        (defaults.IndexesPrune, defaults.IndexesOnRebuild, defaults.IndexesDropHiddenAfterSeconds).ShouldBe(("report", "allow", 604800));
+        (defaults.IndexesPrune, defaults.IndexesOnRebuild, defaults.IndexesDropHiddenAfterSeconds, defaults.IndexesSupersededWindowSeconds)
+            .ShouldBe(("report", "allow", 604800, 3600));
 
         var local = ConfigLoader.Load(yaml, null, Env);
-        (local.IndexesPrune, local.IndexesOnRebuild, local.IndexesDropHiddenAfterSeconds).ShouldBe(("hide", "allow", 86400));
+        (local.IndexesPrune, local.IndexesOnRebuild, local.IndexesDropHiddenAfterSeconds, local.IndexesSupersededWindowSeconds).ShouldBe(("hide", "allow", 86400, 600));
 
         var prod = ConfigLoader.Load(yaml, "prod", Env);
-        (prod.IndexesPrune, prod.IndexesOnRebuild, prod.IndexesDropHiddenAfterSeconds).ShouldBe(("hide", "fail", 86400));
+        (prod.IndexesPrune, prod.IndexesOnRebuild, prod.IndexesDropHiddenAfterSeconds, prod.IndexesSupersededWindowSeconds).ShouldBe(("hide", "fail", 86400, 600));
     }
 
-    [Fact]
-    public void Drop_hidden_after_must_not_be_negative()
+    [Theory]
+    [InlineData("dropHiddenAfter")]
+    [InlineData("supersededWindow")]
+    public void Index_durations_must_not_be_negative(string setting)
     {
-        Should.Throw<ConfigException>(() => ConfigLoader.EnsureConnectable(new ResolvedConfig { MongoUrl = "mongodb://x", DatabaseName = "db", IndexesDropHiddenAfterSeconds = -1 }))
-            .Message.ShouldBe("'indexes.dropHiddenAfter' must not be negative.");
+        var config = new ResolvedConfig { MongoUrl = "mongodb://x", DatabaseName = "db" };
+        if (setting == "dropHiddenAfter")
+        {
+            config.IndexesDropHiddenAfterSeconds = -1;
+        }
+        else
+        {
+            config.IndexesSupersededWindowSeconds = -1;
+        }
+
+        Should.Throw<ConfigException>(() => ConfigLoader.EnsureConnectable(config)).Message.ShouldBe($"'indexes.{setting}' must not be negative.");
     }
 
     [Fact]
