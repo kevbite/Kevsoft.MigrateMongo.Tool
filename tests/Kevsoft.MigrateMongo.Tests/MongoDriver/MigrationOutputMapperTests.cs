@@ -128,7 +128,7 @@ public sealed class MigrationOutputMapperTests
 
         var output = MigrationOutputMapper.Read(document).ShouldNotBeNull();
 
-        output.Committed.ShouldBeTrue();
+        output.Committed.ShouldBe(true);
         output.Results!.Value.GetRawText().ShouldBe("""{ "skipped" : { "$numberInt" : "2" } }""");
         output.NotesTruncated.ShouldBe(2);
         output.Notes.ShouldBeNull();
@@ -141,6 +141,17 @@ public sealed class MigrationOutputMapperTests
         operation.Error.ShouldBe("MongoWriteException: boom");
         operation.DurationMs.ShouldBe(9);
         operation.At.ShouldBe(At);
+    }
+
+    [Fact]
+    public void An_unknown_commit_outcome_is_stored_as_null()
+    {
+        var document = new BsonDocument("_id", "20261022120000");
+
+        MigrationOutputMapper.Write(document, new MigrationOutputInfo { Results = Json("""{ "n": 1 }"""), Committed = null });
+
+        document["resultsCommitted"].ShouldBe(BsonNull.Value);
+        MigrationOutputMapper.Read(document).ShouldNotBeNull().Committed.ShouldBeNull();
     }
 
     [Fact]

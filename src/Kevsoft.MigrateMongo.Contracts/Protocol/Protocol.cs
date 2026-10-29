@@ -254,10 +254,11 @@ public sealed class MigrationOutputInfo
     public int? OperationsTruncated { get; set; }
 
     /// <summary>
-    /// Whether the migration's changes were persisted: always true on success; on failure true only when the migration
-    /// wasn't transactional (a failed transaction is rolled back).
+    /// Whether the migration's changes were persisted: true on success and when a migration without a transaction fails,
+    /// false when its transaction was rolled back, and null when the commit's outcome is unknown (it failed with
+    /// <c>UnknownTransactionCommitResult</c> until the retries ran out, so it may have been applied).
     /// </summary>
-    public bool Committed { get; set; }
+    public bool? Committed { get; set; }
 }
 
 public sealed class ResultNoteInfo

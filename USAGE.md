@@ -374,7 +374,10 @@ that records more fails with `MM-RESULTS-TOO-LARGE`, listing the largest keys. P
 The first 200 operations are kept, and a statement over 4 KB is left out (`statementTruncated: true`).
 
 Results are kept when a migration fails. If its transaction was aborted, they're marked as not committed
-(`resultsCommitted: false`): they show what the migration got up to, but none of it was saved. On a transaction
+(`resultsCommitted: false`): they show what the migration got up to, but none of it was saved. If the commit itself
+kept failing with `UnknownTransactionCommitResult` until `transactionRetryTimeout`, nobody can tell whether it was
+applied, so they're marked `resultsCommitted: null` and the run says "commit outcome unknown": check the data (and the
+migration's state) before running it again. On a transaction
 retry, only the last attempt's results are kept. `DownAsync` can record results too; they're stored on the
 `rolledBack` history entry.
 

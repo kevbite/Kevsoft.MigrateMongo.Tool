@@ -770,7 +770,7 @@ public sealed class MigrationEngine
         catch (Exception e)
         {
             var error = Describe(e);
-            output = Committed((e as MigrationExecutionException)?.Output ?? output, !transactional);
+            output = Committed((e as MigrationExecutionException)?.Output ?? output, CommittedAfterFailure(e, transactional));
             if (!transactional)
             {
                 var failed = NewState(migration, MigrationStates.Failed, batch, false);
@@ -830,7 +830,7 @@ public sealed class MigrationEngine
         catch (Exception e)
         {
             var error = Describe(e);
-            output = Committed((e as MigrationExecutionException)?.Output ?? output, !transactional);
+            output = Committed((e as MigrationExecutionException)?.Output ?? output, CommittedAfterFailure(e, transactional));
             if (!transactional)
             {
                 state.State = MigrationStates.Failed;
@@ -849,7 +849,7 @@ public sealed class MigrationEngine
         return null;
     }
 
-    private static MigrationOutputInfo? Committed(MigrationOutputInfo? output, bool committed)
+    private static MigrationOutputInfo? Committed(MigrationOutputInfo? output, bool? committed)
     {
         if (output is not null)
         {
@@ -858,6 +858,16 @@ public sealed class MigrationEngine
 
         return output;
     }
+
+    /// <summary>
+    /// Whether a failed migration's changes were persisted: always without a transaction, never when the transaction was
+    /// rolled back, and unknown (null) when its commit failed with <c>UnknownTransactionCommitResult</c> and wasn't
+    /// retried successfully, since that commit may have been applied.
+    /// </summary>
+    private bool? CommittedAfterFailure(Exception exception, bool transactional) =>
+        !transactional ? true
+        : _executor.ClassifyTransactionError(exception) == TransactionErrorKind.UnknownCommitResult ? null
+        : false;
 
     private OutputOptions OutputOptionsFor(CommandArguments? arguments) =>
         new(_options.CaptureStatements && arguments?.NoCaptureStatements != true, _options.ResultsMaxBytes);

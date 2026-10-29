@@ -167,9 +167,9 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
             WriteLine(Paint($"    {operations} operation(s) recorded{(failedOperations > 0 ? $", {failedOperations} failed" : "")} – migrate-mongo show {id}", Dim));
         }
 
-        if (failed && !output.Committed)
+        if (failed && CommitNotice(output.Committed) is { } notice)
         {
-            WriteLine(Paint("    (transaction aborted – changes not persisted)", Yellow));
+            WriteLine(Paint($"    {notice}", Yellow));
         }
     }
 
@@ -239,7 +239,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         if (output?.Results is { ValueKind: JsonValueKind.Object } results && results.EnumerateObject().Any())
         {
             WriteLine("");
-            WriteLine("Results" + (output.Committed ? "" : Paint("  (transaction aborted – changes not persisted)", Yellow)));
+            WriteLine("Results" + (CommitNotice(output.Committed) is { } notice ? Paint($"  {notice}", Yellow) : ""));
             var properties = results.EnumerateObject().ToList();
             var width = properties.Max(p => p.Name.Length);
             foreach (var property in properties)
@@ -305,6 +305,13 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
             WriteHistoryTable(show.History);
         }
     }
+
+    private static string? CommitNotice(bool? committed) => committed switch
+    {
+        false => "(transaction aborted – changes not persisted)",
+        null => "(commit outcome unknown – check whether the changes were persisted)",
+        true => null,
+    };
 
     private static string Join(params string?[] parts) => string.Join(", ", parts.Where(p => !string.IsNullOrEmpty(p)));
 

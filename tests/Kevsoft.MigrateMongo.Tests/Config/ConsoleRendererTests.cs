@@ -115,6 +115,26 @@ public sealed class ConsoleRendererTests
     }
 
     [Fact]
+    public void Failed_commits_with_an_unknown_outcome_say_so()
+    {
+        var text = Render(r => r.Render(new RunnerEvent
+        {
+            Type = EventTypes.MigrationFailed,
+            MigrationId = "20261022120000",
+            Name = "tier-customers",
+            Error = "MongoException: commit failed",
+            Output = new MigrationOutputInfo { Results = Json("""{"processed":4200}"""), Committed = null },
+        }));
+
+        text.ShouldBe("""
+            ✖ 20261022120000 tier-customers: MongoException: commit failed
+                processed  4200
+                (commit outcome unknown – check whether the changes were persisted)
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void Status_gets_a_results_column_only_when_a_migration_has_results()
     {
         var migrations = new List<MigrationStatusInfo>

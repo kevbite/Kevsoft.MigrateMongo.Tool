@@ -106,7 +106,7 @@ internal static class MigrationOutputMapper
             document.Add("notesTruncated", notesTruncated);
         }
 
-        document.Add("resultsCommitted", output.Committed);
+        document.Add("resultsCommitted", output.Committed is { } committed ? committed : BsonNull.Value);
 
         if (output.Operations is { Count: > 0 } operations)
         {
@@ -122,14 +122,15 @@ internal static class MigrationOutputMapper
     /// <summary>Reads what <see cref="Write"/> added, or null when there's nothing.</summary>
     public static MigrationOutputInfo? Read(BsonDocument document)
     {
-        if (!document.TryGetValue("resultsCommitted", out var committed) || !committed.IsBoolean)
+        // resultsCommitted is always written with the output: null means the commit's outcome is unknown.
+        if (!document.TryGetValue("resultsCommitted", out var committed) || !(committed.IsBoolean || committed.IsBsonNull))
         {
             return null;
         }
 
         return new MigrationOutputInfo
         {
-            Committed = committed.AsBoolean,
+            Committed = committed.IsBoolean ? committed.AsBoolean : null,
             Results = document.TryGetValue("results", out var results) && results.IsBsonDocument ? ToJson(results.AsBsonDocument) : null,
             Notes = document.TryGetValue("notes", out var notes) && notes.IsBsonArray
                 ? notes.AsBsonArray.OfType<BsonDocument>().Select(n => new ResultNoteInfo
