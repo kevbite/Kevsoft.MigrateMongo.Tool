@@ -351,8 +351,23 @@ An operation that throws is recorded too, with its `error`, before the exception
 `insertMany` that fails part-way records the counts of what it applied before the error (with `IsOrdered = false`,
 everything that didn't fail); other failed operations record no counts.
 
-Statements can hold data from your filters. Turn them off with `results.captureStatements: false`,
-`--no-capture-statements` for one run, or `context.Track(collection, captureStatement: false)` for one collection.
+> [!WARNING]
+> **Statements are stored as they were sent.** Tracked filters, updates and commands are written to the migrations
+> collections and printed by `show` and `--json`, so anyone who can read those collections or your CI logs can see
+> them, including any secrets or personal data in them. A tracked `createUser` or `updateUser` command records its
+> password (`pwd`), and a filter on an email address records the address.
+
+For operations like these, either don't track them (run them on `context.Database`, or a tracked collection's
+`Collection`), or pass `captureStatement: false` so only the kind, counts and timings are recorded:
+
+```csharp
+await context.Track(context.Database, captureStatement: false).RunCommandAsync(
+    new BsonDocument { { "createUser", "reporting" }, { "pwd", password }, { "roles", new BsonArray { "read" } } },
+    cancellationToken: cancellationToken);
+```
+
+To leave statements out everywhere, set `results.captureStatements: false`, or pass `--no-capture-statements` for one
+run.
 
 Limits keep the state documents small: the named values can take up to `results.maxBytes` (64 KB), and a migration
 that records more fails with `MM-RESULTS-TOO-LARGE`, listing the largest keys. Put large data in your own collection.
