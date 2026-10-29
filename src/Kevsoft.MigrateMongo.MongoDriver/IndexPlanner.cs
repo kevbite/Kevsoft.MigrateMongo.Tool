@@ -154,8 +154,8 @@ internal static class IndexPlanner
             if (newName != rebuild.DropName && candidates.FirstOrDefault(c => c.Name == newName) is { } taken)
             {
                 var what = claimed.Contains(taken) ? "another declared index" : IsIgnored(taken.Name) ? "ignored" : "not declared";
+                rebuild.Info.Reason = rebuild.Info.Blocked == true ? $"{rebuild.Info.Reason}; {newName} is taken" : $"{newName} is taken";
                 rebuild.Info.Blocked = true;
-                rebuild.Info.Reason = $"{newName} is taken";
                 plan.Problems.Add($"{name}: {rebuild.DropName} is rebuilt as {newName}, but the server already has an index called {newName} ({what}). " +
                                   $"Give the declared index a different name, or drop the server's {newName} first.");
             }

@@ -238,6 +238,19 @@ public sealed class IndexPlannerTests
     }
 
     [Fact]
+    public void A_rebuild_blocked_for_two_reasons_shows_both()
+    {
+        var plan = Plan(
+            [Declared(new BsonDocument("email", 1), new BsonDocument { { "name", "email_lookup" }, { "sparse", true } })],
+            [IdIndex, Server("by_email", new BsonDocument("email", 1)), Server("email_lookup", new BsonDocument { { "email", 1 }, { "x", 1 } })],
+            Policy(prune: "drop", onRebuild: "fail"));
+
+        var rebuild = plan.Changes.Single(c => c.Info.Action == "rebuild");
+        (rebuild.Info.Blocked, rebuild.Info.Reason).ShouldBe((true, "indexes.onRebuild is fail; email_lookup is taken"));
+        plan.Problems.Count.ShouldBe(2);
+    }
+
+    [Fact]
     public void Ignored_indexes_are_left_alone()
     {
         var declaration = new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("status", 1))], Ignored = ["adhoc_*"] };
