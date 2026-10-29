@@ -69,6 +69,26 @@ public sealed class TrackedCollectionTests
     }
 
     [Fact]
+    public async Task Dropping_indexes_in_a_transaction_fails_before_reaching_the_server()
+    {
+        var results = new MigrationResults();
+        var session = DriverFake.Of<IClientSessionHandle>(method => method.Name == "get_IsInTransaction" ? true : throw new NotSupportedException(method.Name));
+        var context = new MigrationContext(null!, session, NullLogger.Instance, null!, new MigrationRunInfo("run-1", 1, MigrationDirection.Up, true, null), results);
+        var orders = context.Track(DriverFake.Of<IMongoCollection<BsonDocument>>(method => method.Name == "get_CollectionNamespace"
+            ? new CollectionNamespace("shop", "orders")
+            : throw new NotSupportedException(method.Name)));
+
+        var byName = await Should.ThrowAsync<InvalidOperationException>(() => orders.DropIndexAsync("status_1"));
+        await Should.ThrowAsync<InvalidOperationException>(() => orders.DropIndexAsync(Builders<BsonDocument>.IndexKeys.Ascending("status")));
+        await Should.ThrowAsync<InvalidOperationException>(() => orders.DropAllIndexesAsync());
+
+        byName.Message.ShouldBe(
+            "Indexes on 'orders' can't be dropped in a transaction: MongoDB doesn't allow dropIndexes in a multi-document " +
+            "transaction. Run the migration without one: [Migration(..., Transaction = TransactionMode.Never)].");
+        results.Operations.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Failed_commands_are_recorded_with_their_error_and_rethrown()
     {
         var results = new MigrationResults();

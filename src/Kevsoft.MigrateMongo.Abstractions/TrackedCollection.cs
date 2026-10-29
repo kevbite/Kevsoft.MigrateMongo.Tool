@@ -182,22 +182,26 @@ public sealed class TrackedCollection<T>
     /// <summary>
     /// Drops an index by name, first recording its full definition (keys and options) so the history shows exactly what
     /// was removed. With <paramref name="ignoreMissing"/>, a missing index or collection records <c>dropped: 0</c>
-    /// instead of throwing.
+    /// instead of throwing. MongoDB doesn't allow this in a transaction, so the migration needs
+    /// <see cref="TransactionMode.Never"/>.
     /// </summary>
     public async Task DropIndexAsync(string name, bool ignoreMissing = false, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
+        ThrowIfInTransaction();
         var index = (await ListIndexesAsync(cancellationToken)).FirstOrDefault(i => i.GetValue("name", "").ToString() == name);
         await DropAsync(name, index ?? new BsonDocument("name", name), ignoreMissing, cancellationToken);
     }
 
     /// <summary>
     /// Drops the index with these keys, first recording its full definition. With <paramref name="ignoreMissing"/>, a
-    /// missing index or collection records <c>dropped: 0</c> instead of throwing.
+    /// missing index or collection records <c>dropped: 0</c> instead of throwing. MongoDB doesn't allow this in a
+    /// transaction, so the migration needs <see cref="TransactionMode.Never"/>.
     /// </summary>
     public async Task DropIndexAsync(IndexKeysDefinition<T> keys, bool ignoreMissing = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        ThrowIfInTransaction();
         var rendered = Render(keys) ?? throw new ArgumentException("The index keys couldn't be rendered.", nameof(keys));
         var index = (await ListIndexesAsync(cancellationToken)).FirstOrDefault(i => i.TryGetValue("key", out var key) && key.Equals(rendered));
         if (index is not null)
@@ -228,9 +232,13 @@ public sealed class TrackedCollection<T>
             dropped => new Dictionary<string, long> { ["dropped"] = dropped });
     }
 
-    /// <summary>Drops every index except <c>_id_</c>, first recording each one's full definition.</summary>
+    /// <summary>
+    /// Drops every index except <c>_id_</c>, first recording each one's full definition. MongoDB doesn't allow this in a
+    /// transaction, so the migration needs <see cref="TransactionMode.Never"/>.
+    /// </summary>
     public async Task DropAllIndexesAsync(CancellationToken cancellationToken = default)
     {
+        ThrowIfInTransaction();
         var indexes = (await ListIndexesAsync(cancellationToken)).Where(i => i.GetValue("name", "").ToString() != "_id_").ToList();
         await RunAsync(
             "dropIndexes",
@@ -268,7 +276,21 @@ public sealed class TrackedCollection<T>
     /// <summary>IndexNotFound (27) or NamespaceNotFound (26).</summary>
     private static bool IsMissing(MongoCommandException e) => e.Code is 26 or 27;
 
-    /// <summary>Lists the indexes without the session: <c>listIndexes</c> isn't allowed in a multi-document transaction.</summary>
+    /// <summary>
+    /// <c>dropIndexes</c> is never allowed in a multi-document transaction, so fail with a clear message rather than the
+    /// server's <c>OperationNotSupportedInTransaction</c>.
+    /// </summary>
+    private void ThrowIfInTransaction()
+    {
+        if (_session is { IsInTransaction: true })
+        {
+            throw new InvalidOperationException(
+                $"Indexes on '{Name}' can't be dropped in a transaction: MongoDB doesn't allow dropIndexes in a multi-document " +
+                "transaction. Run the migration without one: [Migration(..., Transaction = TransactionMode.Never)].");
+        }
+    }
+
+    /// <summary>Lists the indexes, or none when the collection doesn't exist.</summary>
     private async Task<List<BsonDocument>> ListIndexesAsync(CancellationToken cancellationToken)
     {
         try

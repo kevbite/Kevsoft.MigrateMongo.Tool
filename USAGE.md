@@ -280,7 +280,8 @@ public sealed class SplitFullName : IMigration
 Set `Transaction` on `[Migration]` to override the config:
 
 - `TransactionMode.Never` is for operations that can't run in a transaction, such as building indexes on existing
-  collections.
+  collections or dropping indexes. A tracked `DropIndexAsync` or `DropAllIndexesAsync` in a transaction fails straight
+  away and says so.
 - `TransactionMode.Always` fails the migration if transactions aren't available.
 
 On a `TransientTransactionError` (e.g. a write conflict or a primary election), the transaction is aborted and the
