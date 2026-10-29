@@ -6,6 +6,7 @@ Everything you can do with Kevsoft.MigrateMongo. For a quick introduction, see t
 - [Setting up a project](#setting-up-a-project)
 - [Configuration](#configuration)
 - [Writing migrations](#writing-migrations)
+- [Managing collections](#managing-collections)
 - [Commands](#commands)
 - [Exit codes](#exit-codes)
 - [What gets stored](#what-gets-stored)
@@ -159,6 +160,10 @@ migrationTemplate: templates/migration.cs.template
 results:
   captureStatements: true
   maxBytes: 65536
+indexes:
+  prune: report
+  onRebuild: allow
+  dropHiddenAfter: 604800
 environments:
   staging:
     mongodb:
@@ -188,6 +193,9 @@ environments:
 | `migrationTemplate` | | A file `create` uses instead of the built-in template. See [custom templates](#custom-templates). |
 | `results.captureStatements` | `true` | Record each [tracked operation](#recording-results)'s filter, update or index keys. `false` keeps only the kind, counts and timings. |
 | `results.maxBytes` | `65536` | The most a migration's named results can take up. A migration that records more fails. |
+| `indexes.prune` | `report` | What happens to an index a [collection definition](#managing-collections) doesn't declare: `report`, `hide` or `drop`. |
+| `indexes.onRebuild` | `allow` | `fail` refuses to drop and re-create an index (the collection is without it while it builds). |
+| `indexes.dropHiddenAfter` | `604800` | With `prune: hide`, seconds an undeclared index stays hidden before it's dropped (7 days). |
 | `tunnel` | | See [Tunnelling through a bastion](#tunnelling-through-a-bastion). |
 | `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings. |
 
@@ -413,6 +421,134 @@ The source generator finds migrations at compile time and reports mistakes as bu
 | `MM0003` | A `[Migration]` class doesn't implement `IMigration`. |
 | `MM0004` | The migration class can't be constructed (abstract, private, or no accessible constructor). |
 | `MM0005` | The migration name is empty. |
+| `MM0006` | A `[ManagedCollection]` class doesn't implement `ICollectionDefinition<TDocument>` (exactly once). |
+| `MM0007` | The collection name is empty, contains `$` or starts with `system.`. |
+| `MM0008` | The collection definition can't be constructed. |
+| `MM0009` | Two classes define the same collection. |
+
+## Managing collections
+
+A migration runs once. A collection definition describes what a collection should look like now, and every `up` makes
+only the changes needed to get there. It covers indexes for now.
+
+```csharp
+using Kevsoft.MigrateMongo;
+using MongoDB.Bson;
+using MongoDB.Driver;
+
+[ManagedCollection("orders")]
+public sealed class Orders : ICollectionDefinition<BsonDocument>
+{
+    public void Define(CollectionBuilder<BsonDocument> collection) =>
+        collection.Indexes
+            .Add(k => k.Ascending("companyId").Descending("createdAt"))
+            .Add(k => k.Ascending("reference"), new() { Unique = true })
+            .Add(k => k.Ascending("closedAt"), new() { ExpireAfter = TimeSpan.FromDays(30) })
+            .Add(k => k.Ascending("customer"), new() { Name = "customer_ci", Collation = new Collation("en", strength: CollationStrength.Secondary) })
+            .Ignore("adhoc_*");
+}
+```
+
+Definitions live in the migrations project next to the migrations, and can take constructor dependencies the same way.
+Options are the driver's own `CreateIndexOptions<TDocument>`.
+
+### How indexes are matched
+
+An index is identified by its keys, collation and partial filter: MongoDB only allows two indexes on the same keys if
+those differ. A declared index matches an existing one with the same identity whatever either is called, so existing
+databases are adopted as they are. Names are optional; a new index without one gets MongoDB's default name
+(`companyId_1_createdAt_-1`).
+
+Once matched, the other options are compared:
+
+| Change | What `up` does |
+|---|---|
+| Declared, not on the server | Creates it. |
+| TTL or `hidden` changed | `collMod`, in place. |
+| Made unique | `collMod` with `prepareUnique`, then `unique` (MongoDB 6.0+). Fails, leaving the index as it was, if there are duplicates. |
+| Any other option changed | Drops the index and creates it again, under the same name. |
+| Same name, different keys | Drops it and creates the declared one. (Creating it would fail with `IndexKeySpecsConflict`.) |
+| Different keys, no name | The new index is created alongside, and the old one is pruned. |
+| On the server, not declared | Depends on `prune` (below). |
+
+Changes run in that order: new indexes first, removals last. Every operation is recorded like a migration's
+[tracked operations](#recording-results), including the full definition of anything dropped. If creating the
+replacement in a rebuild fails, the dropped index is restored.
+
+### Rebuilds
+
+Dropping and re-creating keeps the name, so queries that hint the index by name keep working, but the collection is
+without the index (and, for a unique index, without the constraint) while it builds. To refuse that, set
+`indexes.onRebuild: fail` (per environment if you like). `plan` and `up` then stop with exit code `4` before changing
+anything:
+
+```
+  ⟳ orders
+      ↻ rebuild  reference_1   sparse: false → true (drop, then create)   ✖ blocked: indexes.onRebuild is fail
+error: orders: rebuilding reference_1 drops it before the new one builds, and indexes.onRebuild is fail. Give the declared
+index a new name so it builds alongside the old one, or run with --allow-rebuild orders.reference_1.
+```
+
+A definition can make this stricter, not looser: `collection.Indexes.OnRebuild = IndexRebuild.Fail`, or
+`Add(..., onRebuild: IndexRebuild.Fail)` for one index. `--allow-rebuild collection.index` approves one rebuild.
+
+### Undeclared indexes
+
+| `prune` | An index on the server that isn't declared |
+|---|---|
+| `report` (default) | Is left alone and listed as `keep`. |
+| `hide` | Is hidden from the query planner (still maintained, so unhiding is instant), then dropped once it has been hidden for `dropHiddenAfter`. Declaring it again unhides it. |
+| `drop` | Is dropped, its definition recorded first. |
+
+`collection.Indexes.Prune` overrides the config for one collection, and `Ignore("pattern")` leaves matching names alone
+(`*` matches anything). The `_id_` index is never touched.
+
+### Typed definitions
+
+With a document class, keys are rendered through the class maps and conventions registered in the process:
+
+```csharp
+[ManagedCollection("customers")]
+public sealed class Customers : ICollectionDefinition<Customer>
+{
+    public void Define(CollectionBuilder<Customer> collection) =>
+        collection.Indexes.Add(k => k.Ascending(c => c.Email), new() { Unique = true });
+}
+```
+
+Register them before the runner starts, in the migrations project's `Program.cs`:
+
+```csharp
+MyAppMongoConfiguration.Register();
+return await MigrateMongoRunner.RunAsync(args);
+```
+
+If they aren't registered, the field names render differently and every index looks new. As a guard, a collection whose
+existing indexes match none of the declared ones is blocked until you check the plan and run with
+`--allow-unmatched collection`.
+
+A typed definition follows the model: renaming a property that changes the stored field name changes the index too.
+That's usually a data change as well (existing documents still have the old field), so pair it with a migration that
+renames the field. Migrations themselves are best written against `BsonDocument`, so a later model change doesn't alter
+what an old one does on a fresh database.
+
+### When they run
+
+`up` applies pending migrations first, then each collection definition, under the same lock. A migration can prepare
+the data a definition needs, e.g. removing duplicates before an index becomes unique. `up --to` skips the definitions
+while later migrations are still pending.
+
+`--only migrations` and `--only collections` split the two, e.g. migrations at startup and collection definitions from
+a deploy step where long index builds don't matter. A definition that's invalid, or a change that isn't allowed, stops
+`up` before any migration runs, unless pending migrations could change the indexes first (then it's checked again
+after them).
+
+During a rolling deploy, an instance of the previous build can start after the new one has run. Each collection
+remembers the definition it replaced, and a run that would bring that one back is skipped with a warning instead of
+undoing the newer one. `--allow-superseded` applies it anyway, e.g. when rolling back on purpose.
+
+Atlas Search indexes, validators and other collection options aren't managed yet, and a definition covers a collection
+in the configured database only.
 
 ## Commands
 
@@ -449,7 +585,18 @@ $ migrate-mongo status
 ```
 
 States are `pending`, `applied`, `applying`, `rollingBack` and `failed`. Applied migrations that are no longer in the
-code, or whose checksum has changed, are flagged. `--check` exits with code `2` when there are pending migrations.
+code, or whose checksum has changed, are flagged. `--check` exits with code `2` when there are pending migrations, or a
+collection that's out of line with its definition (so a scheduled run can spot indexes changed by hand).
+
+With [collection definitions](#managing-collections), a second table follows:
+
+```
+ Collection  State    Reconciled           Changes
+ orders      changes  2026-10-21 09:00:00  1 create · 1 hide
+ customers   in sync  2026-10-21 09:00:00  1 kept
+```
+
+States are `in sync`, `changes`, `blocked` (invalid, or a change that isn't allowed) and `superseded`.
 
 ### `plan`
 
@@ -457,10 +604,18 @@ code, or whose checksum has changed, are flagged. `--check` exits with code `2` 
 $ migrate-mongo plan
   ▶ 20261014164028  add-email-index-to-users   (no transaction)
   ▶ 20261014164029  split-full-name   (transaction)
-Would apply 2 migration(s) as batch 2.
+  ⟳ orders
+      + create   companyId_1_createdAt_-1   { companyId: 1, createdAt: -1 }
+      ~ modify   closedAt_1                 expireAfterSeconds 2592000 → 604800
+      - hide     legacy_ref                 not declared
+      ! keep     status_1                   not declared (prune: report)
+  ⟳ customers   in sync
+Would apply 2 migration(s) as batch 2 and change 1 collection(s).
 ```
 
-Shows what `up` would do. Exits with code `2` when there is pending work, so it can gate a deployment.
+Shows what `up` would do. Exits with code `2` when there is pending work, so it can gate a deployment, and `4` when a
+collection change isn't allowed. It takes `up`'s `--only` and `--allow-*` options. While migrations are pending, the
+collection changes are worked out against the database as it is now, so they may change once the migrations have run.
 
 ### `up`
 
@@ -472,11 +627,25 @@ Acquired lock (run ba6b5b60f25e4861a4ba25597d63fd8d).
 ✔ 20261014164028 add-email-index-to-users   (0.13s)
 ▶ 20261014164029 split-full-name
 ✔ 20261014164029 split-full-name   (0.02s, transaction)
-Applied 2 migration(s) in batch 2.
+⟳ orders
+  + create   companyId_1_createdAt_-1   { companyId: 1, createdAt: -1 }
+  ~ modify   closedAt_1                 expireAfterSeconds 2592000 → 604800
+✔ orders   (38.40s)
+✔ customers   (in sync)
+Applied 2 migration(s) in batch 2 and changed 1 collection(s).
 ```
 
-Applies every pending migration as one batch. `--to <id>` stops after that migration. `--no-capture-statements`
-records [tracked operations](#recording-results) without their statements (also on `down`).
+Applies every pending migration as one batch, then brings each collection in line with its definition.
+`--to <id>` stops after that migration. `--no-capture-statements` records [tracked operations](#recording-results)
+without their statements (also on `down`).
+
+| Option | Meaning |
+|---|---|
+| `--only migrations` | Apply migrations only. |
+| `--only collections` | Apply collection definitions only (warns if migrations are pending). |
+| `--allow-rebuild <collection.index>` | Let this index be rebuilt even with `onRebuild: fail`. Repeat for more. |
+| `--allow-unmatched <collection>` | Change this collection although none of its existing indexes match the declared ones. |
+| `--allow-superseded` | Apply definitions a newer run has replaced. |
 
 ### `down`
 
@@ -594,6 +763,26 @@ Shows everything about one migration: its state, who applied it, its results, no
 The id can be a unique prefix. `--history <n>` changes how many history entries are shown (default 10), and
 `--no-statements` leaves the operations' statements out. A rolled-back migration is still found through its history.
 
+`show <collection>` does the same for a [collection definition](#managing-collections): each index on the server and how
+it relates to the definition, the changes `up` would make, the operations of the last run that changed something, and
+its history.
+
+```
+$ migrate-mongo show orders
+orders (collection)
+  State      in sync
+  Reconciled 2026-10-29 10:12:41 by runner@build-agent-12 (38.40s)
+  Declared   sha256:6d0c41...
+  Source     csharp MyApp.Migrations.Collections.Orders
+
+Indexes
+  _id_                      { _id: 1 }
+  companyId_1_createdAt_-1  { companyId: 1, createdAt: -1 }
+  legacy_ref                { reference: 1 }  unique
+  status_1                  { status: 1 }  hidden  undeclared, hidden 2026-10-29 10:12
+  adhoc_x                   { x: 1 }  ignored
+```
+
 ### `bundle` and `version`
 
 `bundle` is described in [Bundles](#bundles). `version` prints the tool's version, platform and runtime.
@@ -604,9 +793,9 @@ The id can be a unique prefix. `--history <n>` changes how many history entries 
 |---|---|
 | `0` | Success. |
 | `1` | A migration failed, or another error. |
-| `2` | Pending migrations exist (`plan`, `status --check`). |
+| `2` | Pending migrations or collection changes exist (`plan`, `status --check`). |
 | `3` | Timed out waiting for the lock. |
-| `4` | Validation failed (checksum mismatch, missing or out-of-order migrations). |
+| `4` | Validation failed (checksum mismatch, missing or out-of-order migrations, an invalid collection definition, or a collection change that isn't allowed). |
 | `5` | The tool and runner have no protocol version in common. Update the tool. |
 | `6` | Building the migrations project failed. |
 
@@ -615,8 +804,9 @@ The id can be a unique prefix. `--history <n>` changes how many history entries 
 | Collection | Contents |
 |---|---|
 | `_migrations` | One document per migration, keyed by id, with its state, batch, checksum, timings and who applied it. |
-| `_migrations.history` | An append-only log of every apply, rollback, failure and `mark`. |
+| `_migrations.history` | An append-only log of every apply, rollback, failure and `mark`, and every collection change (`kind: "collection"`). |
 | `_migrations.lock` | The lock document while a run is in progress, with its owner, expiry and heartbeat. |
+| `_migrations.collections` | One document per [collection definition](#managing-collections), keyed by collection name: the declaration last applied, the one it replaced, the indexes it hid, and the last run's operations. |
 
 ```js
 {
@@ -933,8 +1123,30 @@ The defaults match the config file's.
 | `Transaction`, `TransactionRetryTimeout` | `transaction`, `transactionRetryTimeout` |
 | `AllowOutOfOrder` | `allowOutOfOrder` |
 | `CaptureStatements`, `ResultsMaxBytes` | `results.captureStatements`, `results.maxBytes` |
+| `IndexPrune`, `IndexRebuild`, `DropHiddenIndexesAfter` | `indexes.prune`, `indexes.onRebuild`, `indexes.dropHiddenAfter` |
 | `Environment` | Recorded with each run. |
 | `Tunnel`, `TunnelProvider` | `tunnel` (needs `Kevsoft.MigrateMongo.Tunnel`) |
+
+**Collection definitions at startup.** `RunOnStartup()` also brings collections in line with their
+[definitions](#managing-collections), and the app doesn't start until that's finished too:
+
+- **Index builds delay startup.** On a large collection a build can take longer than your platform's health-check
+  grace period, and the instance is restarted part-way through.
+- **A change that isn't allowed stops startup.** For example, `IndexRebuild.Fail` with a definition that needs a
+  rebuild: `RunOnStartup()` throws a `MongoMigrationException`, and every instance fails to start until the definition
+  or the option changes.
+- **Older builds don't undo newer definitions.** During a rolling deploy, an instance still on the previous build skips
+  any definition a newer build has replaced, and logs a warning.
+
+To avoid the first two, apply migrations at startup and collection definitions from your deploy step:
+
+```csharp
+.RunOnStartup(o => o.Collections = false);
+```
+
+```bash
+migrate-mongo up --only collections --env prod
+```
 
 To run migrations yourself instead (e.g. from an admin endpoint or a `--migrate` switch), leave out `RunOnStartup()`
 and use `IMongoMigrationRunner`:

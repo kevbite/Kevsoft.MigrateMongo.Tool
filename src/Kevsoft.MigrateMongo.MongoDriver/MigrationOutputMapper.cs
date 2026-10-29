@@ -203,13 +203,13 @@ internal static class MigrationOutputMapper
         };
     }
 
-    private static JsonElement ToJson(BsonDocument document)
+    internal static JsonElement ToJson(BsonDocument document)
     {
         using var json = JsonDocument.Parse(document.ToJson(Canonical));
         return json.RootElement.Clone();
     }
 
-    private static BsonDocument ToBson(JsonElement element) => BsonDocument.Parse(element.GetRawText());
+    internal static BsonDocument ToBson(JsonElement element) => BsonDocument.Parse(element.GetRawText());
 
     private static int? Int(BsonDocument document, string name) =>
         document.TryGetValue(name, out var value) && value.IsNumeric ? value.ToInt32() : null;

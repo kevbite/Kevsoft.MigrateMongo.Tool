@@ -16,10 +16,12 @@ public static class ConfigLoader
     private static readonly HashSet<string> KnownKeys =
     [
         "project", "mongodb", "stateCollection", "lockTtl", "lockWaitTimeout", "onChecksumMismatch",
-        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate", "results",
+        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate", "results", "indexes",
     ];
 
     private static readonly HashSet<string> ResultsKeys = ["captureStatements", "maxBytes"];
+
+    private static readonly HashSet<string> IndexesKeys = ["prune", "onRebuild", "dropHiddenAfter"];
 
     private static readonly HashSet<string> TunnelKeys =
     [
@@ -140,6 +142,19 @@ public static class ConfigLoader
                 throw new ConfigException("Config setting 'results' must be a mapping.");
         }
 
+        switch (root.GetValueOrDefault("indexes"))
+        {
+            case null:
+                break;
+            case Dictionary<string, object?> indexes:
+                config.IndexesPrune = OneOf(indexes, "prune", ["report", "hide", "drop"], getEnvironmentVariable) ?? config.IndexesPrune;
+                config.IndexesOnRebuild = OneOf(indexes, "onRebuild", ["allow", "fail"], getEnvironmentVariable) ?? config.IndexesOnRebuild;
+                config.IndexesDropHiddenAfterSeconds = OptionalInt(indexes, "dropHiddenAfter", getEnvironmentVariable) ?? config.IndexesDropHiddenAfterSeconds;
+                break;
+            default:
+                throw new ConfigException("Config setting 'indexes' must be a mapping.");
+        }
+
         return config;
     }
 
@@ -225,6 +240,11 @@ public static class ConfigLoader
         if (config.ResultsMaxBytes < 1)
         {
             throw new ConfigException("'results.maxBytes' must be positive.");
+        }
+
+        if (config.IndexesDropHiddenAfterSeconds < 0)
+        {
+            throw new ConfigException("'indexes.dropHiddenAfter' must not be negative.");
         }
     }
 
@@ -342,6 +362,14 @@ public static class ConfigLoader
             foreach (var key in results.Keys.Where(k => !ResultsKeys.Contains(k)))
             {
                 throw new ConfigException($"Unknown config setting '{prefix}results.{key}'.");
+            }
+        }
+
+        if (map.GetValueOrDefault("indexes") is Dictionary<string, object?> indexes)
+        {
+            foreach (var key in indexes.Keys.Where(k => !IndexesKeys.Contains(k)))
+            {
+                throw new ConfigException($"Unknown config setting '{prefix}indexes.{key}'.");
             }
         }
     }

@@ -40,6 +40,15 @@ public sealed class ResolvedConfig
     /// <summary>The largest a migration's named results may be, in BSON bytes (<c>results.maxBytes</c>).</summary>
     public int ResultsMaxBytes { get; set; } = 64 * 1024;
 
+    /// <summary>What happens to indexes a collection definition doesn't declare: <c>report</c>, <c>hide</c> or <c>drop</c> (<c>indexes.prune</c>).</summary>
+    public string IndexesPrune { get; set; } = "report";
+
+    /// <summary>Whether an index may be dropped and created again: <c>allow</c> or <c>fail</c> (<c>indexes.onRebuild</c>).</summary>
+    public string IndexesOnRebuild { get; set; } = "allow";
+
+    /// <summary>With <c>prune: hide</c>, seconds an undeclared index stays hidden before it's dropped (<c>indexes.dropHiddenAfter</c>).</summary>
+    public int IndexesDropHiddenAfterSeconds { get; set; } = 7 * 24 * 60 * 60;
+
     /// <summary>
     /// SSH tunnel to open before connecting. Never serialised: the tool opens the tunnel and only passes the rewritten
     /// <see cref="MongoUrl"/> to the runner, so SSH credentials never leave the tool process. A standalone runner or bundle

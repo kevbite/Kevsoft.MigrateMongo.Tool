@@ -40,6 +40,23 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
                 WriteLine(Paint($"✖ {e.MigrationId} {e.Name}: {e.Error}", Red));
                 RenderOutputSummary(e.Output, e.MigrationId, failed: true);
                 break;
+            case EventTypes.CollectionStarted:
+                WriteLine(Paint($"⟳ {e.Collection}", Cyan));
+                break;
+            case EventTypes.CollectionCompleted when e.Changes is { Count: > 0 } changes:
+                WriteChanges(changes, "  ");
+                WriteLine(Paint($"✔ {e.Collection}", Green) + $"   ({FormatDuration(e.DurationMs)})");
+                break;
+            case EventTypes.CollectionCompleted:
+                WriteLine(Paint($"✔ {e.Collection}   (in sync)", Dim));
+                break;
+            case EventTypes.CollectionFailed:
+                WriteLine(Paint($"✖ {e.Collection}: {e.Error}", Red));
+                RenderOutputSummary(e.Output, e.Collection, failed: false);
+                break;
+            case EventTypes.CollectionSkipped:
+                WriteLine(Paint($"⚠ {e.Message}", Yellow));
+                break;
             case EventTypes.Result when e.Result is not null:
                 RenderResult(e.Result);
                 break;
@@ -72,9 +89,29 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
             }
         }
 
+        if (result.Migrations is not null && result.Collections is { Count: > 0 } statuses)
+        {
+            WriteLine("");
+            WriteTable(
+                ["Collection", "State", "Reconciled", "Changes"],
+                statuses.Select(c => new[]
+                {
+                    c.Name,
+                    StateText(c.State),
+                    c.ReconciledAt?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "",
+                    ChangeCounts(c.Changes),
+                }).ToList(),
+                row => row[1] switch { "in sync" => Green, "changes" or "superseded" => Yellow, "blocked" => Red, _ => null });
+        }
+
         if (result.Show is { } show)
         {
             RenderShow(show);
+        }
+
+        if (result.ShowCollection is { } collection)
+        {
+            RenderShowCollection(collection);
         }
 
         if (result.Plan is { Count: > 0 } plan)
@@ -82,6 +119,21 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
             foreach (var item in plan)
             {
                 WriteLine($"  {(item.Direction == "down" ? "◀" : "▶")} {item.Id}  {item.Name}   ({(item.Transactional ? "transaction" : "no transaction")})");
+            }
+        }
+
+        if (result.Migrations is null && result.Collections is { } collections)
+        {
+            foreach (var item in collections)
+            {
+                if (item.Changes.Count == 0)
+                {
+                    WriteLine(Paint($"  ⟳ {item.Name}   {StateText(item.State)}", item.State == CollectionStates.InSync ? Dim : Yellow));
+                    continue;
+                }
+
+                WriteLine($"  ⟳ {item.Name}" + (item.State == CollectionStates.Superseded ? Paint("   superseded (skipped)", Yellow) : ""));
+                WriteChanges(item.Changes, "      ");
             }
         }
 
@@ -234,7 +286,147 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
             WriteLine($"  {label,-9} {value}");
         }
 
-        var output = m.Output;
+        RenderOutputDetail(m.Output);
+        if (show.History.Count > 0)
+        {
+            WriteLine("");
+            WriteLine("History");
+            WriteHistoryTable(show.History);
+        }
+    }
+
+    private void RenderShowCollection(CollectionInfo collection)
+    {
+        WriteLine(Paint($"{collection.Name} (collection)", Cyan));
+        var rows = new List<(string Label, string Value)> { ("State", StateText(collection.State)) };
+        if (collection.ReconciledAt is { } reconciledAt)
+        {
+            var by = (collection.User, collection.Host) switch
+            {
+                ({ Length: > 0 } user, { Length: > 0 } host) => $" by {user}@{host}",
+                (_, { Length: > 0 } host) => $" on {host}",
+                _ => "",
+            };
+            rows.Add(("Reconciled", reconciledAt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + by +
+                                    (collection.DurationMs is { } duration ? $" ({FormatDuration(duration)})" : "")));
+        }
+
+        if (collection.Declaration is { } declaration)
+        {
+            rows.Add(("Declared", declaration));
+        }
+
+        if (collection.Origin is { Length: > 0 } origin)
+        {
+            rows.Add(("Source", $"{collection.Source} {origin}".Trim()));
+        }
+
+        if (collection.RunId is { Length: > 0 } runId)
+        {
+            rows.Add(("Run", runId));
+        }
+
+        foreach (var (label, value) in rows)
+        {
+            WriteLine($"  {label,-10} {value}");
+        }
+
+        if (collection.Indexes is { Count: > 0 } indexes)
+        {
+            WriteLine("");
+            WriteLine("Indexes");
+            var width = indexes.Max(i => i.Name.Length);
+            foreach (var index in indexes)
+            {
+                var options = index.Options is { ValueKind: JsonValueKind.Object } o ? "  " + FormatOptions(o) : "";
+                var status = index.Status switch
+                {
+                    "undeclared" => "  undeclared" + (index.HiddenAt is { } hiddenAt ? $", hidden {hiddenAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}" : ""),
+                    "ignored" => "  ignored",
+                    _ => index.DeclaredName is { } declaredName ? $"  (declared as {declaredName})" : "",
+                };
+                WriteLine($"  {index.Name.PadRight(width)}  {Keys(index.Keys)}{options}" +
+                          Paint(status, index.Status == "undeclared" ? Yellow : Dim));
+            }
+        }
+
+        if (collection.Changes.Count > 0)
+        {
+            WriteLine("");
+            WriteLine("Pending");
+            WriteChanges(collection.Changes, "  ");
+        }
+
+        foreach (var problem in collection.Problems ?? [])
+        {
+            WriteLine(Paint($"  ✖ {problem}", Red));
+        }
+
+        if (collection.Output is not null)
+        {
+            WriteLine("");
+            WriteLine(Paint("Last change", Dim));
+        }
+
+        RenderOutputDetail(collection.Output);
+        if (collection.History is { Count: > 0 } history)
+        {
+            WriteLine("");
+            WriteLine("History");
+            WriteHistoryTable(history);
+        }
+    }
+
+    /// <summary>One line per change, e.g. <c>+ create   status_1   { status: 1 }</c>.</summary>
+    private void WriteChanges(List<IndexChangeInfo> changes, string indent)
+    {
+        var width = changes.Max(c => c.Index.Length);
+        foreach (var change in changes)
+        {
+            var (symbol, colour) = change.Action switch
+            {
+                IndexActions.Create => ("+", Green),
+                IndexActions.Modify => ("~", Yellow),
+                IndexActions.Rebuild => ("↻", Yellow),
+                IndexActions.Hide or IndexActions.Drop => ("-", Red),
+                _ => ("!", Dim),
+            };
+            var detail = change.Action == IndexActions.Create
+                ? Keys(change.Keys) + (change.Detail is { } options ? "  " + options : "")
+                : change.Detail ?? "";
+            var line = $"{indent}{symbol} {change.Action,-8} {change.Index.PadRight(width)}   {detail}";
+            WriteLine(change.Blocked == true
+                ? Paint(line + $"   ✖ blocked: {change.Reason}", Red)
+                : Paint(line, colour));
+        }
+    }
+
+    private static string Keys(JsonElement? keys) => keys is { } k ? ExtendedJson.Format(k, quoteStrings: true) : "";
+
+    /// <summary>e.g. <c>unique, expireAfterSeconds 3600</c>.</summary>
+    private static string FormatOptions(JsonElement options) =>
+        string.Join(", ", options.EnumerateObject().Select(p => p.Value.ValueKind == JsonValueKind.True
+            ? p.Name
+            : $"{p.Name} {ExtendedJson.Format(p.Value, quoteStrings: true)}"));
+
+    private static string StateText(string state) => state switch
+    {
+        CollectionStates.InSync => "in sync",
+        CollectionStates.Changes => "changes",
+        CollectionStates.Blocked => "blocked",
+        CollectionStates.Superseded => "superseded",
+        _ => state,
+    };
+
+    /// <summary>e.g. <c>1 create · 2 hide · 1 kept</c>.</summary>
+    private static string ChangeCounts(List<IndexChangeInfo> changes) =>
+        string.Join(" · ", changes
+            .GroupBy(c => c.Action)
+            .Select(g => $"{g.Count().ToString(CultureInfo.InvariantCulture)} {(g.Key == IndexActions.Keep ? "kept" : g.Key)}"));
+
+    /// <summary>The results, notes and operations a migration or collection change recorded.</summary>
+    private void RenderOutputDetail(MigrationOutputInfo? output)
+    {
         if (output?.Results is { ValueKind: JsonValueKind.Object } results && results.EnumerateObject().Any())
         {
             WriteLine("");
@@ -290,13 +482,6 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         if (output?.OperationsTruncated is > 0)
         {
             WriteLine(Paint($"  (+{output.OperationsTruncated} more not recorded)", Dim));
-        }
-
-        if (show.History.Count > 0)
-        {
-            WriteLine("");
-            WriteLine("History");
-            WriteHistoryTable(show.History);
         }
     }
 

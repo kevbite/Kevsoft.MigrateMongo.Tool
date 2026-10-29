@@ -260,7 +260,7 @@ public static class MigrateMongoRunner
         try
         {
             ConfigLoader.EnsureConnectable(config);
-            var migrations = MigrationDiscovery.Discover(options, entryAssembly);
+            var (migrations, collections) = MigrationDiscovery.Discover(options, entryAssembly);
 
             using var loggerFactory = new EventSinkLoggerFactory(sink);
             MongoDriverBackend? backend = null;
@@ -275,7 +275,7 @@ public static class MigrateMongoRunner
             backend = MongoDriverBackend.Create(config, provider, loggerFactory);
             try
             {
-                var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(config, tool), sink);
+                var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(config, tool), sink, collections: collections);
                 return await engine.ExecuteAsync(command, arguments, cancellationToken);
             }
             finally
@@ -308,6 +308,9 @@ public static class MigrateMongoRunner
         Environment = config.Environment,
         CaptureStatements = config.ResultsCaptureStatements,
         ResultsMaxBytes = config.ResultsMaxBytes,
+        IndexesPrune = config.IndexesPrune,
+        IndexesOnRebuild = config.IndexesOnRebuild,
+        IndexesDropHiddenAfter = TimeSpan.FromSeconds(config.IndexesDropHiddenAfterSeconds),
         Provenance = new Provenance
         {
             Host = Environment.MachineName,

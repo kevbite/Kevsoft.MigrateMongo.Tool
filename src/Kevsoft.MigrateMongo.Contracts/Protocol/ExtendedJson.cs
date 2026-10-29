@@ -25,10 +25,11 @@ public static class ExtendedJson
         return document.RootElement.Clone();
     }
 
-    /// <summary>Relaxes every Extended JSON value in the event (results, statements, status, history and show).</summary>
+    /// <summary>Relaxes every Extended JSON value in the event (results, statements, index keys, status, history and show).</summary>
     public static void Relax(RunnerEvent runnerEvent)
     {
         Relax(runnerEvent.Output);
+        Relax(runnerEvent.Changes);
         if (runnerEvent.Result is not { } result)
         {
             return;
@@ -51,6 +52,30 @@ public static class ExtendedJson
             {
                 Relax(record.Output);
             }
+        }
+
+        foreach (var collection in (result.Collections ?? []).Append(result.ShowCollection).OfType<CollectionInfo>())
+        {
+            Relax(collection.Changes);
+            Relax(collection.Output);
+            foreach (var index in collection.Indexes ?? [])
+            {
+                index.Keys = index.Keys is { } keys ? ToRelaxed(keys) : null;
+                index.Options = index.Options is { } options ? ToRelaxed(options) : null;
+            }
+
+            foreach (var record in collection.History ?? [])
+            {
+                Relax(record.Output);
+            }
+        }
+    }
+
+    private static void Relax(List<IndexChangeInfo>? changes)
+    {
+        foreach (var change in changes ?? [])
+        {
+            change.Keys = change.Keys is { } keys ? ToRelaxed(keys) : null;
         }
     }
 

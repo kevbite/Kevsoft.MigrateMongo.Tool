@@ -98,6 +98,10 @@ public sealed class ConfigLoaderTests
     [InlineData("lockTtl: soon", "lockTtl")]
     [InlineData("results:\n  maxSize: 10", "results.maxSize")]
     [InlineData("results: 5", "results")]
+    [InlineData("indexes:\n  prune: delete", "prune")]
+    [InlineData("indexes:\n  onRebuild: maybe", "onRebuild")]
+    [InlineData("indexes:\n  dropAfter: 10", "indexes.dropAfter")]
+    [InlineData("indexes: drop", "indexes")]
     public void Invalid_settings_are_reported(string yaml, string expected)
     {
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message.ShouldContain(expected);
@@ -238,6 +242,34 @@ public sealed class ConfigLoaderTests
 
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, "prod", Env)).Message
             .ShouldBe("Unknown config setting 'environments.prod.results.capture'.");
+    }
+
+    [Fact]
+    public void Index_settings_default_to_report_allow_and_7_days_and_can_be_changed_per_environment()
+    {
+        var yaml = Yaml + """
+
+            indexes:
+              prune: hide
+              dropHiddenAfter: 86400
+            """;
+        yaml = yaml.Replace("lockWaitTimeout: 5", "lockWaitTimeout: 5\n    indexes:\n      onRebuild: fail", StringComparison.Ordinal);
+
+        var defaults = ConfigLoader.Load(Yaml, null, Env);
+        (defaults.IndexesPrune, defaults.IndexesOnRebuild, defaults.IndexesDropHiddenAfterSeconds).ShouldBe(("report", "allow", 604800));
+
+        var local = ConfigLoader.Load(yaml, null, Env);
+        (local.IndexesPrune, local.IndexesOnRebuild, local.IndexesDropHiddenAfterSeconds).ShouldBe(("hide", "allow", 86400));
+
+        var prod = ConfigLoader.Load(yaml, "prod", Env);
+        (prod.IndexesPrune, prod.IndexesOnRebuild, prod.IndexesDropHiddenAfterSeconds).ShouldBe(("hide", "fail", 86400));
+    }
+
+    [Fact]
+    public void Drop_hidden_after_must_not_be_negative()
+    {
+        Should.Throw<ConfigException>(() => ConfigLoader.EnsureConnectable(new ResolvedConfig { MongoUrl = "mongodb://x", DatabaseName = "db", IndexesDropHiddenAfterSeconds = -1 }))
+            .Message.ShouldBe("'indexes.dropHiddenAfter' must not be negative.");
     }
 
     [Fact]

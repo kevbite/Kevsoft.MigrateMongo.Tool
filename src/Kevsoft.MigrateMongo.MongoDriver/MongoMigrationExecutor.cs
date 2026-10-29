@@ -12,6 +12,84 @@ public sealed class MongoMigrationExecutor(
     IServiceProvider services,
     ILoggerFactory loggerFactory) : IMigrationExecutor
 {
+    /// <summary>MongoDB 6.0, which added converting an index to unique with <c>collMod</c>.</summary>
+    private const int UniqueConversionWireVersion = 17;
+
+    private int? _maxWireVersion;
+
+    public async Task<CollectionPlan> PlanCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken) =>
+        (await PlanIndexesAsync(collection, policy, cancellationToken)).ToCollectionPlan();
+
+    public async Task<CollectionApplyResult> ApplyCollectionAsync(
+        CollectionDescriptor collection,
+        CollectionPolicy policy,
+        MigrationRunInfo run,
+        OutputOptions options,
+        CancellationToken cancellationToken)
+    {
+        var plan = await PlanIndexesAsync(collection, policy, cancellationToken);
+        if (plan.Invalid || plan.Problems.Count > 0)
+        {
+            return new CollectionApplyResult { Plan = plan.ToCollectionPlan(), Applied = false };
+        }
+
+        var results = new MigrationResults(options.CaptureStatements);
+        var context = new MigrationContext(database, null, loggerFactory.CreateLogger($"Collection.{collection.Name}"), services, run, results);
+        try
+        {
+            await IndexApplier.ApplyAsync(context, collection.Name, plan, cancellationToken);
+        }
+        catch (Exception e)
+        {
+            throw new MigrationExecutionException(MigrationOutputMapper.From(results, options.MaxResultsBytes, out _), e);
+        }
+
+        return new CollectionApplyResult
+        {
+            Plan = plan.ToCollectionPlan(),
+            Applied = true,
+            Output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out _),
+        };
+    }
+
+    private async Task<IndexPlan> PlanIndexesAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken)
+    {
+        CollectionDeclaration declaration;
+        try
+        {
+            declaration = collection.Declare(services, database);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return IndexPlan.InvalidPlan($"{collection.Name}: {e.Message}");
+        }
+
+        List<BsonDocument> existing;
+        try
+        {
+            using var cursor = await database.GetCollection<BsonDocument>(declaration.Name).Indexes.ListAsync(cancellationToken);
+            existing = await cursor.ToListAsync(cancellationToken);
+        }
+        catch (MongoCommandException e) when (e.Code == 26)
+        {
+            // NamespaceNotFound: the collection doesn't exist yet, so every declared index is created (which creates it).
+            existing = [];
+        }
+
+        return IndexPlanner.Plan(declaration, existing, policy, await MaxWireVersionAsync(cancellationToken) >= UniqueConversionWireVersion);
+    }
+
+    private async Task<int> MaxWireVersionAsync(CancellationToken cancellationToken)
+    {
+        if (_maxWireVersion is null)
+        {
+            var hello = await database.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1), cancellationToken: cancellationToken);
+            _maxWireVersion = hello.TryGetValue("maxWireVersion", out var version) && version.IsNumeric ? version.ToInt32() : 0;
+        }
+
+        return _maxWireVersion.Value;
+    }
+
     public async Task<bool> SupportsTransactionsAsync(CancellationToken cancellationToken)
     {
         var hello = await database.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1), cancellationToken: cancellationToken);

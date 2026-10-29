@@ -19,6 +19,12 @@ public static class HistoryEvents
     public const string MarkedApplied = "markedApplied";
     public const string MarkedUnapplied = "markedUnapplied";
     public const string Baselined = "baselined";
+
+    /// <summary>A collection's indexes were brought in line with its definition.</summary>
+    public const string Reconciled = "reconciled";
+
+    /// <summary>The <see cref="HistoryRecord.Kind"/> of a collection definition's entries.</summary>
+    public const string CollectionKind = "collection";
 }
 
 /// <summary>Who/what applied a migration.</summary>
@@ -80,12 +86,56 @@ public sealed class StoredMigrationState
     public MigrationOutputInfo? Output { get; set; }
 }
 
+/// <summary>A document in the collections state collection: the last declaration <c>up</c> applied for one collection.</summary>
+public sealed class StoredCollectionState
+{
+    /// <summary>The schema version this library writes. Documents with a higher version are refused.</summary>
+    public const int CurrentSchemaVersion = 1;
+
+    /// <summary>The collection's name.</summary>
+    public string Name { get; set; } = "";
+
+    public int V { get; set; } = CurrentSchemaVersion;
+
+    public string Source { get; set; } = "";
+
+    public string Origin { get; set; } = "";
+
+    /// <summary>A hash of the declaration that was last applied.</summary>
+    public string Declaration { get; set; } = "";
+
+    /// <summary>
+    /// The declaration that one replaced. A run that brings it back (e.g. an instance of the previous build starting during a
+    /// rolling deploy) is skipped unless it's run with <c>--allow-superseded</c>.
+    /// </summary>
+    public string? PreviousDeclaration { get; set; }
+
+    public DateTime ReconciledAt { get; set; }
+
+    public long? DurationMs { get; set; }
+
+    public string RunId { get; set; } = "";
+
+    public Provenance AppliedBy { get; set; } = new();
+
+    /// <summary>Undeclared indexes this tool hid (with <c>prune: hide</c>), and when.</summary>
+    public Dictionary<string, DateTime> Hidden { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>What the last run that changed something recorded.</summary>
+    public MigrationOutputInfo? Output { get; set; }
+}
+
 /// <summary>Persistence for state, history and the lock.</summary>
 public interface IMigrationStore
 {
     Task InitializeAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<StoredCollectionState>> GetCollectionStatesAsync(CancellationToken cancellationToken);
+
+    /// <summary>Inserts or replaces a collection state document.</summary>
+    Task SaveCollectionStateAsync(StoredCollectionState state, CancellationToken cancellationToken);
 
     /// <summary>Inserts or replaces a state document. When <paramref name="scope"/> is transactional the write is part of it.</summary>
     Task SaveStateAsync(StoredMigrationState state, IExecutionScope? scope, CancellationToken cancellationToken);
@@ -145,6 +195,74 @@ public interface IMigrationExecutor
     Task<MigrationOutputInfo?> ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken);
 
     TransactionErrorKind ClassifyTransactionError(Exception exception);
+
+    /// <summary>Works out what bringing a collection in line with its definition would change, without changing anything.</summary>
+    Task<CollectionPlan> PlanCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Plans again and applies the plan, unless it's blocked or invalid (then <see cref="CollectionApplyResult.Applied"/> is
+    /// false and nothing changes). If a change fails, throws a <see cref="MigrationExecutionException"/> carrying what was
+    /// recorded before it failed.
+    /// </summary>
+    Task<CollectionApplyResult> ApplyCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken);
+}
+
+/// <summary>The settings a collection plan is worked out with.</summary>
+public sealed class CollectionPolicy
+{
+    /// <summary><c>report</c>, <c>hide</c> or <c>drop</c>, unless the definition sets its own.</summary>
+    public string Prune { get; init; } = "report";
+
+    /// <summary><c>allow</c> or <c>fail</c>. A definition can make it stricter, not looser.</summary>
+    public string OnRebuild { get; init; } = "allow";
+
+    public TimeSpan DropHiddenAfter { get; init; } = TimeSpan.FromDays(7);
+
+    /// <summary>Index names that may be rebuilt even when <see cref="OnRebuild"/> is <c>fail</c>.</summary>
+    public IReadOnlySet<string> AllowRebuild { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>Change the collection even though none of its existing indexes match the declared ones.</summary>
+    public bool AllowUnmatched { get; init; }
+
+    /// <summary>Undeclared indexes this tool hid earlier, and when.</summary>
+    public IReadOnlyDictionary<string, DateTime> Hidden { get; init; } = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+
+    public DateTime Now { get; init; }
+}
+
+/// <summary>What bringing a collection in line with its definition would change.</summary>
+public sealed class CollectionPlan
+{
+    /// <summary>A hash of what the definition declares (empty when <see cref="Invalid"/>).</summary>
+    public string Declaration { get; init; } = "";
+
+    /// <summary>The changes in the order they'd be made, plus <c>keep</c> entries for undeclared indexes left alone.</summary>
+    public List<IndexChangeInfo> Changes { get; init; } = [];
+
+    /// <summary>Why the plan can't be applied: an invalid definition, a blocked rebuild, or no existing index matching.</summary>
+    public List<string> Problems { get; init; } = [];
+
+    /// <summary>True when the definition itself couldn't be rendered or is inconsistent.</summary>
+    public bool Invalid { get; init; }
+
+    /// <summary>The indexes on the server and how each relates to the definition.</summary>
+    public List<IndexInfo> Indexes { get; init; } = [];
+
+    /// <summary>The undeclared indexes this tool will have hidden once the plan is applied, and when each was hidden.</summary>
+    public Dictionary<string, DateTime> Hidden { get; init; } = new(StringComparer.Ordinal);
+
+    public bool HasChanges => Changes.Any(c => c.Action != IndexActions.Keep);
+}
+
+public sealed class CollectionApplyResult
+{
+    /// <summary>The plan that was applied, or that blocked applying.</summary>
+    public required CollectionPlan Plan { get; init; }
+
+    public bool Applied { get; init; }
+
+    /// <summary>What the changes recorded (null if nothing ran).</summary>
+    public MigrationOutputInfo? Output { get; init; }
 }
 
 /// <summary>How a migration's results are recorded.</summary>
@@ -193,6 +311,15 @@ public sealed class EngineOptions
 
     /// <summary>The largest a migration's named results may be, in BSON bytes.</summary>
     public int ResultsMaxBytes { get; set; } = 64 * 1024;
+
+    /// <summary><c>report</c>, <c>hide</c> or <c>drop</c>: what happens to indexes a collection definition doesn't declare.</summary>
+    public string IndexesPrune { get; set; } = "report";
+
+    /// <summary><c>allow</c> or <c>fail</c>: whether an index may be dropped and created again.</summary>
+    public string IndexesOnRebuild { get; set; } = "allow";
+
+    /// <summary>With <c>prune: hide</c>, how long an undeclared index stays hidden before it's dropped.</summary>
+    public TimeSpan IndexesDropHiddenAfter { get; set; } = TimeSpan.FromDays(7);
 
     public Provenance Provenance { get; set; } = new();
 }
