@@ -110,6 +110,10 @@ public sealed class StoredCollectionState
     /// </summary>
     public string? PreviousDeclaration { get; set; }
 
+    /// <summary>When <see cref="Declaration"/> was first applied, which later runs that only fix drift don't change.</summary>
+    public DateTime? ReplacedAt { get; set; }
+
+    /// <summary>When a run last changed something or applied a new declaration.</summary>
     public DateTime ReconciledAt { get; set; }
 
     public long? DurationMs { get; set; }

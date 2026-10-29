@@ -155,16 +155,32 @@ public sealed class CollectionEngineTests
     }
 
     [Fact]
-    public async Task A_blocked_change_found_after_the_migrations_fails_the_run()
+    public async Task A_blocked_change_found_after_the_migrations_stops_before_changing_any_collection()
     {
-        _executor.CollectionPlans = (_, _) => new CollectionPlan { Declaration = "sha256:a", Problems = ["users: rebuild blocked."] };
+        _executor.CollectionPlans = (c, _) => c.Name == "orders"
+            ? Collections.Plan("sha256:orders", CreateStatus)
+            : new CollectionPlan { Declaration = "sha256:users", Problems = ["users: rebuild blocked."] };
 
-        var result = await Engine([Migrations.Create("20260101000001", "seed")], "users").UpAsync(null, CancellationToken.None);
+        var result = await Engine([Migrations.Create("20260101000001", "seed")], "orders", "users").UpAsync(null, CancellationToken.None);
 
-        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        result.ExitCode.ShouldBe(ExitCodes.ValidationFailed);
         result.Applied.ShouldBe(["20260101000001"]);
-        result.Message.ShouldBe("Collection users failed: users: rebuild blocked.");
-        _sink.Events.Last(e => e.Collection == "users").Type.ShouldBe("collectionFailed");
+        result.Message.ShouldBe("Applied 1 migration(s) in batch 1, then stopped before changing any collection: 1 problem(s) with collection definitions.");
+        result.Issues!.ShouldHaveSingleItem().Message.ShouldBe("users: rebuild blocked.");
+        result.Collections!.Select(c => (c.Name, c.State)).ShouldBe([("orders", "changes"), ("users", "blocked")]);
+        _executor.Calls.ShouldBe(["Up:20260101000001:tx"]);
+        _store.CollectionStates.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Up_plans_each_collection_once_and_again_only_after_migrations()
+    {
+        await Engine([], "orders", "users").UpAsync(null, CancellationToken.None);
+        _executor.Policies.Count.ShouldBe(2);
+
+        _executor.Policies.Clear();
+        await Engine([Migrations.Create("20260101000001", "seed")], "orders", "users").UpAsync(null, CancellationToken.None);
+        _executor.Policies.Count.ShouldBe(4);
     }
 
     [Fact]
@@ -195,14 +211,42 @@ public sealed class CollectionEngineTests
         skipped.ExitCode.ShouldBe(0);
         _executor.Calls.ShouldBeEmpty();
         _sink.Events.Single(e => e.Type == "collectionSkipped").Message.ShouldBe(
-            $"users: this build's definition was replaced at {replacedAt:u} by run abcdef01 (deploy-1); skipping it until {replacedAt.AddHours(1):u}. " +
+            $"users: this build's definition was replaced at {replacedAt:u}; skipping it until {replacedAt.AddHours(1):u}. " +
             "Run with --allow-superseded to apply it now.");
 
         var forced = await Engine([], "users").ExecuteAsync("up", new CommandArguments { AllowSuperseded = true }, CancellationToken.None);
 
         forced.Reconciled.ShouldBe(["users"]);
-        _store.CollectionStates["users"].Declaration.ShouldBe("sha256:old");
-        _store.CollectionStates["users"].PreviousDeclaration.ShouldBe("sha256:new");
+        var state = _store.CollectionStates["users"];
+        (state.Declaration, state.PreviousDeclaration).ShouldBe(("sha256:old", "sha256:new"));
+        state.ReplacedAt!.Value.ShouldBe(DateTime.UtcNow, TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
+    public async Task Fixing_drift_does_not_restart_the_window_for_an_older_build()
+    {
+        // The definition was replaced two days ago, and a run five minutes ago put back an index someone dropped.
+        _store.CollectionStates["users"] = Replaced(DateTime.UtcNow.AddDays(-2));
+        _store.CollectionStates["users"].ReconciledAt = DateTime.UtcNow.AddMinutes(-5);
+        _executor.CollectionPlans = (_, _) => Collections.Plan("sha256:old", CreateStatus);
+
+        var result = await Engine([], "users").UpAsync(null, CancellationToken.None);
+
+        result.Reconciled.ShouldBe(["users"]);
+    }
+
+    [Fact]
+    public async Task Fixing_drift_keeps_when_the_definition_was_replaced()
+    {
+        var replacedAt = DateTime.UtcNow.AddDays(-2);
+        _store.CollectionStates["users"] = Replaced(replacedAt);
+        _executor.CollectionPlans = (_, _) => Collections.Plan("sha256:new", CreateStatus);
+
+        await Engine([], "users").UpAsync(null, CancellationToken.None);
+
+        var state = _store.CollectionStates["users"];
+        state.ReplacedAt.ShouldBe(replacedAt);
+        state.ReconciledAt.ShouldBe(DateTime.UtcNow, TimeSpan.FromMinutes(1));
     }
 
     [Fact]
@@ -236,6 +280,7 @@ public sealed class CollectionEngineTests
         PreviousDeclaration = "sha256:old",
         RunId = "abcdef0123456789",
         AppliedBy = new Provenance { Host = "deploy-1" },
+        ReplacedAt = at,
         ReconciledAt = at,
     };
 

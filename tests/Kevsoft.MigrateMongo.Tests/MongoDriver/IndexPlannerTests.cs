@@ -216,6 +216,94 @@ public sealed class IndexPlannerTests
     }
 
     [Fact]
+    public void An_ignored_index_is_never_replaced_by_a_declared_one_with_its_name()
+    {
+        var declaration = new CollectionDeclaration
+        {
+            Name = "users",
+            Indexes = [Declared(new BsonDocument("status", 1)), Declared(new BsonDocument("email", 1), new BsonDocument("name", "adhoc_email"))],
+            Ignored = ["adhoc_*"],
+        };
+
+        var plan = IndexPlanner.Plan(
+            declaration,
+            [IdIndex, Server("status_1", new BsonDocument("status", 1)), Server("adhoc_email", new BsonDocument { { "email", 1 }, { "createdAt", -1 } })],
+            Policy(),
+            true);
+
+        plan.Changes.ShouldNotContain(c => c.Info.Action == "rebuild");
+        plan.Problems.ShouldBe([
+            "users: the declared index { email: 1 } is named adhoc_email, but the server's adhoc_email is ignored, so it isn't replaced. " +
+            "Give the declared index a different name, or stop ignoring adhoc_email.",
+        ]);
+    }
+
+    [Fact]
+    public void An_ignored_text_index_is_never_replaced_by_a_declared_one()
+    {
+        var declaration = new CollectionDeclaration
+        {
+            Name = "users",
+            Indexes = [Declared(new BsonDocument("status", 1)), Declared(new BsonDocument("title", "text"))],
+            Ignored = ["search_*"],
+        };
+
+        var plan = IndexPlanner.Plan(
+            declaration,
+            [
+                IdIndex,
+                Server("status_1", new BsonDocument("status", 1)),
+                Server("search_text", new BsonDocument { { "_fts", "text" }, { "_ftsx", 1 } }, new BsonDocument("weights", new BsonDocument("body", 1))),
+            ],
+            Policy(),
+            true);
+
+        plan.Changes.ShouldNotContain(c => c.Info.Action == "rebuild");
+        plan.Problems.ShouldBe([
+            "users: the declared index { title: \"text\" } matches search_text, which is ignored, so it isn't changed " +
+            "(weights { body: 1 } → { title: 1 }). Declare it as it is, or stop ignoring search_text.",
+        ]);
+    }
+
+    [Fact]
+    public void A_second_text_index_is_not_created_beside_an_ignored_one()
+    {
+        var declaration = new CollectionDeclaration
+        {
+            Name = "users",
+            Indexes = [Declared(new BsonDocument("status", 1)), Declared(new BsonDocument { { "companyId", 1 }, { "title", "text" } })],
+            Ignored = ["search_*"],
+        };
+
+        var plan = IndexPlanner.Plan(
+            declaration,
+            [
+                IdIndex,
+                Server("status_1", new BsonDocument("status", 1)),
+                Server("search_text", new BsonDocument { { "_fts", "text" }, { "_ftsx", 1 } }, new BsonDocument("weights", new BsonDocument("body", 1))),
+            ],
+            Policy(),
+            true);
+
+        plan.Problems.ShouldBe([
+            "users: a collection can only have one text index, and the server's search_text is ignored, so the declared " +
+            "{ companyId: 1, title: \"text\" } can't be created. Stop ignoring search_text to replace it.",
+        ]);
+    }
+
+    [Fact]
+    public void A_declared_index_the_same_as_an_ignored_one_is_adopted()
+    {
+        var declaration = new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("status", 1))], Ignored = ["adhoc_*"] };
+
+        var plan = IndexPlanner.Plan(declaration, [IdIndex, Server("adhoc_status", new BsonDocument("status", 1))], Policy(), true);
+
+        plan.Changes.ShouldBeEmpty();
+        plan.Problems.ShouldBeEmpty();
+        plan.Indexes.Single(i => i.Name == "adhoc_status").Status.ShouldBe("declared");
+    }
+
+    [Fact]
     public void Nothing_changes_when_the_declared_indexes_share_no_field_with_the_existing_ones_unless_that_is_allowed()
     {
         BsonDocument[] existing = [IdIndex, Server("CompanyId_1", new BsonDocument("CompanyId", 1)), Server("Title_text", new BsonDocument { { "_fts", "text" }, { "_ftsx", 1 } }, new BsonDocument("weights", new BsonDocument("Title", 1)))];

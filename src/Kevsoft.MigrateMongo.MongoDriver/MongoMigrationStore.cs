@@ -242,6 +242,7 @@ public sealed class MongoMigrationStore : IMigrationStore
             { "declaration", state.Declaration },
         };
         AddIfNotNull(document, "previousDeclaration", state.PreviousDeclaration);
+        AddIfNotNull(document, "replacedAt", state.ReplacedAt);
         document.Add("reconciledAt", state.ReconciledAt);
         AddIfNotNull(document, "durationMs", state.DurationMs);
         document.Add("runId", state.RunId);
@@ -273,6 +274,7 @@ public sealed class MongoMigrationStore : IMigrationStore
         Origin = GetString(d, "origin") ?? "",
         Declaration = GetString(d, "declaration") ?? "",
         PreviousDeclaration = GetString(d, "previousDeclaration"),
+        ReplacedAt = d.TryGetValue("replacedAt", out var replacedAt) && replacedAt.IsValidDateTime ? replacedAt.ToUniversalTime() : null,
         ReconciledAt = d.TryGetValue("reconciledAt", out var reconciledAt) && reconciledAt.IsValidDateTime ? reconciledAt.ToUniversalTime() : default,
         DurationMs = d.TryGetValue("durationMs", out var duration) && duration.IsNumeric ? duration.ToInt64() : null,
         RunId = GetString(d, "runId") ?? "",

@@ -59,6 +59,23 @@ public sealed class IndexPruneAndGuardTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task Hidden_indexes_named_with_dots_or_a_dollar_are_recorded()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.Collection().Indexes.CreateManyAsync([
+            new CreateIndexModel<BsonDocument>(new BsonDocument("status", 1)),
+            new CreateIndexModel<BsonDocument>(new BsonDocument("address.city", 1)),
+            new CreateIndexModel<BsonDocument>(new BsonDocument("$**", 1)),
+        ]);
+
+        // The state is keyed by index name, which MongoDB 5.0+ stores as a field name as it is.
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("status"))), Prune("hide", TimeSpan.FromDays(1)));
+
+        mongo.State()["hidden"].AsBsonDocument.Names.ShouldBe(["address.city_1", "$**_1"], ignoreOrder: true);
+        mongo.Indexes()["$**_1"]["hidden"].ToBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task An_index_someone_else_hid_starts_its_clock_when_found()
     {
         await using var mongo = new CollectionHarness(environment);
@@ -121,6 +138,22 @@ public sealed class IndexPruneAndGuardTests(IntegrationEnvironment environment)
         await mongo.ApplyAsync(Define(i => i.Ignore("adhoc_*")), Prune("drop"));
 
         mongo.Indexes().Keys.ShouldBe(["_id_", "adhoc_x"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task An_ignored_text_index_is_not_replaced_by_a_declared_one()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.Collection().Indexes.CreateManyAsync([
+            new CreateIndexModel<BsonDocument>(new BsonDocument("status", 1)),
+            new CreateIndexModel<BsonDocument>(new BsonDocument("body", "text"), new CreateIndexOptions { Name = "search_text" }),
+        ]);
+
+        var up = await mongo.UpAsync(Define(i => i.Add(k => k.Ascending("status")).Add(k => k.Text("title")).Ignore("search_*")));
+
+        up.ExitCode.ShouldBe(ExitCodes.ValidationFailed);
+        up.Issues!.ShouldHaveSingleItem().Message.ShouldStartWith("things: the declared index { title: \"text\" } matches search_text, which is ignored");
+        mongo.Indexes()["search_text"]["weights"].ShouldBe(new BsonDocument("body", 1));
     }
 
     [Fact]

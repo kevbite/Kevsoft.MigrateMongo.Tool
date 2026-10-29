@@ -91,7 +91,7 @@ public sealed partial class MigrationEngine
         var status = BuildStatus(states);
         var pending = status.Count(s => s.State == MigrationStates.Pending);
         var issues = Analyse(states, status);
-        var collections = await PreviewCollectionsAsync(new CommandArguments(), migrationsRunFirst: pending > 0, issues, cancellationToken);
+        var collections = (await PreviewCollectionsAsync(new CommandArguments(), migrationsRunFirst: pending > 0, issues, cancellationToken))?.Select(c => c.Info).ToList();
         var changing = collections?.Count(c => c.State is CollectionStates.Changes or CollectionStates.Blocked) ?? 0;
         return new CommandResult
         {
@@ -204,7 +204,7 @@ public sealed partial class MigrationEngine
         List<CollectionInfo>? collections = null;
         if (arguments.Only != OnlyScopes.Migrations && CollectionsRunAfter(to, pendingCount, plan.Count, arguments, issues))
         {
-            collections = await PreviewCollectionsAsync(arguments, migrationsRunFirst: plan.Count > 0, issues, cancellationToken);
+            collections = (await PreviewCollectionsAsync(arguments, migrationsRunFirst: plan.Count > 0, issues, cancellationToken))?.Select(c => c.Info).ToList();
         }
 
         var holder = await ReportHeldLockAsync(issues, cancellationToken);
@@ -296,22 +296,14 @@ public sealed partial class MigrationEngine
 
             // Stop before any migration runs if a collection definition is invalid, or (when no migration runs first that
             // could change the indexes, e.g. with --only collections) would make a change that isn't allowed.
+            List<CollectionPreview>? collections = null;
             if (runCollections)
             {
-                var precheckIssues = new List<ValidationIssue>();
-                var precheck = await PreviewCollectionsAsync(arguments, migrationsRunFirst: pending.Count > 0, precheckIssues, ct);
-                var errors = precheckIssues.Count(i => i.Severity == "error");
-                if (errors > 0)
+                var found = new List<ValidationIssue>();
+                collections = await PreviewCollectionsAsync(arguments, migrationsRunFirst: pending.Count > 0, found, ct);
+                if (CollectionsBlocked(collections, found, issues, "Stopped before changing anything") is { } stopped)
                 {
-                    issues.AddRange(precheckIssues);
-                    return new CommandResult
-                    {
-                        ExitCode = ExitCodes.ValidationFailed,
-                        Applied = [],
-                        Collections = precheck,
-                        Issues = issues,
-                        Message = $"Stopped before changing anything: {errors} problem(s) with collection definitions.",
-                    };
+                    return stopped;
                 }
             }
 
@@ -344,10 +336,22 @@ public sealed partial class MigrationEngine
             }
 
             var reconciled = new List<string>();
-            if (runCollections)
+            if (collections is not null)
             {
-                var collectionStates = await GetCollectionStatesAsync(ct);
-                foreach (var collection in _collections)
+                // The migrations may have changed the indexes, so check every definition again before changing any.
+                if (applied.Count > 0)
+                {
+                    var found = new List<ValidationIssue>();
+                    collections = await PreviewCollectionsAsync(arguments, migrationsRunFirst: false, found, ct);
+                    if (CollectionsBlocked(collections, found, issues, $"Applied {applied.Count} migration(s) in batch {batch}, then stopped before changing any collection") is { } stopped)
+                    {
+                        stopped.Batch = batch;
+                        stopped.Applied = applied;
+                        return stopped;
+                    }
+                }
+
+                foreach (var collection in collections!)
                 {
                     if (LockLost(ct, cancellationToken) is { } lost)
                     {
@@ -358,8 +362,7 @@ public sealed partial class MigrationEngine
                         return lost;
                     }
 
-                    collectionStates.TryGetValue(collection.Name, out var state);
-                    var (changed, error) = await ReconcileAsync(collection, state, arguments, outputOptions, batch, ct);
+                    var (changed, error) = await ReconcileAsync(collection, arguments, outputOptions, batch, ct);
                     if (error is not null)
                     {
                         return new CommandResult
@@ -369,13 +372,13 @@ public sealed partial class MigrationEngine
                             Applied = applied,
                             Reconciled = reconciled,
                             Issues = issues,
-                            Message = $"Collection {collection.Name} failed: {error}",
+                            Message = $"Collection {collection.Collection.Name} failed: {error}",
                         };
                     }
 
                     if (changed)
                     {
-                        reconciled.Add(collection.Name);
+                        reconciled.Add(collection.Collection.Name);
                     }
                 }
             }

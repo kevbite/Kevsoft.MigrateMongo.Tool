@@ -431,7 +431,7 @@ The source generator finds migrations at compile time and reports mistakes as bu
 ## Managing collections
 
 A migration runs once. A collection definition describes what a collection should look like now, and every `up` makes
-only the changes needed to get there. It covers indexes for now.
+only the changes needed to get there. It covers indexes for now, and needs MongoDB 5.0 or later.
 
 ```csharp
 using Kevsoft.MigrateMongo;
@@ -507,7 +507,9 @@ A definition can make this stricter, not looser: `collection.Indexes.OnRebuild =
 | `drop` | Is dropped, its definition recorded first. |
 
 `collection.Indexes.Prune` overrides the config for one collection, and `Ignore("pattern")` leaves matching names alone
-(`*` matches anything). The `_id_` index is never touched.
+(`*` matches anything). The `_id_` index is never touched. A declared index never changes an ignored one: if it has
+the same name, the same keys with other options, or both are text indexes, the collection is blocked until one of them
+changes. One that's exactly the same is fine.
 
 ### Typed definitions
 
@@ -546,12 +548,13 @@ while later migrations are still pending.
 
 `--only migrations` and `--only collections` split the two, e.g. migrations at startup and collection definitions from
 a deploy step where long index builds don't matter. A definition that's invalid, or a change that isn't allowed, stops
-`up` before any migration runs, unless migrations run first in the same `up` and could change the indexes (then it's
-checked again after them). With `--only collections` no migration runs first, so `up` stops before changing anything.
+`up` before any migration runs, unless migrations run first in the same `up` and could change the indexes. Then every
+definition is checked again after the migrations, and `up` stops before changing any collection. With
+`--only collections` no migration runs first, so `up` stops before changing anything.
 
 During a rolling deploy, an instance of the previous build can start after the new one has run. Each collection
-remembers the definition it replaced, and for `indexes.supersededWindow` (an hour by default) a run that would bring
-that one back is skipped with a warning instead of undoing the newer one. After that, going back to it is treated as a
+remembers the definition it replaced, and for `indexes.supersededWindow` (an hour by default) after the replacement, a
+run that would bring that one back is skipped with a warning instead of undoing the newer one. After that, going back to it is treated as a
 deliberate change. `--allow-superseded` applies it straight away, e.g. when rolling back on purpose.
 
 Atlas Search indexes, validators and other collection options aren't managed yet, and a definition covers a collection
@@ -813,7 +816,7 @@ Indexes
 | `_migrations` | One document per migration, keyed by id, with its state, batch, checksum, timings and who applied it. |
 | `_migrations.history` | An append-only log of every apply, rollback, failure and `mark`, and every collection change (`kind: "collection"`). |
 | `_migrations.lock` | The lock document while a run is in progress, with its owner, expiry and heartbeat. |
-| `_migrations.collections` | One document per [collection definition](#managing-collections), keyed by collection name: the declaration last applied, the one it replaced, the indexes it hid, and the last run's operations. |
+| `_migrations.collections` | One document per [collection definition](#managing-collections), keyed by collection name: the declaration last applied, the one it replaced and when, the indexes it hid, and the last run's operations. |
 
 ```js
 {

@@ -79,12 +79,13 @@ internal static class IndexPlanner
             }
         }
 
-        // 2. Same name (or the collection's one text index) but a different identity: it has to be rebuilt.
+        // 2. Same name (or the collection's one text index) but a different identity: it has to be rebuilt. An ignored index
+        // is never replaced.
         var clashes = new Dictionary<IndexSpec, IndexSpec>();
         foreach (var index in unmatched.ToList())
         {
-            var clash = candidates.FirstOrDefault(c => !matched.ContainsValue(c) && !clashes.ContainsValue(c) && c.Name == index.Name)
-                        ?? (index.IsText ? candidates.FirstOrDefault(c => !matched.ContainsValue(c) && !clashes.ContainsValue(c) && c.IsText) : null);
+            var free = candidates.Where(c => !matched.ContainsValue(c) && !clashes.ContainsValue(c) && !IsIgnored(c.Name)).ToList();
+            var clash = free.FirstOrDefault(c => c.Name == index.Name) ?? (index.IsText ? free.FirstOrDefault(c => c.IsText) : null);
             if (clash is not null)
             {
                 clashes[index] = clash;
@@ -93,10 +94,21 @@ internal static class IndexPlanner
         }
 
         var claimed = matched.Values.Concat(clashes.Values).ToHashSet();
-        foreach (var index in unmatched.Where(u => candidates.Any(c => c.Name == u.Name)))
+        foreach (var index in unmatched)
         {
-            plan.Problems.Add($"{name}: the declared index {Display(index.Keys)} is named {index.Name}, but the server's {index.Name} " +
-                              "is another declared index. Give one of them a different name.");
+            if (candidates.FirstOrDefault(c => c.Name == index.Name) is { } taken)
+            {
+                plan.Problems.Add(claimed.Contains(taken)
+                    ? $"{name}: the declared index {Display(index.Keys)} is named {index.Name}, but the server's {index.Name} is another declared index. " +
+                      "Give one of them a different name."
+                    : $"{name}: the declared index {Display(index.Keys)} is named {index.Name}, but the server's {index.Name} is ignored, so it isn't replaced. " +
+                      $"Give the declared index a different name, or stop ignoring {index.Name}.");
+            }
+            else if (index.IsText && candidates.FirstOrDefault(c => c.IsText && !claimed.Contains(c)) is { } text)
+            {
+                plan.Problems.Add($"{name}: a collection can only have one text index, and the server's {text.Name} is ignored, so the declared " +
+                                  $"{Display(index.Keys)} can't be created. Stop ignoring {text.Name} to replace it.");
+            }
         }
 
         var creates = new List<PlannedChange>();
@@ -110,7 +122,13 @@ internal static class IndexPlanner
                 continue;
             }
 
-            if (differences.All(d => CanModify(d, canConvertToUnique)))
+            if (IsIgnored(server.Name))
+            {
+                // E.g. a declared text index matches the collection's one text index whatever its fields.
+                plan.Problems.Add($"{name}: the declared index {Display(index.Keys)} matches {server.Name}, which is ignored, so it isn't changed " +
+                                  $"({string.Join("; ", differences.Select(d => d.Describe()))}). Declare it as it is, or stop ignoring {server.Name}.");
+            }
+            else if (differences.All(d => CanModify(d, canConvertToUnique)))
             {
                 modifies.Add(Modify(server, differences));
             }

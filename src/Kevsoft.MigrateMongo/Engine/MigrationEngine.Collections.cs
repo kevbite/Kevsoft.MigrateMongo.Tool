@@ -42,7 +42,7 @@ public sealed partial class MigrationEngine
     /// Plans every collection definition without changing anything, adding an issue for each one that can't be applied. When
     /// migrations run before the definitions, a blocked change is only a warning: the migrations may change the indexes first.
     /// </summary>
-    private async Task<List<CollectionInfo>?> PreviewCollectionsAsync(
+    private async Task<List<CollectionPreview>?> PreviewCollectionsAsync(
         CommandArguments arguments,
         bool migrationsRunFirst,
         List<ValidationIssue> issues,
@@ -60,13 +60,13 @@ public sealed partial class MigrationEngine
                 $"State for collection {state.Name} was written by a newer version of Kevsoft.MigrateMongo (schema v{state.V}). Upgrade the library."));
         }
 
-        var result = new List<CollectionInfo>();
+        var result = new List<CollectionPreview>();
         foreach (var collection in _collections)
         {
             states.TryGetValue(collection.Name, out var state);
             var plan = await _executor.PlanCollectionAsync(collection, PolicyFor(collection, state, arguments), cancellationToken);
             var info = ToInfo(collection, plan, state, arguments);
-            result.Add(info);
+            result.Add(new CollectionPreview(collection, state, plan, info));
 
             if (info.State == CollectionStates.Superseded)
             {
@@ -83,6 +83,36 @@ public sealed partial class MigrationEngine
         }
 
         return result;
+    }
+
+    /// <summary>A collection definition planned against the database as it was then.</summary>
+    private sealed record CollectionPreview(CollectionDescriptor Collection, StoredCollectionState? State, CollectionPlan Plan, CollectionInfo Info);
+
+    /// <summary>
+    /// The result that stops <c>up</c> when a preview found an error, or null. What the preview found is only reported then:
+    /// otherwise the run goes on to apply it.
+    /// </summary>
+    private static CommandResult? CollectionsBlocked(
+        List<CollectionPreview>? collections,
+        List<ValidationIssue> found,
+        List<ValidationIssue> issues,
+        string stopped)
+    {
+        var errors = found.Count(i => i.Severity == "error");
+        if (errors == 0)
+        {
+            return null;
+        }
+
+        issues.AddRange(found);
+        return new CommandResult
+        {
+            ExitCode = ExitCodes.ValidationFailed,
+            Applied = [],
+            Collections = collections?.Select(c => c.Info).ToList(),
+            Issues = issues,
+            Message = $"{stopped}: {errors} problem(s) with collection definitions.",
+        };
     }
 
     /// <summary>For <c>validate</c>: every definition renders and is consistent.</summary>
@@ -121,15 +151,13 @@ public sealed partial class MigrationEngine
     /// After the window, going back to it counts as a deliberate change.
     /// </summary>
     private bool IsSuperseded(CollectionPlan plan, StoredCollectionState? state, CommandArguments arguments) =>
-        !arguments.AllowSuperseded && !plan.Invalid && state is not null &&
+        !arguments.AllowSuperseded && !plan.Invalid && state is { ReplacedAt: { } replacedAt } &&
         plan.Declaration != state.Declaration && plan.Declaration == state.PreviousDeclaration &&
-        Now < state.ReconciledAt + _options.IndexesSupersededWindow;
+        Now < replacedAt + _options.IndexesSupersededWindow;
 
     private string Superseded(CollectionDescriptor collection, StoredCollectionState state) =>
-        $"{collection.Name}: this build's definition was replaced at {state.ReconciledAt:u} by run {ShortRun(state.RunId)} ({state.AppliedBy.Host}); " +
-        $"skipping it until {state.ReconciledAt + _options.IndexesSupersededWindow:u}. Run with --allow-superseded to apply it now.";
-
-    private static string ShortRun(string runId) => runId.Length > 8 ? runId[..8] : runId;
+        $"{collection.Name}: this build's definition was replaced at {state.ReplacedAt:u}; skipping it until " +
+        $"{state.ReplacedAt + _options.IndexesSupersededWindow:u}. Run with --allow-superseded to apply it now.";
 
     private CollectionInfo ToInfo(CollectionDescriptor collection, CollectionPlan plan, StoredCollectionState? state, CommandArguments arguments) => new()
     {
@@ -150,29 +178,23 @@ public sealed partial class MigrationEngine
         DurationMs = state?.DurationMs,
     };
 
-    /// <summary>Brings one collection in line with its definition.</summary>
+    /// <summary>
+    /// Brings one collection in line with its definition, from a preview that was checked for problems before any collection
+    /// changed. The executor plans it again before applying, so it works from the indexes as they are then.
+    /// </summary>
     /// <returns>Whether any index changed, and the error if it failed.</returns>
     private async Task<(bool Changed, string? Error)> ReconcileAsync(
-        CollectionDescriptor collection,
-        StoredCollectionState? state,
+        CollectionPreview preview,
         CommandArguments arguments,
         OutputOptions outputOptions,
         int batch,
         CancellationToken cancellationToken)
     {
-        var policy = PolicyFor(collection, state, arguments);
-        var plan = await _executor.PlanCollectionAsync(collection, policy, cancellationToken);
-        if (IsSuperseded(plan, state, arguments))
+        var (collection, state, plan, _) = preview;
+        if (preview.Info.State == CollectionStates.Superseded)
         {
             _events.OnEvent(new RunnerEvent { Type = EventTypes.CollectionSkipped, Collection = collection.Name, Message = Superseded(collection, state!) });
             return (false, null);
-        }
-
-        if (plan.Problems.Count > 0)
-        {
-            var problems = string.Join(" ", plan.Problems);
-            EmitCollection(EventTypes.CollectionFailed, collection, null, problems);
-            return (false, problems);
         }
 
         if (!plan.HasChanges && state?.Declaration == plan.Declaration && SameHidden(state.Hidden, plan.Hidden))
@@ -187,7 +209,7 @@ public sealed partial class MigrationEngine
         CollectionApplyResult applied;
         try
         {
-            applied = await _executor.ApplyCollectionAsync(collection, policy, run, outputOptions, cancellationToken);
+            applied = await _executor.ApplyCollectionAsync(collection, PolicyFor(collection, state, arguments), run, outputOptions, cancellationToken);
         }
         catch (Exception e)
         {
@@ -215,6 +237,7 @@ public sealed partial class MigrationEngine
             Origin = collection.Origin,
             Declaration = result.Declaration,
             PreviousDeclaration = declarationChanged ? state?.Declaration : state?.PreviousDeclaration,
+            ReplacedAt = declarationChanged ? Now : state?.ReplacedAt,
             ReconciledAt = changed || declarationChanged || state is null ? Now : state.ReconciledAt,
             DurationMs = changed ? stopwatch.ElapsedMilliseconds : state?.DurationMs,
             RunId = changed || declarationChanged || state is null ? RunId : state.RunId,
