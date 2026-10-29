@@ -13,7 +13,7 @@ internal static class MigrationOutputMapper
 
     private static readonly HashSet<string> OperationFields = new(StringComparer.Ordinal)
     {
-        "kind", "collection", "label", "counts", "durationMs", "at", "statementTruncated",
+        "kind", "collection", "label", "counts", "error", "durationMs", "at", "statementTruncated",
     };
 
     /// <summary>
@@ -68,6 +68,7 @@ internal static class MigrationOutputMapper
                 Statement = o.Statement is null ? null : ToJson(o.Statement),
                 StatementTruncated = o.StatementTruncated ? true : null,
                 Counts = new Dictionary<string, long>(o.Counts, StringComparer.Ordinal),
+                Error = o.Error,
                 DurationMs = o.DurationMs,
                 At = o.At,
             }).ToList();
@@ -180,6 +181,11 @@ internal static class MigrationOutputMapper
         }
 
         document.Add("counts", counts);
+        if (operation.Error is not null)
+        {
+            document.Add("error", operation.Error);
+        }
+
         document.Add("durationMs", operation.DurationMs);
         document.Add("at", operation.At);
         return document;
@@ -198,6 +204,7 @@ internal static class MigrationOutputMapper
             Counts = d.TryGetValue("counts", out var counts) && counts.IsBsonDocument
                 ? counts.AsBsonDocument.Where(e => e.Value.IsNumeric).ToDictionary(e => e.Name, e => e.Value.ToInt64(), StringComparer.Ordinal)
                 : [],
+            Error = d.TryGetValue("error", out var error) && error.IsString ? error.AsString : null,
             DurationMs = d.TryGetValue("durationMs", out var duration) && duration.IsNumeric ? duration.ToInt64() : 0,
             At = d.TryGetValue("at", out var at) && at.IsValidDateTime ? at.ToUniversalTime() : default,
         };

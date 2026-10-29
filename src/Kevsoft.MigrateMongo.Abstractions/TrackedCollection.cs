@@ -131,7 +131,8 @@ public sealed class TrackedCollection<T>
                     : Collection.InsertManyAsync(_session, list, options, cancellationToken));
                 return true;
             },
-            _ => new Dictionary<string, long> { ["inserted"] = list.Count });
+            _ => new Dictionary<string, long> { ["inserted"] = list.Count },
+            r => new Dictionary<string, long> { ["inserted"] = r.InsertedCount });
     }
 
     /// <summary>Runs a bulk write. Each request's kind and filter/update is recorded (inserted documents aren't).</summary>
@@ -147,7 +148,8 @@ public sealed class TrackedCollection<T>
             () => _session is null
                 ? Collection.BulkWriteAsync(list, options, cancellationToken)
                 : Collection.BulkWriteAsync(_session, list, options, cancellationToken),
-            r => r.IsAcknowledged ? MigrationResults.Counts(r) : null);
+            r => r.IsAcknowledged ? MigrationResults.Counts(r) : null,
+            r => MigrationResults.Counts(r));
     }
 
     /// <summary>Creates an index and records its keys and options.</summary>
@@ -298,19 +300,42 @@ public sealed class TrackedCollection<T>
         return definition;
     }
 
+    /// <summary>
+    /// Runs and records an operation, also when it fails. For operations that throw
+    /// <see cref="MongoBulkWriteException{T}"/>, <paramref name="partialCounts"/> gives what was applied before the error.
+    /// </summary>
     private async Task<TResult> RunAsync<TResult>(
         string kind,
         Func<BsonDocument?> statement,
         Func<Task<TResult>> operation,
-        Func<TResult, IReadOnlyDictionary<string, long>?> counts)
+        Func<TResult, IReadOnlyDictionary<string, long>?> counts,
+        Func<BulkWriteResult<T>, IReadOnlyDictionary<string, long>>? partialCounts = null)
     {
         var rendered = _captureStatement ? statement() : null;
         var at = _results.Time.GetUtcNow().UtcDateTime;
         var started = Stopwatch.GetTimestamp();
-        var result = await operation();
-        var elapsed = Stopwatch.GetElapsedTime(started);
+        TResult result;
+        try
+        {
+            result = await operation();
+        }
+        catch (Exception e)
+        {
+            var applied = partialCounts is not null && e is MongoBulkWriteException<T> { Result.IsAcknowledged: true } bulk
+                ? partialCounts(bulk.Result)
+                : null;
+            Record(kind, rendered, applied, at, started, e);
+            throw;
+        }
 
-        var recordedCounts = counts(result) ?? new Dictionary<string, long>();
+        Record(kind, rendered, counts(result), at, started, null);
+        return result;
+    }
+
+    private void Record(string kind, BsonDocument? rendered, IReadOnlyDictionary<string, long>? counts, DateTime at, long started, Exception? error)
+    {
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        var recordedCounts = counts ?? new Dictionary<string, long>();
         var truncated = rendered is not null && rendered.ToBson().Length > MigrationResults.MaxStatementBytes;
         _results.Record(new TrackedOperation
         {
@@ -320,6 +345,7 @@ public sealed class TrackedCollection<T>
             Statement = truncated ? null : rendered,
             StatementTruncated = truncated,
             Counts = recordedCounts,
+            Error = error is null ? null : MigrationResults.DescribeError(error),
             DurationMs = (long)elapsed.TotalMilliseconds,
             At = at,
         });
@@ -328,8 +354,6 @@ public sealed class TrackedCollection<T>
         {
             _results.AddCounts(Label, recordedCounts);
         }
-
-        return result;
     }
 
     private BsonDocument? UpdateStatement(FilterDefinition<T> filter, UpdateDefinition<T> update, UpdateOptions? options) =>

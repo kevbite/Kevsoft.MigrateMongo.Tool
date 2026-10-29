@@ -37,7 +37,14 @@ public sealed class TrackedOperation
     /// <summary>True when the statement was over <see cref="MigrationResults.MaxStatementBytes"/> and was dropped.</summary>
     public bool StatementTruncated { get; init; }
 
+    /// <summary>
+    /// What was applied. For a failed operation, only what the server reports as applied before the error (bulk writes
+    /// and <c>insertMany</c>).
+    /// </summary>
     public required IReadOnlyDictionary<string, long> Counts { get; init; }
+
+    /// <summary>Why the operation failed (the exception's type and message), or null when it succeeded.</summary>
+    public string? Error { get; init; }
 
     public long DurationMs { get; init; }
 
@@ -60,6 +67,7 @@ public sealed partial class MigrationResults
     public const int MaxNoteLength = 1024;
     public const int MaxOperations = 200;
     public const int MaxStatementBytes = 4 * 1024;
+    public const int MaxErrorLength = 1024;
 
     private readonly BsonDocument _values = [];
     private readonly List<ResultNote> _notes = [];
@@ -227,10 +235,7 @@ public sealed partial class MigrationResults
     public void Note(string message, NoteLevel level = NoteLevel.Info)
     {
         ArgumentNullException.ThrowIfNull(message);
-        if (message.Length > MaxNoteLength)
-        {
-            message = message[..(MaxNoteLength - 1)] + "…";
-        }
+        message = Truncate(message, MaxNoteLength);
 
         lock (_gate)
         {
@@ -367,6 +372,15 @@ public sealed partial class MigrationResults
         }
     }
 
+    /// <summary>The error recorded for a failed operation: the exception's type and message, cut to <see cref="MaxErrorLength"/>.</summary>
+    internal static string DescribeError(Exception exception)
+    {
+        // Generic exceptions (MongoBulkWriteException`1) are named without their arity.
+        var type = exception.GetType().Name;
+        var arity = type.IndexOf('`', StringComparison.Ordinal);
+        return Truncate($"{(arity < 0 ? type : type[..arity])}: {exception.Message}", MaxErrorLength);
+    }
+
     /// <summary>Throws if <paramref name="key"/> isn't a valid result key.</summary>
     internal static void ValidateKey(string key)
     {
@@ -458,6 +472,9 @@ public sealed partial class MigrationResults
 
         return wrapper["v"];
     }
+
+    private static string Truncate(string text, int maxLength) =>
+        text.Length > maxLength ? text[..(maxLength - 1)] + "…" : text;
 
     private static DateTime ToUtc(DateTime value) => value.Kind switch
     {

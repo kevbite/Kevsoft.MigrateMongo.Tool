@@ -290,8 +290,14 @@ public sealed class OperationRecord
     /// <summary>True when the statement was too large to keep.</summary>
     public bool? StatementTruncated { get; set; }
 
-    /// <summary>e.g. <c>matched</c>, <c>modified</c>, <c>upserted</c>, <c>deleted</c>, <c>inserted</c>, <c>created</c>, <c>dropped</c>.</summary>
+    /// <summary>
+    /// e.g. <c>matched</c>, <c>modified</c>, <c>upserted</c>, <c>deleted</c>, <c>inserted</c>, <c>created</c>,
+    /// <c>dropped</c>. For a failed operation, only what was applied before the error.
+    /// </summary>
     public Dictionary<string, long>? Counts { get; set; }
+
+    /// <summary>Why the operation failed, or null when it succeeded.</summary>
+    public string? Error { get; set; }
 
     public long DurationMs { get; set; }
 

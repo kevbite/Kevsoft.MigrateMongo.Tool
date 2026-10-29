@@ -540,6 +540,7 @@ public sealed class MigrationEngine
             Collection = o.Collection,
             Label = o.Label,
             Counts = o.Counts,
+            Error = o.Error,
             DurationMs = o.DurationMs,
             At = o.At,
         }).ToList(),

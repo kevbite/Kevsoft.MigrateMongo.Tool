@@ -163,7 +163,8 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         var operations = (output.Operations?.Count ?? 0) + (output.OperationsTruncated ?? 0);
         if (operations > 0)
         {
-            WriteLine(Paint($"    {operations} operation(s) recorded – migrate-mongo show {id}", Dim));
+            var failedOperations = output.Operations?.Count(o => o.Error is not null) ?? 0;
+            WriteLine(Paint($"    {operations} operation(s) recorded{(failedOperations > 0 ? $", {failedOperations} failed" : "")} – migrate-mongo show {id}", Dim));
         }
 
         if (failed && !output.Committed)
@@ -283,6 +284,11 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
                 if (op.StatementTruncated == true)
                 {
                     WriteLine(Paint("       (statement too large to record)", Dim));
+                }
+
+                if (op.Error is { } operationError)
+                {
+                    WriteLine(Paint($"       failed: {operationError}", Red));
                 }
             }
         }
