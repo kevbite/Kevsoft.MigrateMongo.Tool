@@ -29,15 +29,4 @@ public sealed class ExtendedJsonTests
     {
         ExtendedJson.Format(Json("\"gold\""), quoteStrings: true).ShouldBe("\"gold\"");
     }
-
-    [Fact]
-    public void Canonical_values_are_relaxed()
-    {
-        var relaxed = ExtendedJson.ToRelaxed(Json("""
-            {"i":{"$numberInt":"2"},"l":{"$numberLong":"9007199254740993"},"d":{"$numberDouble":"1.5"},"s":"x","list":[{"$numberInt":"4"}],
-             "at":{"$date":{"$numberLong":"1790812800000"}},"old":{"$date":{"$numberLong":"-1000"}}}
-            """));
-
-        relaxed.GetRawText().ShouldBe("""{"i":2,"l":9007199254740993,"d":1.5,"s":"x","list":[4],"at":{"$date":"2026-10-01T00:00:00Z"},"old":{"$date":{"$numberLong":"-1000"}}}""");
-    }
 }

@@ -13,7 +13,7 @@ internal sealed class JsonLineEventSink(TextWriter output) : IMigrationEventSink
 
     public void OnEvent(RunnerEvent runnerEvent)
     {
-        ExtendedJson.Relax(runnerEvent);
+        RelaxedExtendedJson.Relax(runnerEvent);
         var json = JsonSerializer.Serialize(runnerEvent, ProtocolJsonContext.Default.RunnerEvent);
         lock (_gate)
         {
