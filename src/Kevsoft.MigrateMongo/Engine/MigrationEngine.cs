@@ -350,6 +350,11 @@ public sealed class MigrationEngine
         return await WithLockAsync(async ct =>
         {
             var states = await _store.GetStatesAsync(ct);
+            if (BlockingResult(UnsupportedStates(states)) is { } unsupported)
+            {
+                return unsupported;
+            }
+
             var existing = states.FirstOrDefault(s => s.Id == id);
             _byId.TryGetValue(id, out var migration);
             if (existing is null && migration is null)
@@ -404,6 +409,11 @@ public sealed class MigrationEngine
         return await WithLockAsync(async ct =>
         {
             var states = await _store.GetStatesAsync(ct);
+            if (BlockingResult(UnsupportedStates(states)) is { } unsupported)
+            {
+                return unsupported;
+            }
+
             var known = states.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
             var targets = _migrations.Where(m => string.CompareOrdinal(m.Id, to) <= 0 && !known.Contains(m.Id)).ToList();
             if (targets.Count == 0)
@@ -596,13 +606,7 @@ public sealed class MigrationEngine
 
     private List<ValidationIssue> Analyse(IReadOnlyList<StoredMigrationState> states, List<MigrationStatusInfo> status)
     {
-        var issues = new List<ValidationIssue>();
-        foreach (var state in states.Where(s => s.V > StoredMigrationState.CurrentSchemaVersion))
-        {
-            issues.Add(Issue("error", "unsupportedState", state.Id,
-                $"State for {state.Id} was written by a newer version of Kevsoft.MigrateMongo (schema v{state.V}). Upgrade the library."));
-        }
-
+        var issues = UnsupportedStates(states);
         foreach (var state in states.Where(s => s.State is MigrationStates.Applying or MigrationStates.RollingBack or MigrationStates.Failed))
         {
             var what = state.State == MigrationStates.Failed ? $"failed ({state.Error})" : $"in state '{state.State}' from run {state.RunId} on {state.AppliedBy.Host}";
@@ -640,6 +644,16 @@ public sealed class MigrationEngine
 
         return issues;
     }
+
+    /// <summary>
+    /// State written by a newer schema version. Every command that writes refuses to run while there is any, so an
+    /// older version can't overwrite or misread what a newer one recorded.
+    /// </summary>
+    private static List<ValidationIssue> UnsupportedStates(IReadOnlyList<StoredMigrationState> states) => states
+        .Where(s => s.V > StoredMigrationState.CurrentSchemaVersion)
+        .Select(s => Issue("error", "unsupportedState", s.Id,
+            $"State for {s.Id} was written by a newer version of Kevsoft.MigrateMongo (schema v{s.V}). Upgrade the library."))
+        .ToList();
 
     private static CommandResult? BlockingResult(List<ValidationIssue> issues)
     {
