@@ -148,7 +148,8 @@ always use the built-in templates, not `migrationTemplate`.
 ## Configuration
 
 `migrate-mongo.yaml` (or `migrate-mongo.yml`) is found in the current directory, or passed with `-f <path>`. Any value
-can reference environment variables with `${NAME}`. Unknown settings are errors, so typos don't go unnoticed.
+can reference environment variables with `${NAME}`. Unknown settings are errors, in every environment and not just
+the one `--env` selects, so typos don't go unnoticed.
 
 ```yaml
 project: src/MyApp.Migrations        # the migrations project, relative to this file
@@ -196,7 +197,7 @@ environments:
 | `results.captureStatements` | `true` | Record each [tracked operation](#recording-results)'s filter, update or index keys. `false` keeps only the kind, counts and timings. |
 | `results.maxBytes` | `65536` | The most a migration's named results can take up. A migration that records more fails. |
 | `tunnel` | | See [Tunnelling through a bastion](#tunnelling-through-a-bastion). |
-| `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings. |
+| `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings; an empty one changes nothing. |
 
 ## Writing migrations
 
