@@ -12,21 +12,9 @@ public sealed class MongoMigrationExecutor(
     IServiceProvider services,
     ILoggerFactory loggerFactory) : IMigrationExecutor
 {
-    private const int CommandNotFound = 59;
-
     public async Task<bool> SupportsTransactionsAsync(CancellationToken cancellationToken)
     {
-        BsonDocument hello;
-        try
-        {
-            hello = await database.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1), cancellationToken: cancellationToken);
-        }
-        catch (MongoCommandException e) when (e.Code == CommandNotFound)
-        {
-            // MongoDB 4.2 before 4.2.10 and 4.4 before 4.4.2 only have the command's old name.
-            hello = await database.RunCommandAsync<BsonDocument>(new BsonDocument("isMaster", 1), cancellationToken: cancellationToken);
-        }
-
+        var hello = await database.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1), cancellationToken: cancellationToken);
         var isReplicaSet = hello.Contains("setName");
         var isMongos = hello.TryGetValue("msg", out var msg) && msg.IsString && msg.AsString == "isdbgrid";
         return isReplicaSet || isMongos;

@@ -20,9 +20,9 @@ line, your build server or your application.
 
 ## Getting started
 
-You need a [.NET SDK](https://dotnet.microsoft.com/download) (10 or later) and MongoDB 4.4 or later (4.2 also works with
-MongoDB.Driver 3.9 or earlier). Transactions need a replica set or sharded cluster. Locally,
-[MongoDB Atlas Local](https://hub.docker.com/r/mongodb/mongodb-atlas-local) works well:
+You need a [.NET SDK](https://dotnet.microsoft.com/download) (10 or later) and MongoDB 5.0 or later. Transactions need a
+replica set or sharded cluster. Locally, [MongoDB Atlas Local](https://hub.docker.com/r/mongodb/mongodb-atlas-local)
+works well:
 
 ```bash
 docker run -d -p 27017:27017 mongodb/mongodb-atlas-local:8.0

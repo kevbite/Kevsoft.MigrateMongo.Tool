@@ -64,7 +64,7 @@ There's also a [Docker image](#docker).
 
 Migrations live in a small console project that you own. The tool builds it with your SDK and runs it on your runtime,
 using the library and `MongoDB.Driver` versions you choose (3.9 or later). The tool itself never loads the driver, so
-upgrading either side doesn't break the other.
+upgrading either side doesn't break the other. The database must be MongoDB 5.0 or later.
 
 ### `init`
 
@@ -377,8 +377,7 @@ await context.Track(context.Database, captureStatement: false).RunCommandAsync(
 ```
 
 To leave statements out everywhere, set `results.captureStatements: false`, or pass `--no-capture-statements` for one
-run. Statements need MongoDB 5.0 or later: they contain field names that start with `$` (such as `$set`), which older
-servers refuse to store, so there a migration that tracks a filter or update fails unless statements are left out.
+run.
 
 Limits keep the state documents small: the named values can take up to `results.maxBytes` (64 KB), and a migration
 that records more fails with `MM-RESULTS-TOO-LARGE`, listing the largest keys. Put large data in your own collection.
