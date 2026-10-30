@@ -31,7 +31,7 @@ public sealed class BundleTests(IntegrationEnvironment environment)
         up.ExitCode.ShouldBe(0, up.ToString());
         var states = workspace.Find("_migrations");
         states.Select(s => s["_id"].AsString).ShouldBe(["20260101000001", "20260101000002", "20260101000003"]);
-        states.ShouldAllBe(s => s["state"].AsString == "applied" && s["appliedBy"]["runtime"].AsString.StartsWith("8.0."));
+        states.ShouldAllBe(s => s["state"].AsString == "applied" && s["appliedBy"]["runtime"].AsString.StartsWith("10.0."));
 
         var down = await workspace.RunAsync(["down", "--batch", "--runner", executable], variables);
 

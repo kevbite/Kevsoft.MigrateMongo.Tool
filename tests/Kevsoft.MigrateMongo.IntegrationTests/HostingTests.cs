@@ -35,7 +35,7 @@ public sealed class HostingTests(IntegrationEnvironment environment)
             appliedBy["tool"].AsString.ShouldBe("app/HostingApp");
             appliedBy["library"].AsString.ShouldBe(environment.PackageVersion);
             appliedBy["driver"].AsString.ShouldBe("3.12.0");
-            appliedBy["runtime"].AsString.ShouldStartWith("8.0.");
+            appliedBy["runtime"].AsString.ShouldStartWith("10.0.");
         }
 
         // SeedDefaults took SeedOptions from the app's service collection.
