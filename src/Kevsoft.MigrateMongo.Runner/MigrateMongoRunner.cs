@@ -261,7 +261,7 @@ public static class MigrateMongoRunner
         {
             ConfigLoader.EnsureConnectable(config);
             var migrations = MigrationDiscovery.Discover(options, entryAssembly);
-            if (migrations.Count == 0 && command is not ("unlock" or "history"))
+            if (migrations.Count == 0 && command is not ("unlock" or "history" or "show"))
             {
                 // Silence here would hide a build that skipped the source generator: `up` would report nothing to do.
                 sink.OnEvent(new RunnerEvent

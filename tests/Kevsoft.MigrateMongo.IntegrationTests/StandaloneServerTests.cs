@@ -19,11 +19,13 @@ public sealed class StandaloneServerTests(IntegrationEnvironment environment, St
 
         var up = await workspace.RunAsync("up");
 
-        up.ExitCode.ShouldBe(0, up.ToString());
+        // SeedDefaults checks it has a transaction (on a replica set `auto` gives it one), so here it shows it didn't get one.
+        up.ExitCode.ShouldBe(1, up.ToString());
+        up.Output.ShouldContain("Expected to run in a transaction.");
         workspace.Find("_migrations").Select(s => (s["_id"].AsString, s["state"].AsString, s["transactional"].AsBoolean)).ShouldBe([
             ("20260101000001", "applied", false),
             ("20260101000002", "applied", false),
-            ("20260101000003", "applied", false),
+            ("20260101000003", "failed", false),
         ]);
     }
 
