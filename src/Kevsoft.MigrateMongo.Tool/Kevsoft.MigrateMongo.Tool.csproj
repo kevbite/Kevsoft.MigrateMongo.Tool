@@ -53,4 +53,21 @@
     </ItemGroup>
   </Target>
 
+  <!--
+    .NET 10's Swift crypto library has debug info that points at clang module caches on the machine that built it, so
+    dsymutil prints "error: ....pcm: No such file or directory" while making the dSYM. It still succeeds, but the
+    Native AOT targets fail the publish on that text. Until a .NET 10 release has .NET 11's fix (dotnet/runtime#124266),
+    publishing on macOS (which Native AOT only does for macOS) skips the targets' stripping and runs the same commands
+    here instead, without treating their output as errors. Like the link, it only reruns when the link's inputs change.
+  -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <StripSymbols>false</StripSymbols>
+  </PropertyGroup>
+
+  <Target Name="StripMacOSSymbols" AfterTargets="LinkNative" Condition="$([MSBuild]::IsOSPlatform('OSX'))"
+          Inputs="$(NativeObject);@(NativeLibrary)" Outputs="$(NativeBinary).dSYM/Contents/Info.plist">
+    <Exec Command="dsymutil $(DsymUtilOptions) &quot;$(NativeBinary)&quot; &amp;&amp; strip -no_code_signature_warning -x &quot;$(NativeBinary)&quot;"
+          IgnoreStandardErrorWarningFormat="true" />
+  </Target>
+
 </Project>
