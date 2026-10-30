@@ -433,11 +433,15 @@ expiresAt, heartbeatAt }`.
 * **Versioned documents (`v`).** A library that finds a `v` newer than it understands refuses to write, so
   an old pinned version on one pipeline can't corrupt state written by a newer one.
 * **Lock correctness doesn't depend on TTL indexes**, which only run every ~60 s. We check expiry
-  explicitly:
-  * acquire with `insertOne`, or with a conditional `findOneAndUpdate` when `expiresAt < now`;
-  * a heartbeat extends `expiresAt` during long migrations;
+  explicitly, by the **server's clock** (`$$NOW`) so agents whose clocks disagree still agree on it:
+  * acquire with one atomic upsert (pipeline `findOneAndUpdate`) that takes the lock only if it's missing or
+    `expiresAt < $$NOW`;
+  * a heartbeat extends `expiresAt` to `$$NOW + lockTtl` until the locked work returns (even after a cancel), and
+    times itself on the local monotonic clock;
   * release deletes the lock only if `runId` still matches;
-  * acquisition retries with exponential back-off up to `lockWaitTimeout`.
+  * acquisition polls every second up to `lockWaitTimeout`.
+* **Primary, majority.** State, history and the lock are always read from the primary with majority read concern
+  and written with majority write concern, whatever the connection string says.
 * **Provenance** records tool, library, driver and runtime versions plus CI run/commit, answering
   "who/what ran this?".
 
