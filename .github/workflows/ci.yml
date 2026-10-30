@@ -408,12 +408,13 @@ jobs:
           mm version | tee version.txt
           grep -qF "$1" version.txt
           mkdir demo && cd demo
+          # A nuget.config rather than `dotnet build --source`, which on Windows takes the nuget.org URL for a folder.
+          echo '<configuration><packageSources><clear /><add key="local" value="../packages" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>' > nuget.config
           mm init
           mm create AddUsersCollection
           ls Migrations/Migrations
           # A compiler that's too old skips the source generator with only warning CS9057, leaving no migrations.
-          dotnet build Migrations -p:WarningsAsErrors=CS9057 -p:EmitCompilerGeneratedFiles=true \
-            --source ../packages --source https://api.nuget.org/v3/index.json
+          dotnet build Migrations -p:WarningsAsErrors=CS9057 -p:EmitCompilerGeneratedFiles=true
           find Migrations/obj -name MigrateMongo.Migrations.g.cs | grep -q .
           EOF
 
