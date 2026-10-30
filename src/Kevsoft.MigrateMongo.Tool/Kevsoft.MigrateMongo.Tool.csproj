@@ -32,7 +32,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Cli\Kevsoft.MigrateMongo.Cli.csproj" />
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Tunnel\Kevsoft.MigrateMongo.Tunnel.csproj" />
   </ItemGroup>
 

@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo\Kevsoft.MigrateMongo.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Aws\Kevsoft.MigrateMongo.Aws.csproj" />
+    <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Cli\Kevsoft.MigrateMongo.Cli.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Hosting\Kevsoft.MigrateMongo.Hosting.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Runner\Kevsoft.MigrateMongo.Runner.csproj" />

@@ -48,6 +48,9 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 >   `MONGODB-AWS` it registers the driver's AWS mechanism through the package (found by name, so no code changes),
 >   or fails up front saying which package to add. `init --auth aws` / `dotnet new migratemongo --auth aws` add it.
 >   X.509 and OIDC need no package (built into the driver), so they're just a URL.
+> * The YAML config loader, the command line and the console renderer are in `Kevsoft.MigrateMongo.Cli`, which only
+>   the tool and Runner reference. `Kevsoft.MigrateMongo.Contracts` keeps the protocol, resolved config and tunnel
+>   types and has no dependencies, so apps using Hosting don't get YamlDotNet or System.CommandLine.
 > * Deferred: scripting loaders.
 
 ---
@@ -481,6 +484,8 @@ src/
   Kevsoft.MigrateMongo.Abstractions/     # IMigration, [Migration], MigrationContext, IMigrationSource (+ analyzer)
   Kevsoft.MigrateMongo.SourceGenerator/  # Registry + checksum generation, diagnostics (packed into Abstractions)
   Kevsoft.MigrateMongo/                  # Driver-free engine: planner, state machine, lock protocol, config
+  Kevsoft.MigrateMongo.Contracts/        # Runner protocol, resolved config, tunnel interfaces (no dependencies)
+  Kevsoft.MigrateMongo.Cli/              # Command line, migrate-mongo.yaml loading, console output (tool + Runner)
   Kevsoft.MigrateMongo.MongoDriver/      # ONLY project calling MongoDB.Driver members (state/history/lock/tx)
   Kevsoft.MigrateMongo.Runner/           # MigrateMongoRunner.RunAsync(args): commands, protocol, NDJSON events
   Kevsoft.MigrateMongo.Hosting/          # DI + IHostedService for in-app execution

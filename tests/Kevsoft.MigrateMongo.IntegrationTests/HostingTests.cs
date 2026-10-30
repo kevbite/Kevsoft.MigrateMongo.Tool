@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MongoDB.Bson;
 using Shouldly;
 
@@ -124,6 +125,31 @@ public sealed class HostingTests(IntegrationEnvironment environment)
         run.Output.ShouldContain("Dry run: would apply 3 migration(s) as batch 1; nothing was changed.");
         run.Output.ShouldNotContain("Applying migration");
         workspace.CollectionNames().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task The_package_doesnt_bring_in_the_command_line_or_yaml_packages()
+    {
+        await using var workspace = Workspace.Empty(environment);
+        File.WriteAllText(workspace.PathOf("App.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="Kevsoft.MigrateMongo.Hosting" Version="$(MigrateMongoVersion)" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        await Dotnet.RunAsync(workspace.Directory, environment.ProcessEnvironment, "restore", "App.csproj");
+
+        using var assets = JsonDocument.Parse(File.ReadAllText(workspace.PathOf("obj", "project.assets.json")));
+        var packages = assets.RootElement.GetProperty("libraries").EnumerateObject().Select(l => l.Name.Split('/')[0]).ToList();
+        packages.ShouldContain("Kevsoft.MigrateMongo.Contracts");
+        packages.ShouldNotContain("Kevsoft.MigrateMongo.Cli");
+        packages.ShouldNotContain("System.CommandLine");
+        packages.ShouldNotContain("YamlDotNet");
     }
 
     /// <summary>A workspace with BasicMigrations (and its migrate-mongo.yaml) plus HostingApp, built once into <c>app/</c>.</summary>

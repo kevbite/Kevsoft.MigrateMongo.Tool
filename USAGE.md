@@ -134,11 +134,13 @@ always use the built-in templates, not `migrationTemplate`.
 | Package | Purpose |
 |---|---|
 | `Kevsoft.MigrateMongo.Tool` | The `migrate-mongo` CLI. |
-| `Kevsoft.MigrateMongo.Runner` | Entry point for your migrations project (`MigrateMongoRunner.RunAsync`). Brings in everything below except the opt-in packages. |
+| `Kevsoft.MigrateMongo.Runner` | Entry point for your migrations project (`MigrateMongoRunner.RunAsync`). Brings in Abstractions, the engine, MongoDriver, Contracts and Cli. |
 | `Kevsoft.MigrateMongo.Abstractions` | `IMigration`, `[Migration]`, `MigrationContext` and the source generator. Reference it directly to keep migrations in a class library. |
 | `Kevsoft.MigrateMongo` | The engine: planning, locking, state and checksums. |
 | `Kevsoft.MigrateMongo.MongoDriver` | The engine's MongoDB driver adapter. |
-| `Kevsoft.MigrateMongo.Hosting` | [Run migrations from your application](#running-from-your-application). |
+| `Kevsoft.MigrateMongo.Contracts` | The runner protocol, resolved configuration and tunnel interfaces. No dependencies. |
+| `Kevsoft.MigrateMongo.Cli` | The command line, `migrate-mongo.yaml` loading and console output used by the tool and Runner (System.CommandLine, YamlDotNet). |
+| `Kevsoft.MigrateMongo.Hosting` | [Run migrations from your application](#running-from-your-application). Brings in the same packages as Runner except Cli. |
 | `Kevsoft.MigrateMongo.Tunnel` | Opt-in: lets the runner, bundles and Hosting open [SSH tunnels](#tunnelling-through-a-bastion) themselves. |
 | `Kevsoft.MigrateMongo.Aws` | Opt-in: [AWS IAM authentication](#aws-iam-authentication-atlas). |
 | `Kevsoft.MigrateMongo.Templates` | The `dotnet new` templates. |

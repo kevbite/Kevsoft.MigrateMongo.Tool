@@ -33,6 +33,7 @@ public sealed class IntegrationEnvironment : IAsyncLifetime
     [
         "Kevsoft.MigrateMongo.Abstractions",
         "Kevsoft.MigrateMongo.Contracts",
+        "Kevsoft.MigrateMongo.Cli",
         "Kevsoft.MigrateMongo",
         "Kevsoft.MigrateMongo.MongoDriver",
         "Kevsoft.MigrateMongo.Runner",
