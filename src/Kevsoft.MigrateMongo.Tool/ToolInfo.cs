@@ -7,7 +7,7 @@ namespace Kevsoft.MigrateMongo.Tool;
 internal static class ToolInfo
 {
     /// <summary>MongoDB.Driver version written into newly scaffolded projects.</summary>
-    public const string DefaultDriverVersion = "3.12.0";
+    public const string DefaultDriverVersion = "3.13.0";
 
     public static string Version { get; } =
         typeof(ToolInfo).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
