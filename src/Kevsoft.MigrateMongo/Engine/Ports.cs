@@ -93,18 +93,25 @@ public interface IMigrationStore
 
     Task<IReadOnlyList<HistoryRecord>> GetHistoryAsync(string? migrationId, int limit, CancellationToken cancellationToken);
 
-    /// <summary>Takes the lock if nobody holds it or the current holder's lock expired before <paramref name="now"/>.</summary>
-    Task<bool> TryAcquireLockAsync(LockInfo lockInfo, DateTime now, CancellationToken cancellationToken);
+    // Lock expiry is decided by the store's (database server's) clock, so runs on machines whose clocks disagree still
+    // agree on whether a lock has expired.
 
-    /// <summary>Extends the lock; returns false if <paramref name="runId"/> no longer holds it.</summary>
-    Task<bool> RenewLockAsync(string runId, DateTime expiresAt, CancellationToken cancellationToken);
+    /// <summary>
+    /// Takes the lock for <paramref name="ttl"/> if nobody holds it or the holder's lock has expired.
+    /// Returns the lock as stored, or null if another run holds it.
+    /// </summary>
+    Task<LockInfo?> TryAcquireLockAsync(string runId, string? host, TimeSpan ttl, CancellationToken cancellationToken);
+
+    /// <summary>Extends the lock to <paramref name="ttl"/> from now; returns false if <paramref name="runId"/> no longer holds it.</summary>
+    Task<bool> RenewLockAsync(string runId, TimeSpan ttl, CancellationToken cancellationToken);
 
     Task ReleaseLockAsync(string runId, CancellationToken cancellationToken);
 
+    /// <summary>The current lock, with <see cref="LockInfo.Expired"/> set.</summary>
     Task<LockInfo?> GetLockAsync(CancellationToken cancellationToken);
 
-    /// <summary>Deletes the lock. With <paramref name="expiredBefore"/> only deletes it if it expired before that time.</summary>
-    Task<bool> DeleteLockAsync(DateTime? expiredBefore, CancellationToken cancellationToken);
+    /// <summary>Deletes the lock. With <paramref name="onlyIfExpired"/> only deletes it if it has expired.</summary>
+    Task<bool> DeleteLockAsync(bool onlyIfExpired, CancellationToken cancellationToken);
 }
 
 /// <summary>An open unit of work, optionally transactional.</summary>

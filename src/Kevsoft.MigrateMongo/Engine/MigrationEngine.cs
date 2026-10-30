@@ -212,7 +212,7 @@ public sealed class MigrationEngine
     private async Task<LockInfo?> ReportHeldLockAsync(List<ValidationIssue> issues, CancellationToken cancellationToken)
     {
         var holder = await _store.GetLockAsync(cancellationToken);
-        if (holder is null || holder.ExpiresAt <= Now)
+        if (holder is null || holder.Expired)
         {
             return null;
         }
@@ -433,8 +433,7 @@ public sealed class MigrationEngine
             return new CommandResult { ExitCode = ExitCodes.Success, Message = "No lock is held." };
         }
 
-        var now = Now;
-        if (!force && current.ExpiresAt > now)
+        if (!force && !current.Expired)
         {
             return new CommandResult
             {
@@ -444,7 +443,7 @@ public sealed class MigrationEngine
             };
         }
 
-        var removed = await _store.DeleteLockAsync(force ? null : now, cancellationToken);
+        var removed = await _store.DeleteLockAsync(onlyIfExpired: !force, cancellationToken);
         return new CommandResult
         {
             ExitCode = removed ? ExitCodes.Success : ExitCodes.Failure,
@@ -816,7 +815,7 @@ public sealed class MigrationEngine
         }
 
         using var lockLost = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var heartbeat = HeartbeatAsync(lockLost, acquired.ExpiresAt);
+        var heartbeat = HeartbeatAsync(lockLost, acquired.Value.Requested);
         try
         {
             return await action(lockLost.Token);
@@ -832,28 +831,24 @@ public sealed class MigrationEngine
         }
     }
 
-    private async Task<LockInfo?> AcquireLockAsync(CancellationToken cancellationToken)
+    /// <returns>
+    /// The lock and when the request that took it was sent (a <see cref="TimeProvider.GetTimestamp"/>), or null if the wait
+    /// timed out.
+    /// </returns>
+    private async Task<(LockInfo Lock, long Requested)?> AcquireLockAsync(CancellationToken cancellationToken)
     {
-        var deadline = Now + _options.LockWaitTimeout;
+        var waiting = _time.GetTimestamp();
         string? reportedHolder = null;
         while (true)
         {
-            var now = Now;
-            var lockInfo = new LockInfo
-            {
-                RunId = RunId,
-                Host = _options.Provenance.Host,
-                AcquiredAt = now,
-                ExpiresAt = now + _options.LockTtl,
-            };
-
-            if (await _store.TryAcquireLockAsync(lockInfo, now, cancellationToken))
+            var requested = _time.GetTimestamp();
+            if (await _store.TryAcquireLockAsync(RunId, _options.Provenance.Host, _options.LockTtl, cancellationToken) is { } acquired)
             {
                 _events.OnEvent(new RunnerEvent { Type = EventTypes.LockAcquired, Message = $"Acquired lock (run {RunId})." });
-                return lockInfo;
+                return (acquired, requested);
             }
 
-            if (Now >= deadline)
+            if (_time.GetElapsedTime(waiting) >= _options.LockWaitTimeout)
             {
                 return null;
             }
@@ -869,7 +864,7 @@ public sealed class MigrationEngine
                 });
             }
 
-            var remaining = deadline - Now;
+            var remaining = _options.LockWaitTimeout - _time.GetElapsedTime(waiting);
             var delay = remaining < _options.LockPollInterval ? remaining : _options.LockPollInterval;
             if (delay > TimeSpan.Zero)
             {
@@ -878,7 +873,9 @@ public sealed class MigrationEngine
         }
     }
 
-    private async Task HeartbeatAsync(CancellationTokenSource lockLost, DateTime expiresAt)
+    /// <param name="lockLost">Cancelled when the lock is lost.</param>
+    /// <param name="renewed">When the request that took the lock was sent (a <see cref="TimeProvider.GetTimestamp"/>).</param>
+    private async Task HeartbeatAsync(CancellationTokenSource lockLost, long renewed)
     {
         var interval = _options.LockTtl / 3;
         while (!lockLost.IsCancellationRequested)
@@ -892,12 +889,12 @@ public sealed class MigrationEngine
                 return;
             }
 
-            var renewedUntil = Now + _options.LockTtl;
+            var requested = _time.GetTimestamp();
             try
             {
-                if (await _store.RenewLockAsync(RunId, renewedUntil, lockLost.Token))
+                if (await _store.RenewLockAsync(RunId, _options.LockTtl, lockLost.Token))
                 {
-                    expiresAt = renewedUntil;
+                    renewed = requested;
                     continue;
                 }
 
@@ -912,8 +909,9 @@ public sealed class MigrationEngine
             catch (Exception e)
             {
                 // Transient errors (elections, network blips) are retried while the lock is still ours; stop the run
-                // before it could expire and be taken by someone else.
-                if (Now + interval >= expiresAt)
+                // before it could expire and be taken by someone else. The server set the expiry to LockTtl after it
+                // received the last renewal, so timing from when that renewal was sent is safe whatever its clock says.
+                if (_time.GetElapsedTime(renewed) + interval >= _options.LockTtl)
                 {
                     _events.OnEvent(new RunnerEvent { Type = EventTypes.Log, Level = "error", Message = $"Couldn't renew the migration lock before it expires ({e.Message}); cancelling." });
                     await lockLost.CancelAsync();

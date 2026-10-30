@@ -240,7 +240,8 @@ migration is detected. Write a new migration instead.
 
 With `transaction: auto` (the default), each migration runs in a transaction when the deployment supports them
 (replica sets and sharded clusters). Its state document is written in the same transaction, so a failure leaves
-nothing half-applied. Pass `context.Session` to every operation:
+nothing half-applied. The transaction reads from the primary and commits with majority write concern. Pass
+`context.Session` to every operation:
 
 ```csharp
 [Migration("20261014164029", "split-full-name")]
@@ -515,6 +516,10 @@ Pass an id to see one migration, and `--limit <n>` to change the number of entri
 
 Before running a migration, its state is set to `applying` (or `rollingBack`). If the process dies part-way through a
 migration that isn't in a transaction, the state stays there and later runs stop until you resolve it.
+
+These collections are always read from and written to the primary with majority read and write concerns, whatever the
+connection string (or your app's `IMongoClient`) asks for, so a lagging secondary can't hide an applied migration. The
+lock expires by the database server's clock, so agents whose clocks disagree still agree on when it has expired.
 
 ## When something goes wrong
 

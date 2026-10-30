@@ -224,6 +224,9 @@ public sealed class LockInfo
     public DateTime AcquiredAt { get; set; }
 
     public DateTime ExpiresAt { get; set; }
+
+    /// <summary>Whether the lock had expired when it was read, by the database server's clock.</summary>
+    public bool Expired { get; set; }
 }
 
 [JsonSourceGenerationOptions(

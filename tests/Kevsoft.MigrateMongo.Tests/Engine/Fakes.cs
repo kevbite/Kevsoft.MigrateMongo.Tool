@@ -4,8 +4,11 @@ using Kevsoft.MigrateMongo.Protocol;
 namespace Kevsoft.MigrateMongo.Tests.Engine;
 
 /// <summary>In-memory store that mimics transactional writes (buffered until commit).</summary>
-internal sealed class FakeStore : IMigrationStore
+/// <param name="clock">The store's clock, which decides lock expiry as the database server's does (default: UTC now).</param>
+internal sealed class FakeStore(Func<DateTime>? clock = null) : IMigrationStore
 {
+    private readonly Func<DateTime> _clock = clock ?? (() => DateTime.UtcNow);
+
     public Dictionary<string, StoredMigrationState> States { get; } = new(StringComparer.Ordinal);
 
     public List<HistoryRecord> History { get; } = [];
@@ -47,21 +50,22 @@ internal sealed class FakeStore : IMigrationStore
     public Task<IReadOnlyList<HistoryRecord>> GetHistoryAsync(string? migrationId, int limit, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<HistoryRecord>>(History.Where(h => migrationId is null || h.MigrationId == migrationId).TakeLast(limit).ToList());
 
-    public Task<bool> TryAcquireLockAsync(LockInfo lockInfo, DateTime now, CancellationToken cancellationToken)
+    public Task<LockInfo?> TryAcquireLockAsync(string runId, string? host, TimeSpan ttl, CancellationToken cancellationToken)
     {
-        if (Lock is null || Lock.ExpiresAt < now)
+        var now = _clock();
+        if (Lock is not null && Lock.ExpiresAt >= now)
         {
-            Lock = lockInfo;
-            return Task.FromResult(true);
+            return Task.FromResult<LockInfo?>(null);
         }
 
-        return Task.FromResult(false);
+        Lock = new LockInfo { RunId = runId, Host = host, AcquiredAt = now, ExpiresAt = now + ttl };
+        return Task.FromResult<LockInfo?>(Lock);
     }
 
     /// <summary>Called on each renewal; return an exception to make that renewal fail.</summary>
     public Func<Exception?>? RenewFailure { get; set; }
 
-    public Task<bool> RenewLockAsync(string runId, DateTime expiresAt, CancellationToken cancellationToken)
+    public Task<bool> RenewLockAsync(string runId, TimeSpan ttl, CancellationToken cancellationToken)
     {
         if (RenewFailure?.Invoke() is { } failure)
         {
@@ -73,7 +77,7 @@ internal sealed class FakeStore : IMigrationStore
             return Task.FromResult(false);
         }
 
-        Lock.ExpiresAt = expiresAt;
+        Lock.ExpiresAt = _clock() + ttl;
         return Task.FromResult(true);
     }
 
@@ -88,11 +92,19 @@ internal sealed class FakeStore : IMigrationStore
         return Task.CompletedTask;
     }
 
-    public Task<LockInfo?> GetLockAsync(CancellationToken cancellationToken) => Task.FromResult(Lock);
-
-    public Task<bool> DeleteLockAsync(DateTime? expiredBefore, CancellationToken cancellationToken)
+    public Task<LockInfo?> GetLockAsync(CancellationToken cancellationToken)
     {
-        if (Lock is null || (expiredBefore is not null && Lock.ExpiresAt >= expiredBefore))
+        if (Lock is not null)
+        {
+            Lock.Expired = Lock.ExpiresAt < _clock();
+        }
+
+        return Task.FromResult(Lock);
+    }
+
+    public Task<bool> DeleteLockAsync(bool onlyIfExpired, CancellationToken cancellationToken)
+    {
+        if (Lock is null || (onlyIfExpired && Lock.ExpiresAt >= _clock()))
         {
             return Task.FromResult(false);
         }
@@ -212,6 +224,12 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
     {
         public object? GetService(Type serviceType) => null;
     }
+}
+
+/// <summary>A clock that always says <paramref name="now"/>, e.g. a machine whose clock differs from the database server's.</summary>
+internal sealed class FixedTime(DateTime now) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => new(now);
 }
 
 internal sealed class RecordingSink : IMigrationEventSink

@@ -236,6 +236,29 @@ public sealed class MigrationEngineTests
     }
 
     [Fact]
+    public async Task Lock_expiry_follows_the_store_clock_not_this_machines()
+    {
+        var storeNow = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc);
+        var store = new FakeStore(() => storeNow);
+        store.Lock = new LockInfo { RunId = "other", AcquiredAt = storeNow.AddMinutes(-1), ExpiresAt = storeNow.AddMinutes(4) };
+        MigrationDescriptor[] migrations = [Migrations.Create("20260101000001", "a")];
+        var options = new EngineOptions { LockWaitTimeout = TimeSpan.Zero };
+
+        // This machine's clock is an hour ahead, but the lock hasn't expired as far as the store is concerned.
+        var ahead = new MigrationEngine(store, new FakeExecutor(), migrations, options, _sink, new FixedTime(storeNow.AddHours(1)));
+        (await ahead.UpAsync(null, CancellationToken.None)).ExitCode.ShouldBe(ExitCodes.LockTimeout);
+        (await ahead.UnlockAsync(force: false, CancellationToken.None)).ExitCode.ShouldBe(ExitCodes.Failure);
+        store.Lock!.RunId.ShouldBe("other");
+
+        // Once it has expired by the store's clock, a machine whose clock is an hour behind takes it over.
+        storeNow = storeNow.AddMinutes(5);
+        var behind = new MigrationEngine(store, new FakeExecutor(), migrations, options, _sink, new FixedTime(storeNow.AddHours(-1)));
+        (await behind.UpAsync(null, CancellationToken.None)).ExitCode.ShouldBe(ExitCodes.Success);
+        store.States.Keys.ShouldBe(["20260101000001"]);
+        store.Lock.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Up_takes_over_an_expired_lock()
     {
         _store.Lock = new LockInfo { RunId = "dead", AcquiredAt = DateTime.UtcNow.AddHours(-1), ExpiresAt = DateTime.UtcNow.AddMinutes(-1) };
