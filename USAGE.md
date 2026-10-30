@@ -574,20 +574,22 @@ jobs:
   migrate:
     runs-on: ubuntu-latest
     environment: production
+    # Every command that connects needs these, validate included.
+    env:
+      PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
+      BASTION_SSH_KEY: ${{ secrets.BASTION_SSH_KEY }}   # if prod has a tunnel:
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with: { global-json-file: global.json }
       - run: dotnet tool restore
       - run: dotnet tool run migrate-mongo validate --env prod
       - run: dotnet tool run migrate-mongo up --env prod
-        env:
-          PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
-          BASTION_SSH_KEY: ${{ secrets.BASTION_SSH_KEY }}   # if prod has a tunnel:
 ```
 
 As a pull request gate, `migrate-mongo validate --env staging` fails with exit code `4` if someone edited an applied
-migration. `migrate-mongo plan --env prod` exits with `2` if a deployment has migrations to apply.
+migration, and a read-only database user is enough for it. `migrate-mongo plan --env prod` exits with `2` if a
+deployment has migrations to apply.
 
 ### Build once, deploy many
 
@@ -598,19 +600,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with: { global-json-file: global.json }
       - run: dotnet tool restore
       - run: dotnet tool run migrate-mongo bundle -r linux-x64 -o out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: migrations, path: out/ }
 
   deploy:
     needs: build
     runs-on: [self-hosted, production]
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: migrations }
       - run: chmod +x MyApp.Migrations && ./MyApp.Migrations up --env prod
         env: { PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }} }
