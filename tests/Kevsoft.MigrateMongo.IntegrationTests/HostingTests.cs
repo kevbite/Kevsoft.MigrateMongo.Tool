@@ -35,7 +35,7 @@ public sealed class HostingTests(IntegrationEnvironment environment)
             var appliedBy = state["appliedBy"].AsBsonDocument;
             appliedBy["tool"].AsString.ShouldBe("app/HostingApp");
             appliedBy["library"].AsString.ShouldBe(environment.PackageVersion);
-            appliedBy["driver"].AsString.ShouldBe("3.12.0");
+            appliedBy["driver"].AsString.ShouldBe(environment.DriverVersion);
             appliedBy["runtime"].AsString.ShouldStartWith("10.0.");
         }
 

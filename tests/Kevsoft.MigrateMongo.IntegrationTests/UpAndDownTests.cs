@@ -49,7 +49,7 @@ public sealed class UpAndDownTests(IntegrationEnvironment environment)
             appliedBy["host"].AsString.ShouldBe(Environment.MachineName);
             appliedBy["tool"].AsString.ShouldStartWith($"migrate-mongo/{environment.PackageVersion} (");
             appliedBy["library"].AsString.ShouldBe(environment.PackageVersion);
-            appliedBy["driver"].AsString.ShouldBe("3.12.0");
+            appliedBy["driver"].AsString.ShouldBe(environment.DriverVersion);
             appliedBy["runtime"].AsString.ShouldStartWith("10.0.");
         }
 

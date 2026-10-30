@@ -35,6 +35,7 @@ public sealed class TunnelTests(IntegrationEnvironment environment, TunnelEnviro
     [Fact]
     public async Task Socks_tunnel_with_a_key_and_pinned_fingerprint_applies_and_rolls_back_migrations()
     {
+        environment.SkipUnlessDriverSupportsSocks();
         var keyPath = Path.Combine(Path.GetTempPath(), "migrate-mongo-it-key-" + Guid.NewGuid().ToString("N"));
         await File.WriteAllTextAsync(keyPath, tunnel.PrivateKey, TestContext.Current.CancellationToken);
         try
@@ -90,6 +91,7 @@ public sealed class TunnelTests(IntegrationEnvironment environment, TunnelEnviro
     [Fact]
     public async Task Wrong_host_key_fingerprint_refuses_to_connect()
     {
+        environment.SkipUnlessDriverSupportsSocks();
         const string wrong = "SHA256:XYPAftl5eLwQJty/XfF9YzBlVihmnX2HIO351jJewMk";
         await using var workspace = CreateWorkspace($"""
             password: {TunnelEnvironment.Password}
@@ -106,6 +108,7 @@ public sealed class TunnelTests(IntegrationEnvironment environment, TunnelEnviro
     [Fact]
     public async Task Unknown_host_fails_unless_host_key_checking_is_explicitly_skipped()
     {
+        environment.SkipUnlessDriverSupportsSocks();
         await using var workspace = CreateWorkspace($"""
             password: {TunnelEnvironment.Password}
             knownHostsPath: empty_known_hosts
@@ -145,14 +148,15 @@ public sealed class TunnelTests(IntegrationEnvironment environment, TunnelEnviro
     [Fact]
     public async Task Bundle_with_the_tunnel_package_opens_the_tunnel_itself()
     {
+        environment.SkipUnlessDriverSupportsSocks();
         await using var workspace = CreateWorkspace($$"""
             password: ${TUNNEL_PASSWORD}
             hostKeyFingerprint: {{tunnel.HostKeyFingerprint}}
             """);
         var project = workspace.PathOf("BasicMigrations", "BasicMigrations.csproj");
         File.WriteAllText(project, File.ReadAllText(project).Replace(
-            """<PackageReference Include="MongoDB.Driver" Version="3.12.0" />""",
-            """<PackageReference Include="MongoDB.Driver" Version="3.12.0" /><PackageReference Include="Kevsoft.MigrateMongo.Tunnel" Version="$(MigrateMongoVersion)" />"""));
+            """<PackageReference Include="MongoDB.Driver" Version="$(MigrateMongoDriverVersion)" />""",
+            """<PackageReference Include="MongoDB.Driver" Version="$(MigrateMongoDriverVersion)" /><PackageReference Include="Kevsoft.MigrateMongo.Tunnel" Version="$(MigrateMongoVersion)" />"""));
         File.WriteAllText(workspace.PathOf("BasicMigrations", "Program.cs"), """
             using BasicMigrations;
             using Kevsoft.MigrateMongo;
@@ -181,6 +185,7 @@ public sealed class TunnelTests(IntegrationEnvironment environment, TunnelEnviro
     [Fact]
     public async Task Standalone_runner_without_a_tunnel_provider_explains_how_to_add_one()
     {
+        environment.SkipUnlessDriverSupportsSocks();
         await using var workspace = CreateWorkspace($"""
             password: {TunnelEnvironment.Password}
             hostKeyFingerprint: {tunnel.HostKeyFingerprint}
@@ -199,6 +204,7 @@ public sealed class TunnelTests(IntegrationEnvironment environment, TunnelEnviro
     [Fact]
     public async Task Wrong_password_reports_an_authentication_failure()
     {
+        environment.SkipUnlessDriverSupportsSocks();
         await using var workspace = CreateWorkspace($"""
             password: not-the-password
             hostKeyFingerprint: {tunnel.HostKeyFingerprint}

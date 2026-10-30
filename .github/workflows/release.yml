@@ -64,9 +64,11 @@ jobs:
               --skip-duplicate
           done
 
+  # The GitHub release and the images wait for the NuGet job (and its environment's approval), so a rejected or failed
+  # NuGet publish doesn't leave a public release or images for a version that isn't on NuGet.
   github-release:
     name: GitHub release
-    needs: ci
+    needs: [ci, nuget]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -96,7 +98,7 @@ jobs:
 
   docker:
     name: Publish Docker images (ghcr.io)
-    needs: ci
+    needs: [ci, nuget]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

@@ -65,6 +65,7 @@ public sealed class Workspace : IAsyncDisposable
             <Project>
               <PropertyGroup>
                 <MigrateMongoVersion>{environment.PackageVersion}</MigrateMongoVersion>
+                <MigrateMongoDriverVersion>{environment.DriverVersion}</MigrateMongoDriverVersion>
               </PropertyGroup>
             </Project>
             """);
