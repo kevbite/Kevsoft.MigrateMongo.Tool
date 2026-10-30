@@ -13,7 +13,7 @@ internal static class MigrationOutputMapper
 
     private static readonly HashSet<string> OperationFields = new(StringComparer.Ordinal)
     {
-        "kind", "collection", "label", "counts", "durationMs", "at", "statementTruncated",
+        "kind", "collection", "label", "counts", "error", "durationMs", "at", "statementTruncated",
     };
 
     /// <summary>
@@ -68,6 +68,7 @@ internal static class MigrationOutputMapper
                 Statement = o.Statement is null ? null : ToJson(o.Statement),
                 StatementTruncated = o.StatementTruncated ? true : null,
                 Counts = new Dictionary<string, long>(o.Counts, StringComparer.Ordinal),
+                Error = o.Error,
                 DurationMs = o.DurationMs,
                 At = o.At,
             }).ToList();
@@ -105,7 +106,7 @@ internal static class MigrationOutputMapper
             document.Add("notesTruncated", notesTruncated);
         }
 
-        document.Add("resultsCommitted", output.Committed);
+        document.Add("resultsCommitted", output.Committed is { } committed ? committed : BsonNull.Value);
 
         if (output.Operations is { Count: > 0 } operations)
         {
@@ -121,14 +122,15 @@ internal static class MigrationOutputMapper
     /// <summary>Reads what <see cref="Write"/> added, or null when there's nothing.</summary>
     public static MigrationOutputInfo? Read(BsonDocument document)
     {
-        if (!document.TryGetValue("resultsCommitted", out var committed) || !committed.IsBoolean)
+        // resultsCommitted is always written with the output: null means the commit's outcome is unknown.
+        if (!document.TryGetValue("resultsCommitted", out var committed) || !(committed.IsBoolean || committed.IsBsonNull))
         {
             return null;
         }
 
         return new MigrationOutputInfo
         {
-            Committed = committed.AsBoolean,
+            Committed = committed.IsBoolean ? committed.AsBoolean : null,
             Results = document.TryGetValue("results", out var results) && results.IsBsonDocument ? ToJson(results.AsBsonDocument) : null,
             Notes = document.TryGetValue("notes", out var notes) && notes.IsBsonArray
                 ? notes.AsBsonArray.OfType<BsonDocument>().Select(n => new ResultNoteInfo
@@ -180,6 +182,11 @@ internal static class MigrationOutputMapper
         }
 
         document.Add("counts", counts);
+        if (operation.Error is not null)
+        {
+            document.Add("error", operation.Error);
+        }
+
         document.Add("durationMs", operation.DurationMs);
         document.Add("at", operation.At);
         return document;
@@ -198,6 +205,7 @@ internal static class MigrationOutputMapper
             Counts = d.TryGetValue("counts", out var counts) && counts.IsBsonDocument
                 ? counts.AsBsonDocument.Where(e => e.Value.IsNumeric).ToDictionary(e => e.Name, e => e.Value.ToInt64(), StringComparer.Ordinal)
                 : [],
+            Error = d.TryGetValue("error", out var error) && error.IsString ? error.AsString : null,
             DurationMs = d.TryGetValue("durationMs", out var duration) && duration.IsNumeric ? duration.ToInt64() : 0,
             At = d.TryGetValue("at", out var at) && at.IsValidDateTime ? at.ToUniversalTime() : default,
         };

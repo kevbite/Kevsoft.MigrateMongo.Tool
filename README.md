@@ -11,6 +11,8 @@ line, your build server or your application.
   and checksums catch migrations edited after they were applied.
 - **An audit trail of what changed.** Migrations can record results and notes, and `context.Track(...)` records each
   operation's filter, update and counts. `migrate-mongo show <id>` lists it all, alongside who ran it and when.
+  Statements are stored as sent, so [leave them out](USAGE.md#recording-results) for commands or filters that hold
+  passwords or personal data.
 - **Indexes kept in line with the code.** A `[ManagedCollection]` class declares a collection's indexes; every `up`
   creates what's missing, changes what it can in place, and reports, hides or drops what isn't declared.
 - **Built for CI.** Meaningful exit codes, `--json` output, per-environment config with `${ENV_VAR}` secrets, dry

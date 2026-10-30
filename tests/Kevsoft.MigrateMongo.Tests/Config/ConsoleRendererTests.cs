@@ -76,8 +76,8 @@ public sealed class ConsoleRendererTests
             Output = new MigrationOutputInfo
             {
                 Results = Json("""{"skipped":3,"archive":{"matched":1520,"modified":{"$numberLong":"1518"}},"ids":[1,2],"cutoff":{"$date":"2026-10-01T00:00:00Z"},"tier":"gold"}"""),
-                Operations = [new OperationRecord { Kind = "updateMany", Counts = [] }],
-                OperationsTruncated = 2,
+                Operations = [new OperationRecord { Kind = "updateMany", Counts = [] }, new OperationRecord { Kind = "insertMany", Counts = [], Error = "MongoBulkWriteException: boom" }],
+                OperationsTruncated = 1,
                 Committed = true,
             },
         }));
@@ -89,7 +89,7 @@ public sealed class ConsoleRendererTests
                 ids      [2 items]
                 cutoff   2026-10-01T00:00:00Z
                 tier     gold
-                3 operation(s) recorded – migrate-mongo show 20261022120000
+                3 operation(s) recorded, 1 failed – migrate-mongo show 20261022120000
 
             """.ReplaceLineEndings("\n"));
     }
@@ -110,6 +110,26 @@ public sealed class ConsoleRendererTests
             ✖ 20261022120000 tier-customers: InvalidOperationException: boom
                 processed  4200
                 (transaction aborted – changes not persisted)
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void Failed_commits_with_an_unknown_outcome_say_so()
+    {
+        var text = Render(r => r.Render(new RunnerEvent
+        {
+            Type = EventTypes.MigrationFailed,
+            MigrationId = "20261022120000",
+            Name = "tier-customers",
+            Error = "MongoException: commit failed",
+            Output = new MigrationOutputInfo { Results = Json("""{"processed":4200}"""), Committed = null },
+        }));
+
+        text.ShouldBe("""
+            ✖ 20261022120000 tier-customers: MongoException: commit failed
+                processed  4200
+                (commit outcome unknown – check whether the changes were persisted)
 
             """.ReplaceLineEndings("\n"));
     }
@@ -156,6 +176,11 @@ public sealed class ConsoleRendererTests
                     Counts = new Dictionary<string, long> { ["matched"] = 1520, ["modified"] = 1518 }, DurationMs = 611,
                 },
                 new OperationRecord { Kind = "createIndex", Collection = "users", StatementTruncated = true, Counts = [], DurationMs = 198 },
+                new OperationRecord
+                {
+                    Kind = "insertMany", Collection = "audit", Counts = new Dictionary<string, long> { ["inserted"] = 2 }, DurationMs = 40,
+                    Error = "MongoBulkWriteException: A bulk write operation resulted in one or more errors.",
+                },
             ],
             Committed = true,
         };
@@ -210,6 +235,8 @@ public sealed class ConsoleRendererTests
                    update: { $set: { archived: true } }
               2. createIndex users  (0.20s)
                    (statement too large to record)
+              3. insertMany audit  inserted 2  (0.04s)
+                   failed: MongoBulkWriteException: A bulk write operation resulted in one or more errors.
 
             History
              At                   ID              Name            Event    Batch  Run    Host       Error

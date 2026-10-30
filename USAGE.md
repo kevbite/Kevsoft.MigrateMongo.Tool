@@ -294,7 +294,8 @@ public sealed class SplitFullName : IMigration
 Set `Transaction` on `[Migration]` to override the config:
 
 - `TransactionMode.Never` is for operations that can't run in a transaction, such as building indexes on existing
-  collections.
+  collections or dropping indexes. A tracked `DropIndexAsync` or `DropAllIndexesAsync` in a transaction fails straight
+  away and says so.
 - `TransactionMode.Always` fails the migration if transactions aren't available.
 
 On a `TransientTransactionError` (e.g. a write conflict or a primary election), the transaction is aborted and the
@@ -348,7 +349,9 @@ public sealed class TierCustomers : IMigration
   lists and any object the driver can serialize (records, anonymous types, ...). `Increment(key)` keeps a count, and
   `Remove(key)` takes a value away. Keys follow MongoDB field-name rules (no `.`, no leading `$`, up to 64
   characters). `Track(result, label)` adds an `UpdateResult`, `ReplaceOneResult`, `DeleteResult` or
-  `BulkWriteResult`'s counts to a value.
+  `BulkWriteResult`'s counts to a value. `Guid`s are stored as standard UUIDs (subtype 4), on their own or in lists
+  and arrays. Inside your own objects and dictionaries they go through the driver's serializer, which needs a
+  representation configured, e.g. `BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard))`.
 - **Notes.** `Note(message, level)` records a timestamped `Info` or `Warning`, which is also logged. The first 100 are
   kept, each up to 1,024 characters.
 
@@ -359,15 +362,37 @@ its full definition first, so you can see what to recreate. Inserted documents a
 `context.Track(database)` does the same for `RunCommandAsync`. `Collection` and `Database` give you the unwrapped
 objects for anything else.
 
-Statements can hold data from your filters. Turn them off with `results.captureStatements: false`,
-`--no-capture-statements` for one run, or `context.Track(collection, captureStatement: false)` for one collection.
+An operation that throws is recorded too, with its `error`, before the exception is rethrown. A bulk write or
+`insertMany` that fails part-way records the counts of what it applied before the error (with `IsOrdered = false`,
+everything that didn't fail); other failed operations record no counts.
+
+> [!WARNING]
+> **Statements are stored as they were sent.** Tracked filters, updates and commands are written to the migrations
+> collections and printed by `show` and `--json`, so anyone who can read those collections or your CI logs can see
+> them, including any secrets or personal data in them. A tracked `createUser` or `updateUser` command records its
+> password (`pwd`), and a filter on an email address records the address.
+
+For operations like these, either don't track them (run them on `context.Database`, or a tracked collection's
+`Collection`), or pass `captureStatement: false` so only the kind, counts and timings are recorded:
+
+```csharp
+await context.Track(context.Database, captureStatement: false).RunCommandAsync(
+    new BsonDocument { { "createUser", "reporting" }, { "pwd", password }, { "roles", new BsonArray { "read" } } },
+    cancellationToken: cancellationToken);
+```
+
+To leave statements out everywhere, set `results.captureStatements: false`, or pass `--no-capture-statements` for one
+run.
 
 Limits keep the state documents small: the named values can take up to `results.maxBytes` (64 KB), and a migration
 that records more fails with `MM-RESULTS-TOO-LARGE`, listing the largest keys. Put large data in your own collection.
 The first 200 operations are kept, and a statement over 4 KB is left out (`statementTruncated: true`).
 
 Results are kept when a migration fails. If its transaction was aborted, they're marked as not committed
-(`resultsCommitted: false`): they show what the migration got up to, but none of it was saved. On a transaction
+(`resultsCommitted: false`): they show what the migration got up to, but none of it was saved. If the commit itself
+kept failing with `UnknownTransactionCommitResult` until `transactionRetryTimeout`, nobody can tell whether it was
+applied, so they're marked `resultsCommitted: null` and the run says "commit outcome unknown": check the data (and the
+migration's state) before running it again. On a transaction
 retry, only the last attempt's results are kept. `DownAsync` can record results too; they're stored on the
 `rolledBack` history entry.
 
@@ -776,8 +801,9 @@ History
 ```
 
 Shows everything about one migration: its state, who applied it, its results, notes and operations, and its history.
-The id can be a unique prefix. `--history <n>` changes how many history entries are shown (default 10), and
-`--no-statements` leaves the operations' statements out. A rolled-back migration is still found through its history.
+The id can be a unique prefix. `--history <n>` changes how many history entries are shown (default 10, `0` for none),
+and `--no-statements` leaves the operations' statements out. A rolled-back migration is still found through its
+history, by its id or a unique prefix, even once its code has been deleted.
 
 `show <collection>` does the same for a [collection definition](#managing-collections): each index on the server and how
 it relates to the definition, the changes `up` would make, the operations of the last run that changed something, and
@@ -854,7 +880,8 @@ entry. Values are stored as native BSON, so you can query them:
 ```
 
 `notesTruncated` and `operationsTruncated` count what went over the limits, and `statementTruncated: true` marks an
-operation whose statement was too large to keep.
+operation whose statement was too large to keep. A failed operation has an `error` with the exception's type and
+message.
 
 Before running a migration, its state is set to `applying` (or `rollingBack`). If the process dies part-way through a
 migration that isn't in a transaction, the state stays there and later runs stop until you resolve it.

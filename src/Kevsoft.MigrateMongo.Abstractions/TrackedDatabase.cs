@@ -41,11 +41,26 @@ public sealed class TrackedDatabase
         var statement = _captureStatement ? new BsonDocument("command", command.DeepClone()) : null;
         var at = _results.Time.GetUtcNow().UtcDateTime;
         var started = Stopwatch.GetTimestamp();
-        var result = await (_session is null
-            ? Database.RunCommandAsync<BsonDocument>(command, readPreference, cancellationToken)
-            : Database.RunCommandAsync<BsonDocument>(_session, command, readPreference, cancellationToken));
-        var elapsed = Stopwatch.GetElapsedTime(started);
+        BsonDocument result;
+        try
+        {
+            result = await (_session is null
+                ? Database.RunCommandAsync<BsonDocument>(command, readPreference, cancellationToken)
+                : Database.RunCommandAsync<BsonDocument>(_session, command, readPreference, cancellationToken));
+        }
+        catch (Exception e)
+        {
+            Record(command, statement, at, started, e);
+            throw;
+        }
 
+        Record(command, statement, at, started, null);
+        return result;
+    }
+
+    private void Record(BsonDocument command, BsonDocument? statement, DateTime at, long started, Exception? error)
+    {
+        var elapsed = Stopwatch.GetElapsedTime(started);
         var truncated = statement is not null && statement.ToBson().Length > MigrationResults.MaxStatementBytes;
         _results.Record(new TrackedOperation
         {
@@ -55,10 +70,9 @@ public sealed class TrackedDatabase
             Statement = truncated ? null : statement,
             StatementTruncated = truncated,
             Counts = new Dictionary<string, long>(),
+            Error = error is null ? null : MigrationResults.DescribeError(error),
             DurationMs = (long)elapsed.TotalMilliseconds,
             At = at,
         });
-
-        return result;
     }
 }

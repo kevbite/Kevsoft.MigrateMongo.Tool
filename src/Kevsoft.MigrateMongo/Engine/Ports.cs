@@ -150,6 +150,9 @@ public interface IMigrationStore
 
     Task<IReadOnlyList<HistoryRecord>> GetHistoryAsync(string? migrationId, int limit, CancellationToken cancellationToken);
 
+    /// <summary>The distinct migration ids in the history that start with <paramref name="prefix"/>.</summary>
+    Task<IReadOnlyList<string>> GetHistoryIdsAsync(string prefix, CancellationToken cancellationToken);
+
     /// <summary>Takes the lock if nobody holds it or the current holder's lock expired before <paramref name="now"/>.</summary>
     Task<bool> TryAcquireLockAsync(LockInfo lockInfo, DateTime now, CancellationToken cancellationToken);
 

@@ -54,14 +54,20 @@ public sealed class MigrationContext
     /// </summary>
     /// <param name="collection">The collection to run operations on.</param>
     /// <param name="label">A result key to add the counts to (letters, digits, <c>_</c> and <c>-</c>).</param>
-    /// <param name="captureStatement">Set to false to record only the counts, e.g. when filters contain sensitive values.</param>
+    /// <param name="captureStatement">
+    /// Set to false to record only the counts. Statements are stored and shown as they were sent, so turn this off when
+    /// filters or updates contain secrets or personal data.
+    /// </param>
     public TrackedCollection<T> Track<T>(IMongoCollection<T> collection, string? label = null, bool captureStatement = true) =>
         new(collection, Session, Results, label, captureStatement);
 
     /// <summary>Wraps <paramref name="database"/> so each command it runs is recorded, and passes <see cref="Session"/> automatically.</summary>
     /// <param name="database">The database to run commands on.</param>
     /// <param name="label">A label shown with the recorded commands.</param>
-    /// <param name="captureStatement">Set to false to leave the commands out.</param>
+    /// <param name="captureStatement">
+    /// Set to false to leave the commands out. Commands are stored and shown as they were sent, so turn this off for
+    /// commands that carry credentials (e.g. <c>createUser</c>'s <c>pwd</c>) or personal data.
+    /// </param>
     public TrackedDatabase Track(IMongoDatabase database, string? label = null, bool captureStatement = true) =>
         new(database, Session, Results, label, captureStatement);
 }

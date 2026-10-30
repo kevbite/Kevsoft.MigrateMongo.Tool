@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Aws\Kevsoft.MigrateMongo.Aws.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Hosting\Kevsoft.MigrateMongo.Hosting.csproj" />
+    <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Runner\Kevsoft.MigrateMongo.Runner.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.SourceGenerator\Kevsoft.MigrateMongo.SourceGenerator.csproj" />
     <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.Tool\Kevsoft.MigrateMongo.Tool.csproj" />
   </ItemGroup>

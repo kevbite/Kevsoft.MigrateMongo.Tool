@@ -75,7 +75,7 @@ public sealed class MigrationOutputMapperTests
                     DurationMs = 611,
                     At = At,
                 },
-                new OperationRecord { Kind = "createIndex", Collection = "users", StatementTruncated = true, Counts = [], DurationMs = 198, At = At },
+                new OperationRecord { Kind = "createIndex", Collection = "users", StatementTruncated = true, Counts = [], Error = "MongoCommandException: boom", DurationMs = 198, At = At },
             ],
             OperationsTruncated = 37,
             Committed = false,
@@ -99,7 +99,7 @@ public sealed class MigrationOutputMapperTests
                 },
                 {
                   "kind": "createIndex", "collection": "users", "statementTruncated": true,
-                  "counts": {}, "durationMs": { "$numberLong": "198" }, "at": { "$date": "2026-10-22T12:31:03Z" }
+                  "counts": {}, "error": "MongoCommandException: boom", "durationMs": { "$numberLong": "198" }, "at": { "$date": "2026-10-22T12:31:03Z" }
                 }
               ],
               "operationsTruncated": 37
@@ -119,7 +119,7 @@ public sealed class MigrationOutputMapperTests
                 {
                   "kind": "deleteMany", "collection": "orders",
                   "filter": { "status": "void" },
-                  "counts": { "deleted": 4 }, "durationMs": 9, "at": { "$date": "2026-10-22T12:31:03Z" }
+                  "counts": { "deleted": 4 }, "error": "MongoWriteException: boom", "durationMs": 9, "at": { "$date": "2026-10-22T12:31:03Z" }
                 }
               ],
               "notesTruncated": 2
@@ -128,7 +128,7 @@ public sealed class MigrationOutputMapperTests
 
         var output = MigrationOutputMapper.Read(document).ShouldNotBeNull();
 
-        output.Committed.ShouldBeTrue();
+        output.Committed.ShouldBe(true);
         output.Results!.Value.GetRawText().ShouldBe("""{ "skipped" : { "$numberInt" : "2" } }""");
         output.NotesTruncated.ShouldBe(2);
         output.Notes.ShouldBeNull();
@@ -138,8 +138,20 @@ public sealed class MigrationOutputMapperTests
         operation.Label.ShouldBeNull();
         operation.Statement!.Value.GetRawText().ShouldBe("""{ "filter" : { "status" : "void" } }""");
         operation.Counts.ShouldBe(new Dictionary<string, long> { ["deleted"] = 4 });
+        operation.Error.ShouldBe("MongoWriteException: boom");
         operation.DurationMs.ShouldBe(9);
         operation.At.ShouldBe(At);
+    }
+
+    [Fact]
+    public void An_unknown_commit_outcome_is_stored_as_null()
+    {
+        var document = new BsonDocument("_id", "20261022120000");
+
+        MigrationOutputMapper.Write(document, new MigrationOutputInfo { Results = Json("""{ "n": 1 }"""), Committed = null });
+
+        document["resultsCommitted"].ShouldBe(BsonNull.Value);
+        MigrationOutputMapper.Read(document).ShouldNotBeNull().Committed.ShouldBeNull();
     }
 
     [Fact]

@@ -579,7 +579,7 @@ public sealed partial class MigrationEngine
 
     /// <summary>Full detail for one migration: its state, everything its last run recorded, and its recent history.</summary>
     /// <param name="id">The migration id, or a unique prefix of it.</param>
-    /// <param name="historyLimit">How many history entries to include (default 10).</param>
+    /// <param name="historyLimit">How many history entries to include (default 10, 0 for none).</param>
     /// <param name="noStatements">Leave the recorded statements out.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public async Task<CommandResult> ShowAsync(string id, int? historyLimit, bool noStatements, CancellationToken cancellationToken)
@@ -592,7 +592,9 @@ public sealed partial class MigrationEngine
             return await ShowCollectionAsync(id, historyLimit ?? DefaultShowHistoryLimit, noStatements, cancellationToken);
         }
 
-        var known = _byId.Keys.Concat(states.Select(s => s.Id)).Distinct(StringComparer.Ordinal).ToList();
+        // A rolled-back migration whose code has gone is only in the history.
+        var historyIds = id.Length > 0 ? await _store.GetHistoryIdsAsync(id, cancellationToken) : [];
+        var known = _byId.Keys.Concat(states.Select(s => s.Id)).Concat(historyIds).Distinct(StringComparer.Ordinal).ToList();
         var resolved = known.Contains(id, StringComparer.Ordinal) ? id : null;
         if (resolved is null)
         {
@@ -605,18 +607,27 @@ public sealed partial class MigrationEngine
             resolved = id.Length > 0 && candidates.Count == 1 ? candidates[0] : null;
         }
 
-        var history = await _store.GetHistoryAsync(resolved ?? id, historyLimit ?? DefaultShowHistoryLimit, cancellationToken);
-        if (resolved is null && history.Count == 0)
+        if (resolved is null)
         {
             return new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Migration '{id}' was not found." };
         }
 
-        resolved ??= id;
+        // The store treats a limit of 0 as no limit, so --history 0 doesn't query at all.
+        var limit = historyLimit ?? DefaultShowHistoryLimit;
+        var history = limit > 0 ? await _store.GetHistoryAsync(resolved, limit, cancellationToken) : [];
         var state = states.FirstOrDefault(s => s.Id == resolved);
         _byId.TryGetValue(resolved, out var migration);
-        var status = state is null && migration is null
-            ? new MigrationStatusInfo { Id = resolved, Name = history[^1].Name, State = MigrationStates.Pending }
-            : BuildStatus(state is null ? [] : [state]).First(s => s.Id == resolved);
+        MigrationStatusInfo status;
+        if (state is null && migration is null)
+        {
+            var latest = history.Count > 0 ? history : await _store.GetHistoryAsync(resolved, 1, cancellationToken);
+            status = new MigrationStatusInfo { Id = resolved, Name = latest[^1].Name, State = MigrationStates.Pending };
+        }
+        else
+        {
+            status = BuildStatus(state is null ? [] : [state]).First(s => s.Id == resolved);
+        }
+
         status.Output = noStatements ? WithoutStatements(state?.Output) : state?.Output;
 
         return new CommandResult
@@ -658,6 +669,7 @@ public sealed partial class MigrationEngine
             Collection = o.Collection,
             Label = o.Label,
             Counts = o.Counts,
+            Error = o.Error,
             DurationMs = o.DurationMs,
             At = o.At,
         }).ToList(),
@@ -875,7 +887,7 @@ public sealed partial class MigrationEngine
         catch (Exception e)
         {
             var error = Describe(e);
-            output = Committed((e as MigrationExecutionException)?.Output ?? output, !transactional);
+            output = Committed((e as MigrationExecutionException)?.Output ?? output, CommittedAfterFailure(e, transactional));
             if (!transactional)
             {
                 var failed = NewState(migration, MigrationStates.Failed, batch, false);
@@ -935,7 +947,7 @@ public sealed partial class MigrationEngine
         catch (Exception e)
         {
             var error = Describe(e);
-            output = Committed((e as MigrationExecutionException)?.Output ?? output, !transactional);
+            output = Committed((e as MigrationExecutionException)?.Output ?? output, CommittedAfterFailure(e, transactional));
             if (!transactional)
             {
                 state.State = MigrationStates.Failed;
@@ -954,7 +966,7 @@ public sealed partial class MigrationEngine
         return null;
     }
 
-    private static MigrationOutputInfo? Committed(MigrationOutputInfo? output, bool committed)
+    private static MigrationOutputInfo? Committed(MigrationOutputInfo? output, bool? committed)
     {
         if (output is not null)
         {
@@ -963,6 +975,16 @@ public sealed partial class MigrationEngine
 
         return output;
     }
+
+    /// <summary>
+    /// Whether a failed migration's changes were persisted: always without a transaction, never when the transaction was
+    /// rolled back, and unknown (null) when its commit failed with <c>UnknownTransactionCommitResult</c> and wasn't
+    /// retried successfully, since that commit may have been applied.
+    /// </summary>
+    private bool? CommittedAfterFailure(Exception exception, bool transactional) =>
+        !transactional ? true
+        : _executor.ClassifyTransactionError(exception) == TransactionErrorKind.UnknownCommitResult ? null
+        : false;
 
     private OutputOptions OutputOptionsFor(CommandArguments? arguments) =>
         new(_options.CaptureStatements && arguments?.NoCaptureStatements != true, _options.ResultsMaxBytes);

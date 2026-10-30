@@ -37,7 +37,7 @@ public sealed class MigrationOutputTests
 
         var state = _store.States["20260101000001"].Output.ShouldNotBeNull();
         state.Results!.Value.GetRawText().ShouldBe("""{"skipped":3}""");
-        state.Committed.ShouldBeTrue();
+        state.Committed.ShouldBe(true);
         _store.History.Single().Output.ShouldBeSameAs(state);
         _sink.Events.Single(e => e.Type == EventTypes.MigrationCompleted).Output.ShouldBeSameAs(state);
     }
@@ -70,8 +70,26 @@ public sealed class MigrationOutputTests
         failed.Event.ShouldBe(HistoryEvents.Failed);
         failed.Error.ShouldBe("InvalidOperationException: boom");
         failed.Output!.Results!.Value.GetRawText().ShouldBe("""{"processed":4200}""");
-        failed.Output.Committed.ShouldBeFalse();
-        _sink.Events.Single(e => e.Type == EventTypes.MigrationFailed).Output!.Committed.ShouldBeFalse();
+        failed.Output.Committed.ShouldBe(false);
+        _sink.Events.Single(e => e.Type == EventTypes.MigrationFailed).Output!.Committed.ShouldBe(false);
+    }
+
+    [Fact]
+    public async Task A_commit_with_an_unknown_outcome_marks_the_output_as_unknown()
+    {
+        var executor = new FakeExecutor
+        {
+            Output = (_, _) => Output("""{"processed":4200}"""),
+            CommitFailure = () => new FakeTransactionException(TransactionErrorKind.UnknownCommitResult),
+        };
+
+        await Engine([Migrations.Create("20260101000001", "first")], executor, o => o.TransactionRetryTimeout = TimeSpan.Zero)
+            .UpAsync(null, CancellationToken.None);
+
+        var failed = _store.History.Single();
+        failed.Event.ShouldBe(HistoryEvents.Failed);
+        failed.Output!.Committed.ShouldBeNull();
+        _sink.Events.Single(e => e.Type == EventTypes.MigrationFailed).Output!.Committed.ShouldBeNull();
     }
 
     [Fact]
@@ -84,9 +102,9 @@ public sealed class MigrationOutputTests
 
         var state = _store.States["20260101000001"];
         state.State.ShouldBe(MigrationStates.Failed);
-        state.Output!.Committed.ShouldBeTrue();
+        state.Output!.Committed.ShouldBe(true);
         state.Output.Results!.Value.GetRawText().ShouldBe("""{"processed":10}""");
-        _store.History.Single().Output!.Committed.ShouldBeTrue();
+        _store.History.Single().Output!.Committed.ShouldBe(true);
     }
 
     [Fact]
@@ -120,7 +138,7 @@ public sealed class MigrationOutputTests
         var rolledBack = _store.History.Last();
         rolledBack.Event.ShouldBe(HistoryEvents.RolledBack);
         rolledBack.Output!.Results!.Value.GetRawText().ShouldBe("""{"unarchived":5}""");
-        rolledBack.Output.Committed.ShouldBeTrue();
+        rolledBack.Output.Committed.ShouldBe(true);
     }
 
     [Fact]
@@ -185,6 +203,38 @@ public sealed class MigrationOutputTests
         show.Migration.State.ShouldBe(MigrationStates.Pending);
         show.Migration.Output.ShouldBeNull();
         show.History.Select(h => h.Event).ShouldBe([HistoryEvents.Applied, HistoryEvents.RolledBack]);
+    }
+
+    [Fact]
+    public async Task Show_finds_a_rolled_back_migration_whose_code_has_gone_by_prefix()
+    {
+        var first = Engine([Migrations.Create("20260101000001", "first")], new FakeExecutor());
+        await first.UpAsync(null, CancellationToken.None);
+        await first.ExecuteAsync("down", new CommandArguments(), CancellationToken.None);
+        var engine = Engine([Migrations.Create("20260202000001", "second")], new FakeExecutor());
+
+        var show = (await engine.ExecuteAsync("show", new CommandArguments { Id = "202601" }, CancellationToken.None)).Show.ShouldNotBeNull();
+        var ambiguous = await engine.ExecuteAsync("show", new CommandArguments { Id = "2026" }, CancellationToken.None);
+
+        show.Migration.Id.ShouldBe("20260101000001");
+        show.Migration.Name.ShouldBe("first");
+        show.Migration.InCode.ShouldBeFalse();
+        show.History.Select(h => h.Event).ShouldBe([HistoryEvents.Applied, HistoryEvents.RolledBack]);
+        ambiguous.Message.ShouldBe("'2026' matches more than one migration: 20260101000001, 20260202000001.");
+    }
+
+    [Fact]
+    public async Task Show_with_a_history_of_0_leaves_the_history_out()
+    {
+        var first = Engine([Migrations.Create("20260101000001", "first")], new FakeExecutor());
+        await first.UpAsync(null, CancellationToken.None);
+        await first.ExecuteAsync("down", new CommandArguments(), CancellationToken.None);
+        var engine = Engine([], new FakeExecutor());
+
+        var show = (await engine.ExecuteAsync("show", new CommandArguments { Id = "20260101000001", Limit = 0 }, CancellationToken.None)).Show.ShouldNotBeNull();
+
+        show.Migration.Name.ShouldBe("first");
+        show.History.ShouldBeEmpty();
     }
 
     [Fact]

@@ -415,10 +415,11 @@ public sealed class MigrationOutputInfo
     public int? OperationsTruncated { get; set; }
 
     /// <summary>
-    /// Whether the migration's changes were persisted: always true on success; on failure true only when the migration
-    /// wasn't transactional (a failed transaction is rolled back).
+    /// Whether the migration's changes were persisted: true on success and when a migration without a transaction fails,
+    /// false when its transaction was rolled back, and null when the commit's outcome is unknown (it failed with
+    /// <c>UnknownTransactionCommitResult</c> until the retries ran out, so it may have been applied).
     /// </summary>
-    public bool Committed { get; set; }
+    public bool? Committed { get; set; }
 }
 
 public sealed class ResultNoteInfo
@@ -451,8 +452,14 @@ public sealed class OperationRecord
     /// <summary>True when the statement was too large to keep.</summary>
     public bool? StatementTruncated { get; set; }
 
-    /// <summary>e.g. <c>matched</c>, <c>modified</c>, <c>upserted</c>, <c>deleted</c>, <c>inserted</c>, <c>created</c>, <c>dropped</c>.</summary>
+    /// <summary>
+    /// e.g. <c>matched</c>, <c>modified</c>, <c>upserted</c>, <c>deleted</c>, <c>inserted</c>, <c>created</c>,
+    /// <c>dropped</c>. For a failed operation, only what was applied before the error.
+    /// </summary>
     public Dictionary<string, long>? Counts { get; set; }
+
+    /// <summary>Why the operation failed, or null when it succeeded.</summary>
+    public string? Error { get; set; }
 
     public long DurationMs { get; set; }
 
