@@ -63,7 +63,7 @@ There's also a [Docker image](#docker).
 ## Setting up a project
 
 Migrations live in a small console project that you own. The tool builds it with your SDK and runs it on your runtime,
-using the library and `MongoDB.Driver` versions you choose (3.5 or later). The tool itself never loads the driver, so
+using the library and `MongoDB.Driver` versions you choose (3.9 or later). The tool itself never loads the driver, so
 upgrading either side doesn't break the other.
 
 ### `init`

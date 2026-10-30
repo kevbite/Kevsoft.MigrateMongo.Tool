@@ -125,7 +125,7 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 * Schema diffing/model snapshots (MongoDB is schemaless).
 * Compatibility with migrate-mongo's `changelog` collection. We use our own, safer state model (§5.4).
   Teams adopting the tool on an existing database use `baseline`.
-* MongoDB.Driver 2.x. v1 targets driver 3.5+. A 2.x adapter package is possible later if there is demand (§4.3).
+* MongoDB.Driver 2.x. v1 targets driver 3.9+. A 2.x adapter package is possible later if there is demand (§4.3).
 * Wrapping the MongoDB driver API for users (see §4.3 for why).
 
 ---
@@ -139,7 +139,7 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
  │  • config / env / --env      │  spawn + handshake      │  ├─ Kevsoft.MigrateMongo (engine)        │
  │  • init / create scaffolding │ ──────────────────────▶ │  ├─ Kevsoft.MigrateMongo.MongoDriver     │
  │  • build orchestration       │  NDJSON events (stdout) │  ├─ Kevsoft.MigrateMongo.Abstractions    │
- │  • SSH tunnel → local SOCKS  │ ◀────────────────────── │  ├─ MongoDB.Driver (user-chosen ≥ 3.5)   │
+ │  • SSH tunnel → local SOCKS  │ ◀────────────────────── │  ├─ MongoDB.Driver (user-chosen ≥ 3.9)   │
  │  • rendering, exit codes, CI │                         │  └─ Migrations/*.cs                      │
  └──────────────────────────────┘                         └─────────────────────────────────────────┘
                                                                  ▲ same engine, state & lock
@@ -280,7 +280,7 @@ What we do instead:
 3. **Abstractions reference only stable driver *types*** (`IMongoDatabase`, `IClientSessionHandle`), never
    members. Type references survive across driver versions as long as the type exists. These two have
    been stable since driver 2.0 and survived 3.0.
-4. **Dependency range:** `MongoDB.Driver >= 3.5.0` with no upper bound. NuGet upper bounds cause
+4. **Dependency range:** `MongoDB.Driver >= 3.9.0` with no upper bound. NuGet upper bounds cause
    resolution errors for users. We compensate with the compat matrix in §8.3 (min, latest stable, and
    latest prerelease as a canary).
 5. **Feature detection** for anything newer than our floor, e.g. a newer driver API, behind a check that
@@ -628,7 +628,7 @@ $env:MIGRATE_MONGO_TOOL_PATH = "artifacts/tool/migrate-mongo.exe"; dotnet test t
 ```
 
 ### 8.3 Compatibility matrices
-* **Driver:** adapter + tool integration tests run against `MongoDB.Driver` **3.5.0 (floor)** and **latest
+* **Driver:** adapter + tool integration tests run against `MongoDB.Driver` **3.9.0 (floor)** and **latest
   stable** on every PR, and **latest prerelease** nightly. The version is overridden at restore with
   `-p:MongoDriverVersion=<v>`, which central package management uses as `VersionOverride`.
 * **Server:** Atlas Local `8.0` (pinned) on every PR; `latest` nightly; plain `mongo:7.0` standalone nightly,
@@ -669,7 +669,7 @@ $env:MIGRATE_MONGO_TOOL_PATH = "artifacts/tool/migrate-mongo.exe"; dotnet test t
 |-----|--------|-------|
 | `build` | ubuntu-latest | checkout (full history for MinVer) → setup-dotnet-cached → `dotnet build -c Release` → unit + generator + protocol tests (TRX + coverage) → `dotnet pack` all libraries, templates and the tool **pointer** package + `any` package → upload `packages` artifact |
 | `aot-tool` | matrix: `win-x64` windows-latest, `win-arm64` windows-11-arm, `linux-x64` ubuntu-latest, `linux-arm64` ubuntu-24.04-arm, `linux-musl-x64` ubuntu-latest + `alpine` container, `osx-x64` macos-15-intel, `osx-arm64` macos-latest | Native AOT must build on its target OS, so each RID builds on its own runner: `dotnet pack src/Kevsoft.MigrateMongo.Tool -r <rid>` (RID-specific tool package) **and** `dotnet publish -r <rid>` (standalone binary) → upload `tool-<rid>` artifact. The job fails on any AOT/trim warning. |
-| `driver-compat` | ubuntu-latest | `MongoDriver.Tests` with `-p:MongoDriverVersion=3.5.0` and `=<latest>` |
+| `driver-compat` | ubuntu-latest | `MongoDriver.Tests` with `-p:MongoDriverVersion=3.9.0` and `=<latest>` |
 | `integration` | ubuntu-latest (x64) and ubuntu-24.04-arm (arm64); Docker is preinstalled | download `packages` + `tool-linux-<arch>` → set `MIGRATE_MONGO_TOOL_PATH`, `MIGRATE_MONGO_PACKAGE_VERSION` → `dotnet test tests/Kevsoft.MigrateMongo.Tool.IntegrationTests` (incl. `Tunnel`) → upload TRX + container logs on failure. GitHub's Windows/macOS runners can't run Linux containers, so DB tests are Linux-only. |
 | `smoke` | windows-latest, macos-latest, ubuntu-latest; plus containers `dotnet/sdk:8.0/9.0/10.0/11.0-preview` and `runtime-deps:10.0` | `dotnet tool install --add-source ./packages` (proves pointer → RID package resolution, and the `any` fallback on SDK 8/9) → `version`, `init`, `create`, `--help`; `runtime-deps` runs the standalone binary |
 | `ci-success` | ubuntu-latest | `needs: [all]` aggregate gate, so branch protection needs only one required check |
@@ -720,7 +720,7 @@ before release.
 ## 11. Open questions / decisions to confirm
 
 1. **Command name**: `migrate-mongo` (familiar, but clashes if the Node version is also on PATH) vs `dotnet-migrate-mongo` / `mongo-migrate`.
-2. **Driver floor**: 3.5 (needed for SOCKS tunnelling) vs 3.0 with tunnelling disabled on older drivers.
+2. **Driver floor**: resolved. 3.9, the first 3.x driver whose SharpCompress and Snappier dependencies have no known advisories.
 3. **Migration id type**: timestamp string (proposed) vs `long`.
 4. **Checksum default**: `fail` on changed applied migrations (proposed) vs `warn`.
 5. **Minimum fallback TFM** for the `any` tool package: resolved. `net10.0`, since .NET 8 and 9 went out of support.
