@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "kevbite",
+  "classifications": [ "MongoDB", "Migrations", "Code" ],
+  "identity": "Kevsoft.MigrateMongo.Templates.Migration.Minimal",
+  "name": "MongoDB Migration, minimal (Kevsoft.MigrateMongo)",
+  "description": "A bare Kevsoft.MigrateMongo migration class, without the results and tracking examples, named M<id>_<Name>.cs.",
+  "shortName": "migratemongo-migration-minimal",
+  "sourceName": "MigrationName",
+  "defaultName": "NewMigration",
+  "tags": {
+    "language": "C#",
+    "type": "item"
+  },
+  "symbols": {
+    "migrationId": {
+      "type": "generated",
+      "generator": "now",
+      "parameters": { "format": "yyyyMMddHHmmss", "utc": true },
+      "replaces": "MIGRATIONID",
+      "fileRename": "MIGRATIONID"
+    },
+    "nameWithDashes": {
+      "type": "generated",
+      "generator": "regex",
+      "parameters": {
+        "source": "name",
+        "steps": [ { "regex": "(?<=[^A-Z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[^0-9])(?=[0-9])", "replacement": "-" } ]
+      }
+    },
+    "migrationDisplayName": {
+      "type": "generated",
+      "generator": "casing",
+      "parameters": { "source": "nameWithDashes", "toLower": true },
+      "replaces": "migration-name"
+    },
+    "rootNamespace": {
+      "type": "bind",
+      "binding": "msbuild:RootNamespace"
+    },
+    "defaultNamespace": {
+      "type": "generated",
+      "generator": "join",
+      "parameters": {
+        "symbols": [
+          { "type": "ref", "value": "rootNamespace" },
+          { "type": "const", "value": "Migrations" }
+        ],
+        "separator": ".",
+        "removeEmptyValues": true
+      }
+    },
+    "Namespace": {
+      "type": "parameter",
+      "description": "The namespace for the migration. Defaults to <project root namespace>.Migrations.",
+      "datatype": "text"
+    },
+    "namespaceValue": {
+      "type": "generated",
+      "generator": "coalesce",
+      "parameters": { "sourceVariableName": "Namespace", "fallbackVariableName": "defaultNamespace" },
+      "replaces": "Company.Migrations"
+    }
+  }
+}

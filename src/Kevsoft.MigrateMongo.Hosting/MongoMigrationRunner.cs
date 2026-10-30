@@ -33,6 +33,12 @@ public interface IMongoMigrationRunner
 
     Task<CommandResult> ValidateAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Full detail for one migration: its state, the results, notes and operations its last run recorded, and its recent
+    /// history (<see cref="CommandResult.Show"/>). <paramref name="id"/> can be a unique prefix.
+    /// </summary>
+    Task<CommandResult> ShowAsync(string id, CancellationToken cancellationToken = default);
+
     /// <summary>Runs any CLI command (<c>down</c>, <c>mark</c>, <c>baseline</c>, <c>unlock</c>, <c>history</c>, ...).</summary>
     Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken = default);
 }
@@ -58,6 +64,9 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
 
     public Task<CommandResult> ValidateAsync(CancellationToken cancellationToken = default) =>
         ExecuteAsync("validate", new CommandArguments(), cancellationToken);
+
+    public Task<CommandResult> ShowAsync(string id, CancellationToken cancellationToken = default) =>
+        ExecuteAsync("show", new CommandArguments { Id = id }, cancellationToken);
 
     public async Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken = default)
     {
@@ -131,6 +140,8 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             AllowOutOfOrder = options.AllowOutOfOrder,
             TransactionRetryTimeout = options.TransactionRetryTimeout,
             Environment = options.Environment ?? host?.EnvironmentName,
+            CaptureStatements = options.CaptureStatements,
+            ResultsMaxBytes = options.ResultsMaxBytes,
             Provenance = new Provenance
             {
                 Host = System.Environment.MachineName,

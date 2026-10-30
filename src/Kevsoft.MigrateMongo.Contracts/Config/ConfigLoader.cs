@@ -16,8 +16,10 @@ public static class ConfigLoader
     private static readonly HashSet<string> KnownKeys =
     [
         "project", "mongodb", "stateCollection", "lockTtl", "lockWaitTimeout", "onChecksumMismatch",
-        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate",
+        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate", "results",
     ];
+
+    private static readonly HashSet<string> ResultsKeys = ["captureStatements", "maxBytes"];
 
     private static readonly HashSet<string> TunnelKeys =
     [
@@ -126,6 +128,18 @@ public static class ConfigLoader
             _ => throw new ConfigException("Config setting 'tunnel' must be a mapping."),
         };
 
+        switch (root.GetValueOrDefault("results"))
+        {
+            case null:
+                break;
+            case Dictionary<string, object?> results:
+                config.ResultsCaptureStatements = OptionalBool(results, "captureStatements", getEnvironmentVariable) ?? config.ResultsCaptureStatements;
+                config.ResultsMaxBytes = OptionalInt(results, "maxBytes", getEnvironmentVariable) ?? config.ResultsMaxBytes;
+                break;
+            default:
+                throw new ConfigException("Config setting 'results' must be a mapping.");
+        }
+
         return config;
     }
 
@@ -206,6 +220,11 @@ public static class ConfigLoader
         if (config.TransactionRetryTimeoutSeconds < 0)
         {
             throw new ConfigException("'transactionRetryTimeout' must not be negative.");
+        }
+
+        if (config.ResultsMaxBytes < 1)
+        {
+            throw new ConfigException("'results.maxBytes' must be positive.");
         }
     }
 
@@ -315,6 +334,14 @@ public static class ConfigLoader
             foreach (var key in tunnel.Keys.Where(k => !TunnelKeys.Contains(k)))
             {
                 throw new ConfigException($"Unknown config setting '{prefix}tunnel.{key}'.");
+            }
+        }
+
+        if (map.GetValueOrDefault("results") is Dictionary<string, object?> results)
+        {
+            foreach (var key in results.Keys.Where(k => !ResultsKeys.Contains(k)))
+            {
+                throw new ConfigException($"Unknown config setting '{prefix}results.{key}'.");
             }
         }
     }

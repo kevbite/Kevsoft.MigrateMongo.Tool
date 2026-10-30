@@ -133,7 +133,7 @@ internal sealed class ToolCommands(string workingDirectory)
         var (configPath, config) = LoadConfig(invocation, projectOnly: true);
         var projectFile = ResolveProjectFile(configPath, config);
         string? template = null;
-        if (config.MigrationTemplate is { } templatePath)
+        if (!invocation.Minimal && config.MigrationTemplate is { } templatePath)
         {
             template = File.Exists(templatePath)
                 ? File.ReadAllText(templatePath)
@@ -161,9 +161,11 @@ internal sealed class ToolCommands(string workingDirectory)
         var rootNamespace = Scaffolding.ToNamespace(Path.GetFileNameWithoutExtension(projectFile));
         var @namespace = rootNamespace + ".Migrations";
         var name = Scaffolding.ToKebabCase(className);
-        File.WriteAllText(path, template is null
-            ? Scaffolding.MigrationFile(@namespace, id, className, name)
-            : Scaffolding.RenderMigrationTemplate(template, @namespace, id, className, name));
+        File.WriteAllText(path, template is not null
+            ? Scaffolding.RenderMigrationTemplate(template, @namespace, id, className, name)
+            : invocation.Minimal
+                ? Scaffolding.MinimalMigrationFile(@namespace, id, className, name)
+                : Scaffolding.MigrationFile(@namespace, id, className, name));
 
         if (invocation.Json)
         {

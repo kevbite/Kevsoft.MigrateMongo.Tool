@@ -32,6 +32,19 @@ public sealed class MigrateMongoCliTests
         invocation.NoBuild.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData(false, "create", "AddProducts")]
+    [InlineData(true, "create", "AddProducts", "--minimal")]
+    public async Task Create_accepts_minimal(bool minimal, params string[] args)
+    {
+        var (exitCode, invocation) = await Parse(true, args);
+
+        exitCode.ShouldBe(0);
+        invocation.ShouldNotBeNull();
+        invocation.Name.ShouldBe("AddProducts");
+        invocation.Minimal.ShouldBe(minimal);
+    }
+
     [Fact]
     public async Task Tool_accepts_insecure_skip_host_key_check()
     {
@@ -120,5 +133,38 @@ public sealed class MigrateMongoCliTests
         invocation.RuntimeIdentifier.ShouldBe("linux-x64");
         invocation.Output.ShouldBe("out/migrations");
         invocation.ConfigFile.ShouldBe("config.yaml");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Show_takes_an_id_with_history_and_no_statements(bool includeToolCommands)
+    {
+        var (exitCode, invocation) = await Parse(includeToolCommands, "show", "20260101", "--history", "5", "--no-statements");
+
+        exitCode.ShouldBe(0);
+        invocation.ShouldNotBeNull();
+        invocation.Command.ShouldBe("show");
+        invocation.Arguments.Id.ShouldBe("20260101");
+        invocation.Arguments.Limit.ShouldBe(5);
+        invocation.Arguments.NoStatements.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Show_requires_an_id()
+    {
+        var (exitCode, invocation) = await Parse(true, "show");
+
+        exitCode.ShouldNotBe(0);
+        invocation.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("up")]
+    [InlineData("down")]
+    public async Task Up_and_down_can_turn_off_statement_capture(string command)
+    {
+        (await Parse(true, command)).Invocation!.Arguments.NoCaptureStatements.ShouldBeFalse();
+        (await Parse(true, command, "--no-capture-statements")).Invocation!.Arguments.NoCaptureStatements.ShouldBeTrue();
     }
 }

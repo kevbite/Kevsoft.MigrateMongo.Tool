@@ -47,6 +47,9 @@ internal sealed class FakeStore : IMigrationStore
     public Task<IReadOnlyList<HistoryRecord>> GetHistoryAsync(string? migrationId, int limit, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<HistoryRecord>>(History.Where(h => migrationId is null || h.MigrationId == migrationId).TakeLast(limit).ToList());
 
+    public Task<IReadOnlyList<string>> GetHistoryIdsAsync(string prefix, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<string>>(History.Select(h => h.MigrationId).Where(id => id.StartsWith(prefix, StringComparison.Ordinal)).Distinct().ToList());
+
     public Task<bool> TryAcquireLockAsync(LockInfo lockInfo, DateTime now, CancellationToken cancellationToken)
     {
         if (Lock is null || Lock.ExpiresAt < now)
@@ -131,6 +134,7 @@ internal sealed class FakeStore : IMigrationStore
         RunId = s.RunId,
         Error = s.Error,
         AppliedBy = s.AppliedBy,
+        Output = s.Output,
     };
 }
 
@@ -190,22 +194,42 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
         return Task.FromResult<IExecutionScope>(scope);
     }
 
-    public TransactionErrorKind ClassifyTransactionError(Exception exception) =>
-        exception is FakeTransactionException fake ? fake.Kind : TransactionErrorKind.None;
+    public TransactionErrorKind ClassifyTransactionError(Exception exception) => exception switch
+    {
+        FakeTransactionException fake => fake.Kind,
+        MigrationExecutionException { InnerException: { } inner } => ClassifyTransactionError(inner),
+        _ => TransactionErrorKind.None,
+    };
 
-    public async Task ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, CancellationToken cancellationToken)
+    /// <summary>What each run records (called once per attempt); a failing migration carries it in a <see cref="MigrationExecutionException"/>.</summary>
+    public Func<MigrationDescriptor, MigrationRunInfo, MigrationOutputInfo?>? Output { get; set; }
+
+    public List<OutputOptions> OutputOptions { get; } = [];
+
+    public async Task<MigrationOutputInfo?> ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken)
     {
         Calls.Add($"{run.Direction}:{migration.Id}:{(run.Transactional ? "tx" : "notx")}");
+        OutputOptions.Add(options);
+        var output = Output?.Invoke(migration, run);
         var instance = migration.Create(new EmptyServices());
         var context = new MigrationContext(null!, null, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, new EmptyServices(), run);
-        if (run.Direction == MigrationDirection.Up)
+        try
         {
-            await instance.UpAsync(context, cancellationToken);
+            if (run.Direction == MigrationDirection.Up)
+            {
+                await instance.UpAsync(context, cancellationToken);
+            }
+            else
+            {
+                await instance.DownAsync(context, cancellationToken);
+            }
         }
-        else
+        catch (Exception e) when (output is not null)
         {
-            await instance.DownAsync(context, cancellationToken);
+            throw new MigrationExecutionException(output, e);
         }
+
+        return output;
     }
 
     private sealed class EmptyServices : IServiceProvider

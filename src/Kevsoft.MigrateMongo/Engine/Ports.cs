@@ -75,6 +75,9 @@ public sealed class StoredMigrationState
     public string? Error { get; set; }
 
     public Provenance AppliedBy { get; set; } = new();
+
+    /// <summary>What the last run recorded (results, notes and operations), if anything.</summary>
+    public MigrationOutputInfo? Output { get; set; }
 }
 
 /// <summary>Persistence for state, history and the lock.</summary>
@@ -92,6 +95,9 @@ public interface IMigrationStore
     Task AppendHistoryAsync(HistoryRecord record, IExecutionScope? scope, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<HistoryRecord>> GetHistoryAsync(string? migrationId, int limit, CancellationToken cancellationToken);
+
+    /// <summary>The distinct migration ids in the history that start with <paramref name="prefix"/>.</summary>
+    Task<IReadOnlyList<string>> GetHistoryIdsAsync(string prefix, CancellationToken cancellationToken);
 
     /// <summary>Takes the lock if nobody holds it or the current holder's lock expired before <paramref name="now"/>.</summary>
     Task<bool> TryAcquireLockAsync(LockInfo lockInfo, DateTime now, CancellationToken cancellationToken);
@@ -135,9 +141,25 @@ public interface IMigrationExecutor
 
     Task<IExecutionScope> BeginAsync(bool transactional, CancellationToken cancellationToken);
 
-    Task ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, CancellationToken cancellationToken);
+    /// <summary>
+    /// Runs the migration and returns what it recorded (null if nothing). If it fails, throws a
+    /// <see cref="MigrationExecutionException"/> carrying what it recorded before failing.
+    /// </summary>
+    Task<MigrationOutputInfo?> ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken);
 
     TransactionErrorKind ClassifyTransactionError(Exception exception);
+}
+
+/// <summary>How a migration's results are recorded.</summary>
+/// <param name="CaptureStatements">Record the statements run through <c>context.Track(...)</c>.</param>
+/// <param name="MaxResultsBytes">The largest the named results may be, in BSON bytes.</param>
+public sealed record OutputOptions(bool CaptureStatements, int MaxResultsBytes);
+
+/// <summary>A migration failed; <see cref="Output"/> is what it recorded before failing.</summary>
+public sealed class MigrationExecutionException(MigrationOutputInfo? output, Exception innerException)
+    : Exception(innerException.Message, innerException)
+{
+    public MigrationOutputInfo? Output { get; } = output;
 }
 
 public interface IMigrationEventSink
@@ -168,6 +190,12 @@ public sealed class EngineOptions
     public TimeSpan TransactionRetryDelay { get; set; } = TimeSpan.FromMilliseconds(100);
 
     public string? Environment { get; set; }
+
+    /// <summary>Record the statements run through <c>context.Track(...)</c> (can be turned off per run).</summary>
+    public bool CaptureStatements { get; set; } = true;
+
+    /// <summary>The largest a migration's named results may be, in BSON bytes.</summary>
+    public int ResultsMaxBytes { get; set; } = 64 * 1024;
 
     public Provenance Provenance { get; set; } = new();
 }

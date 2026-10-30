@@ -10,6 +10,7 @@ namespace Kevsoft.MigrateMongo.Engine;
 public sealed class MigrationEngine
 {
     private const int DefaultHistoryLimit = 50;
+    private const int DefaultShowHistoryLimit = 10;
 
     private readonly IMigrationStore _store;
     private readonly IMigrationExecutor _executor;
@@ -54,7 +55,7 @@ public sealed class MigrationEngine
         "status" => StatusAsync(arguments.Check, cancellationToken),
         "plan" => PlanAsync(cancellationToken),
         "up" when arguments.DryRun => DryRunUpAsync(arguments.To, cancellationToken),
-        "up" => UpAsync(arguments.To, cancellationToken),
+        "up" => UpAsync(arguments.To, OutputOptionsFor(arguments), cancellationToken),
         "down" when arguments.DryRun => DryRunDownAsync(arguments, cancellationToken),
         "down" => DownAsync(arguments, cancellationToken),
         "validate" => ValidateAsync(cancellationToken),
@@ -64,6 +65,7 @@ public sealed class MigrationEngine
         "mark" => MarkAsync(arguments.Id ?? "", arguments.Applied.Value, cancellationToken),
         "unlock" => UnlockAsync(arguments.Force, cancellationToken),
         "history" => HistoryAsync(arguments.Id, arguments.Limit, cancellationToken),
+        "show" => ShowAsync(arguments.Id ?? "", arguments.Limit, arguments.NoStatements, cancellationToken),
         _ => Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Unknown command '{command}'." }),
     };
 
@@ -222,7 +224,10 @@ public sealed class MigrationEngine
         return holder;
     }
 
-    public async Task<CommandResult> UpAsync(string? to, CancellationToken cancellationToken)
+    public Task<CommandResult> UpAsync(string? to, CancellationToken cancellationToken) =>
+        UpAsync(to, OutputOptionsFor(null), cancellationToken);
+
+    private async Task<CommandResult> UpAsync(string? to, OutputOptions outputOptions, CancellationToken cancellationToken)
     {
         if (to is not null && !_byId.ContainsKey(to))
         {
@@ -257,7 +262,7 @@ public sealed class MigrationEngine
                     return lost;
                 }
 
-                var error = await ApplyAsync(migration, batch, ct);
+                var error = await ApplyAsync(migration, batch, outputOptions, ct);
                 if (error is not null)
                 {
                     return new CommandResult
@@ -315,7 +320,7 @@ public sealed class MigrationEngine
                     return lost;
                 }
 
-                var error = await RollBackAsync(_byId[state.Id], state, ct);
+                var error = await RollBackAsync(_byId[state.Id], state, OutputOptionsFor(arguments), ct);
                 if (error is not null)
                 {
                     return new CommandResult
@@ -460,6 +465,101 @@ public sealed class MigrationEngine
         return new CommandResult { ExitCode = ExitCodes.Success, History = history.ToList() };
     }
 
+    /// <summary>Full detail for one migration: its state, everything its last run recorded, and its recent history.</summary>
+    /// <param name="id">The migration id, or a unique prefix of it.</param>
+    /// <param name="historyLimit">How many history entries to include (default 10, 0 for none).</param>
+    /// <param name="noStatements">Leave the recorded statements out.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public async Task<CommandResult> ShowAsync(string id, int? historyLimit, bool noStatements, CancellationToken cancellationToken)
+    {
+        await _store.InitializeAsync(cancellationToken);
+        var states = await _store.GetStatesAsync(cancellationToken);
+
+        // A rolled-back migration whose code has gone is only in the history.
+        var historyIds = id.Length > 0 ? await _store.GetHistoryIdsAsync(id, cancellationToken) : [];
+        var known = _byId.Keys.Concat(states.Select(s => s.Id)).Concat(historyIds).Distinct(StringComparer.Ordinal).ToList();
+        var resolved = known.Contains(id, StringComparer.Ordinal) ? id : null;
+        if (resolved is null)
+        {
+            var candidates = known.Where(k => k.StartsWith(id, StringComparison.Ordinal)).OrderBy(k => k, StringComparer.Ordinal).ToList();
+            if (id.Length > 0 && candidates.Count > 1)
+            {
+                return new CommandResult { ExitCode = ExitCodes.Failure, Message = $"'{id}' matches more than one migration: {string.Join(", ", candidates)}." };
+            }
+
+            resolved = id.Length > 0 && candidates.Count == 1 ? candidates[0] : null;
+        }
+
+        if (resolved is null)
+        {
+            return new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Migration '{id}' was not found." };
+        }
+
+        // The store treats a limit of 0 as no limit, so --history 0 doesn't query at all.
+        var limit = historyLimit ?? DefaultShowHistoryLimit;
+        var history = limit > 0 ? await _store.GetHistoryAsync(resolved, limit, cancellationToken) : [];
+        var state = states.FirstOrDefault(s => s.Id == resolved);
+        _byId.TryGetValue(resolved, out var migration);
+        MigrationStatusInfo status;
+        if (state is null && migration is null)
+        {
+            var latest = history.Count > 0 ? history : await _store.GetHistoryAsync(resolved, 1, cancellationToken);
+            status = new MigrationStatusInfo { Id = resolved, Name = latest[^1].Name, State = MigrationStates.Pending };
+        }
+        else
+        {
+            status = BuildStatus(state is null ? [] : [state]).First(s => s.Id == resolved);
+        }
+
+        status.Output = noStatements ? WithoutStatements(state?.Output) : state?.Output;
+
+        return new CommandResult
+        {
+            ExitCode = ExitCodes.Success,
+            Show = new ShowResult
+            {
+                Migration = status,
+                Source = state?.Source ?? migration?.Source,
+                Origin = state?.Origin ?? migration?.Origin,
+                Direction = state?.Direction,
+                DurationMs = state?.DurationMs,
+                CodeChecksum = migration?.Checksum,
+                User = state?.AppliedBy.User,
+                Tool = state?.AppliedBy.Tool,
+                Library = state?.AppliedBy.Library,
+                Driver = state?.AppliedBy.Driver,
+                History = noStatements ? history.Select(h => { h.Output = WithoutStatements(h.Output); return h; }).ToList() : history.ToList(),
+            },
+        };
+    }
+
+    private static MigrationOutputInfo? WithoutOperations(MigrationOutputInfo? output) => output is null ? null : new MigrationOutputInfo
+    {
+        Results = output.Results,
+        Notes = output.Notes,
+        NotesTruncated = output.NotesTruncated,
+        Committed = output.Committed,
+    };
+
+    private static MigrationOutputInfo? WithoutStatements(MigrationOutputInfo? output) => output is null ? null : new MigrationOutputInfo
+    {
+        Results = output.Results,
+        Notes = output.Notes,
+        NotesTruncated = output.NotesTruncated,
+        Operations = output.Operations?.Select(o => new OperationRecord
+        {
+            Kind = o.Kind,
+            Collection = o.Collection,
+            Label = o.Label,
+            Counts = o.Counts,
+            Error = o.Error,
+            DurationMs = o.DurationMs,
+            At = o.At,
+        }).ToList(),
+        OperationsTruncated = output.OperationsTruncated,
+        Committed = output.Committed,
+    };
+
     private DateTime Now => _time.GetUtcNow().UtcDateTime;
 
     private List<MigrationStatusInfo> BuildStatus(IReadOnlyList<StoredMigrationState> states)
@@ -485,6 +585,7 @@ public sealed class MigrationEngine
                 Error = state?.Error,
                 RunId = state?.RunId,
                 Host = state?.AppliedBy.Host,
+                Output = WithoutOperations(state?.Output),
             });
         }
 
@@ -630,7 +731,7 @@ public sealed class MigrationEngine
     }
 
     /// <returns>The error message, or null on success.</returns>
-    private async Task<string?> ApplyAsync(MigrationDescriptor migration, int batch, CancellationToken cancellationToken)
+    private async Task<string?> ApplyAsync(MigrationDescriptor migration, int batch, OutputOptions outputOptions, CancellationToken cancellationToken)
     {
         bool transactional;
         try
@@ -652,39 +753,44 @@ public sealed class MigrationEngine
             await _store.SaveStateAsync(NewState(migration, MigrationStates.Applying, batch, false), null, cancellationToken);
         }
 
+        MigrationOutputInfo? output = null;
         try
         {
             await RunInScopeAsync(migration, transactional, async scope =>
             {
-                await _executor.ExecuteAsync(scope, migration, run, cancellationToken);
+                output = null;
+                output = Committed(await _executor.ExecuteAsync(scope, migration, run, outputOptions, cancellationToken), true);
                 var state = NewState(migration, MigrationStates.Applied, batch, transactional);
                 state.DurationMs = stopwatch.ElapsedMilliseconds;
+                state.Output = output;
                 await _store.SaveStateAsync(state, scope, cancellationToken);
-                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null), scope, cancellationToken);
+                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null, output), scope, cancellationToken);
             }, cancellationToken);
         }
         catch (Exception e)
         {
             var error = Describe(e);
+            output = Committed((e as MigrationExecutionException)?.Output ?? output, CommittedAfterFailure(e, transactional));
             if (!transactional)
             {
                 var failed = NewState(migration, MigrationStates.Failed, batch, false);
                 failed.AppliedAt = null;
                 failed.Error = error;
                 failed.DurationMs = stopwatch.ElapsedMilliseconds;
+                failed.Output = output;
                 await _store.SaveStateAsync(failed, null, CancellationToken.None);
             }
 
-            await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Failed, "up", batch, migration.Checksum, stopwatch.ElapsedMilliseconds, error), null, CancellationToken.None);
-            Emit(EventTypes.MigrationFailed, migration, "up", transactional, stopwatch.ElapsedMilliseconds, error);
+            await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Failed, "up", batch, migration.Checksum, stopwatch.ElapsedMilliseconds, error, output), null, CancellationToken.None);
+            Emit(EventTypes.MigrationFailed, migration, "up", transactional, stopwatch.ElapsedMilliseconds, error, output);
             return error;
         }
 
-        Emit(EventTypes.MigrationCompleted, migration, "up", transactional, stopwatch.ElapsedMilliseconds, null);
+        Emit(EventTypes.MigrationCompleted, migration, "up", transactional, stopwatch.ElapsedMilliseconds, null, output);
         return null;
     }
 
-    private async Task<string?> RollBackAsync(MigrationDescriptor migration, StoredMigrationState state, CancellationToken cancellationToken)
+    private async Task<string?> RollBackAsync(MigrationDescriptor migration, StoredMigrationState state, OutputOptions outputOptions, CancellationToken cancellationToken)
     {
         bool transactional;
         try
@@ -710,34 +816,61 @@ public sealed class MigrationEngine
             await _store.SaveStateAsync(state, null, cancellationToken);
         }
 
+        MigrationOutputInfo? output = null;
         try
         {
             await RunInScopeAsync(migration, transactional, async scope =>
             {
-                await _executor.ExecuteAsync(scope, migration, run, cancellationToken);
+                output = null;
+                output = Committed(await _executor.ExecuteAsync(scope, migration, run, outputOptions, cancellationToken), true);
                 await _store.DeleteStateAsync(migration.Id, scope, cancellationToken);
-                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null), scope, cancellationToken);
+                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null, output), scope, cancellationToken);
             }, cancellationToken);
         }
         catch (Exception e)
         {
             var error = Describe(e);
+            output = Committed((e as MigrationExecutionException)?.Output ?? output, CommittedAfterFailure(e, transactional));
             if (!transactional)
             {
                 state.State = MigrationStates.Failed;
                 state.Error = error;
                 state.UpdatedAt = Now;
+                state.Output = output;
                 await _store.SaveStateAsync(state, null, CancellationToken.None);
             }
 
-            await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Failed, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, error), null, CancellationToken.None);
-            Emit(EventTypes.MigrationFailed, migration, "down", transactional, stopwatch.ElapsedMilliseconds, error);
+            await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Failed, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, error, output), null, CancellationToken.None);
+            Emit(EventTypes.MigrationFailed, migration, "down", transactional, stopwatch.ElapsedMilliseconds, error, output);
             return error;
         }
 
-        Emit(EventTypes.MigrationCompleted, migration, "down", transactional, stopwatch.ElapsedMilliseconds, null);
+        Emit(EventTypes.MigrationCompleted, migration, "down", transactional, stopwatch.ElapsedMilliseconds, null, output);
         return null;
     }
+
+    private static MigrationOutputInfo? Committed(MigrationOutputInfo? output, bool? committed)
+    {
+        if (output is not null)
+        {
+            output.Committed = committed;
+        }
+
+        return output;
+    }
+
+    /// <summary>
+    /// Whether a failed migration's changes were persisted: always without a transaction, never when the transaction was
+    /// rolled back, and unknown (null) when its commit failed with <c>UnknownTransactionCommitResult</c> and wasn't
+    /// retried successfully, since that commit may have been applied.
+    /// </summary>
+    private bool? CommittedAfterFailure(Exception exception, bool transactional) =>
+        !transactional ? true
+        : _executor.ClassifyTransactionError(exception) == TransactionErrorKind.UnknownCommitResult ? null
+        : false;
+
+    private OutputOptions OutputOptionsFor(CommandArguments? arguments) =>
+        new(_options.CaptureStatements && arguments?.NoCaptureStatements != true, _options.ResultsMaxBytes);
 
     /// <summary>
     /// Runs <paramref name="body"/> in a new scope and commits it. Transactions are retried like the driver's
@@ -969,7 +1102,7 @@ public sealed class MigrationEngine
         };
     }
 
-    private HistoryRecord History(string id, string name, string historyEvent, string direction, int? batch, string? checksum, long? durationMs, string? error) => new()
+    private HistoryRecord History(string id, string name, string historyEvent, string direction, int? batch, string? checksum, long? durationMs, string? error, MigrationOutputInfo? output = null) => new()
     {
         MigrationId = id,
         Name = name,
@@ -982,9 +1115,10 @@ public sealed class MigrationEngine
         Checksum = checksum,
         Error = error,
         Host = _options.Provenance.Host,
+        Output = output,
     };
 
-    private void Emit(string type, MigrationDescriptor migration, string direction, bool? transactional, long? durationMs, string? error) =>
+    private void Emit(string type, MigrationDescriptor migration, string direction, bool? transactional, long? durationMs, string? error, MigrationOutputInfo? output = null) =>
         _events.OnEvent(new RunnerEvent
         {
             Type = type,
@@ -994,14 +1128,18 @@ public sealed class MigrationEngine
             Transactional = transactional,
             DurationMs = durationMs,
             Error = error,
+            Output = output,
         });
 
     private static ValidationIssue Issue(string severity, string kind, string? id, string message) =>
         new() { Severity = severity, Kind = kind, MigrationId = id, Message = message };
 
-    private static string Describe(Exception e) => e is OperationCanceledException
-        ? "The operation was cancelled."
-        : $"{e.GetType().Name}: {e.Message}";
+    private static string Describe(Exception e) => e switch
+    {
+        MigrationExecutionException { InnerException: { } inner } => Describe(inner),
+        OperationCanceledException => "The operation was cancelled.",
+        _ => $"{e.GetType().Name}: {e.Message}",
+    };
 }
 
 public sealed class MigrationEngineException(string message) : Exception(message);
