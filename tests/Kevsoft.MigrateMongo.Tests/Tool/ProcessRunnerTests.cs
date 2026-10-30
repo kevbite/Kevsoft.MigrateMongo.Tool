@@ -1,3 +1,4 @@
+using Kevsoft.MigrateMongo.Protocol;
 using Kevsoft.MigrateMongo.Tool;
 using Shouldly;
 
@@ -26,6 +27,30 @@ public class ProcessRunnerTests
 
         info.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"].ShouldBe("0");
         info.Environment["DOTNET_NOLOGO"].ShouldBe("false");
+    }
+
+    [Fact]
+    public async Task Missing_dotnet_says_to_pass_a_bundle_with_runner()
+    {
+        // As on a machine, or in the -bundle image, without the .NET SDK.
+        var dotnet = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "dotnet");
+
+        var error = await Should.ThrowAsync<ToolException>(() => ProcessRunner.RunAsync(dotnet, ["build"], Directory.GetCurrentDirectory(), CancellationToken.None));
+
+        error.ExitCode.ShouldBe(ExitCodes.Failure);
+        error.Message.ShouldStartWith("Couldn't run dotnet (");
+        error.Message.ShouldEndWith("Building the migrations project needs the .NET SDK; without it, pass --runner with a bundle made by `migrate-mongo bundle`.");
+    }
+
+    [Fact]
+    public async Task A_runner_that_cant_be_started_is_reported()
+    {
+        var runner = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "MyApp.Migrations");
+
+        var error = await Should.ThrowAsync<ToolException>(() => ProcessRunner.RunAsync(runner, ["--version"], Directory.GetCurrentDirectory(), CancellationToken.None));
+
+        error.ExitCode.ShouldBe(ExitCodes.Failure);
+        error.Message.ShouldStartWith($"Couldn't run '{runner}' (");
     }
 
     private sealed class EnvironmentVariables : IDisposable

@@ -826,7 +826,7 @@ migrate-mongo up --env prod --runner ./out/MyApp.Migrations
 - `ghcr.io/kevbite/migrate-mongo:<version>` is the tool on the .NET 10 SDK, so it can build and run your migrations
   project. A `global.json` that pins an older SDK won't work in it.
 - `ghcr.io/kevbite/migrate-mongo:<version>-bundle` is the tool without .NET, for running [bundles](#bundles) with
-  `--runner`.
+  `--runner`. It can't build a project, so without `--runner` it stops and asks for one.
 
 The working directory is `/src`. Run the SDK image as your user so build output in the mount isn't owned by root:
 

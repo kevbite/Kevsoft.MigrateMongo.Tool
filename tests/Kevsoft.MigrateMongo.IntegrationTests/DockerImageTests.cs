@@ -45,6 +45,20 @@ public sealed class DockerImageTests(IntegrationEnvironment environment)
         AppliedIds.ShouldBe(workspace.Find("_migrations").Select(s => s["_id"].AsString));
     }
 
+    [Fact]
+    public async Task Bundle_image_asks_for_a_runner_as_it_cant_build_the_project()
+    {
+        var image = ImageOrSkip("MIGRATE_MONGO_TEST_BUNDLE_IMAGE");
+        await using var workspace = CreateWorkspace();
+
+        var run = await DockerRunAsync(image, workspace, [], "up");
+
+        run.ExitCode.ShouldBe(1, run.ToString());
+        run.Error.ShouldContain("Couldn't run dotnet");
+        run.Error.ShouldContain("pass --runner with a bundle made by `migrate-mongo bundle`");
+        workspace.CollectionNames().ShouldBeEmpty();
+    }
+
     private static string ImageOrSkip(string variable)
     {
         var image = Environment.GetEnvironmentVariable(variable);
