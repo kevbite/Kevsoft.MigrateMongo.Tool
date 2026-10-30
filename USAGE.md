@@ -527,6 +527,10 @@ lock expires by the database server's clock, so agents whose clocks disagree sti
 
 ## When something goes wrong
 
+**A migration throws** (exit code `1`): the output shows the exception with its stack trace (with `--json`, it's the
+`details` of the `migrationFailed` event, and Hosting logs the exception itself). The state and history keep the
+one-line error.
+
 **An applied migration was edited** (exit code `4`):
 
 ```
@@ -789,7 +793,8 @@ builder.Services
 
 `RunOnStartup()` applies pending migrations before any hosted service starts, so ASP.NET Core doesn't serve requests
 against an out-of-date database. If a migration fails, or the lock isn't acquired within `LockWaitTimeout`, the host
-fails to start with a `MongoMigrationException`. Progress goes to your app's `ILogger`, and migrations can take your
+fails to start with a `MongoMigrationException`. Progress, warnings (such as checksum warnings with
+`OnChecksumMismatch = Warn`) and the outcome go to your app's `ILogger`, and migrations can take your
 app's services (including scoped ones) as constructor dependencies.
 
 App instances and CLI runs share the same state and lock, so it's safe when many instances start at once: one applies

@@ -50,4 +50,26 @@ public sealed class ConsoleRendererTests
 
             """.ReplaceLineEndings("\n"));
     }
+
+    [Fact]
+    public void A_failed_migration_is_shown_with_its_exception()
+    {
+        var output = new StringWriter();
+
+        new ConsoleRenderer(output, color: false).Render(new RunnerEvent
+        {
+            Type = EventTypes.MigrationFailed,
+            MigrationId = "20260101000002",
+            Name = "broken",
+            Error = "InvalidOperationException: boom",
+            Details = "System.InvalidOperationException: boom\r\n   at Broken.UpAsync(MigrationContext context) in Broken.cs:line 12",
+        });
+
+        output.ToString().ReplaceLineEndings("\n").ShouldBe("""
+            ✖ 20260101000002 broken: InvalidOperationException: boom
+                System.InvalidOperationException: boom
+                   at Broken.UpAsync(MigrationContext context) in Broken.cs:line 12
+
+            """.ReplaceLineEndings("\n"));
+    }
 }

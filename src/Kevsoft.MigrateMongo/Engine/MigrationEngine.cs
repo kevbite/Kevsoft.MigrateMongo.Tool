@@ -674,7 +674,7 @@ public sealed class MigrationEngine
             }
 
             await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Failed, "up", batch, migration.Checksum, stopwatch.ElapsedMilliseconds, error), null, CancellationToken.None);
-            Emit(EventTypes.MigrationFailed, migration, "up", transactional, stopwatch.ElapsedMilliseconds, error);
+            Emit(EventTypes.MigrationFailed, migration, "up", transactional, stopwatch.ElapsedMilliseconds, error, e);
             return error;
         }
 
@@ -729,7 +729,7 @@ public sealed class MigrationEngine
             }
 
             await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Failed, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, error), null, CancellationToken.None);
-            Emit(EventTypes.MigrationFailed, migration, "down", transactional, stopwatch.ElapsedMilliseconds, error);
+            Emit(EventTypes.MigrationFailed, migration, "down", transactional, stopwatch.ElapsedMilliseconds, error, e);
             return error;
         }
 
@@ -981,7 +981,8 @@ public sealed class MigrationEngine
         Host = _options.Provenance.Host,
     };
 
-    private void Emit(string type, MigrationDescriptor migration, string direction, bool? transactional, long? durationMs, string? error) =>
+    // A failure's exception, with its stack trace, goes in the event; state and history keep the short error.
+    private void Emit(string type, MigrationDescriptor migration, string direction, bool? transactional, long? durationMs, string? error, Exception? exception = null) =>
         _events.OnEvent(new RunnerEvent
         {
             Type = type,
@@ -991,6 +992,9 @@ public sealed class MigrationEngine
             Transactional = transactional,
             DurationMs = durationMs,
             Error = error,
+            // A cancellation's stack trace says nothing about the migration.
+            Details = exception is null or OperationCanceledException ? null : exception.ToString(),
+            Exception = exception,
         });
 
     private static ValidationIssue Issue(string severity, string kind, string? id, string message) =>

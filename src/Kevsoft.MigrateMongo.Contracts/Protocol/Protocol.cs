@@ -111,6 +111,13 @@ public sealed class RunnerEvent
 
     public string? Error { get; set; }
 
+    /// <summary>For <c>migrationFailed</c>: the full exception (types, messages and stack traces) behind <see cref="Error"/>.</summary>
+    public string? Details { get; set; }
+
+    /// <summary>For <c>migrationFailed</c> in-process (e.g. Hosting's logging): the exception itself. Never serialised.</summary>
+    [JsonIgnore]
+    public Exception? Exception { get; set; }
+
     public CommandResult? Result { get; set; }
 }
 

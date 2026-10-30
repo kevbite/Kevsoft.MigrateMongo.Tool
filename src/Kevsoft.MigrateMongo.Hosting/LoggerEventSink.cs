@@ -34,10 +34,19 @@ internal sealed class LoggerEventSink(ILogger logger) : IMigrationEventSink
                 Log.MigrationApplied(logger, e.MigrationId, e.Name, e.DurationMs);
                 break;
             case EventTypes.MigrationFailed:
-                Log.MigrationFailed(logger, e.MigrationId, e.Name, e.Error);
+                Log.MigrationFailed(logger, e.MigrationId, e.Name, e.Error, e.Exception);
                 break;
             case EventTypes.Result when e.Result is { } result:
-                if (result.ExitCode == ExitCodes.Success)
+                foreach (var issue in result.Issues ?? [])
+                {
+                    // A run stopped by errors already lists them in its message.
+                    if (result.Message?.Contains(issue.Message, StringComparison.Ordinal) != true)
+                    {
+                        Log.Message(logger, issue.Severity == "error" ? LogLevel.Error : LogLevel.Warning, issue.Message);
+                    }
+                }
+
+                if (result.ExitCode is ExitCodes.Success or ExitCodes.PendingMigrations)
                 {
                     Log.Message(logger, LogLevel.Information, result.Message ?? "Migrations finished.");
                 }

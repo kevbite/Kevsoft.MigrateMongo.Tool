@@ -20,7 +20,7 @@ internal static partial class Log
     public static partial void MigrationRolledBack(ILogger logger, string? migrationId, string? migrationName, long? durationMs);
 
     [LoggerMessage(EventId = 6, Level = LogLevel.Error, Message = "Migration {MigrationId} {MigrationName} failed: {Error}")]
-    public static partial void MigrationFailed(ILogger logger, string? migrationId, string? migrationName, string? error);
+    public static partial void MigrationFailed(ILogger logger, string? migrationId, string? migrationName, string? error, Exception? exception);
 
     [LoggerMessage(EventId = 7, Level = LogLevel.Error, Message = "Migrations failed (exit code {ExitCode}): {Message}")]
     public static partial void MigrationsFailed(ILogger logger, int exitCode, string? message);

@@ -21,6 +21,7 @@ public sealed class HostingTests(IntegrationEnvironment environment)
         run.ExitCode.ShouldBe(0, run.ToString());
         run.Output.ShouldContain("Applying migration 20260101000001 create-users");
         run.Output.ShouldContain("Applied migration 20260101000003 seed-defaults");
+        run.Output.ShouldContain("Applied 3 migration(s) in batch 1.");
         run.Output.ShouldContain("App started; applied migrations: 3");
 
         var states = workspace.Find("_migrations");
@@ -54,6 +55,7 @@ public sealed class HostingTests(IntegrationEnvironment environment)
         var restart = await RunAppAsync(workspace);
         restart.ExitCode.ShouldBe(0, restart.ToString());
         restart.Output.ShouldNotContain("Applying migration");
+        restart.Output.ShouldContain("Nothing to apply; database is up to date.");
         restart.Output.ShouldContain("App started; applied migrations: 3");
         workspace.Find("_migrations.history", sortBy: "at").Select(h => (h["migrationId"].AsString, h["event"].AsString))
             .ShouldBe(MigrationIds.Select(id => (id, "applied")));

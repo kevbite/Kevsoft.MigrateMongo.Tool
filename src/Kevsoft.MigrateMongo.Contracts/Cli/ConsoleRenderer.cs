@@ -36,6 +36,14 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
                 break;
             case EventTypes.MigrationFailed:
                 WriteLine(Paint($"✖ {e.MigrationId} {e.Name}: {e.Error}", Red));
+                if (e.Details is not null)
+                {
+                    foreach (var line in e.Details.Split('\n'))
+                    {
+                        WriteLine(Paint("    " + line.TrimEnd('\r'), Dim));
+                    }
+                }
+
                 break;
             case EventTypes.Result when e.Result is not null:
                 RenderResult(e.Result);

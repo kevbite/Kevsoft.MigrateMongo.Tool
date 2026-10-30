@@ -235,6 +235,22 @@ public sealed class MigrationEngineTests
         _store.Lock!.RunId.ShouldBe("other");
     }
 
+    [Fact]
+    public async Task A_failed_migration_reports_its_exception_with_the_stack_trace()
+    {
+        var failing = Migrations.Create("20260101000001", "broken", up: () => throw new InvalidOperationException("boom"));
+
+        await Engine([failing]).UpAsync(null, CancellationToken.None);
+
+        var failed = _sink.Events.Single(e => e.Type == EventTypes.MigrationFailed);
+        failed.Error.ShouldBe("InvalidOperationException: boom");
+        failed.Exception.ShouldBeOfType<InvalidOperationException>();
+        failed.Details!.ShouldStartWith("System.InvalidOperationException: boom");
+        failed.Details.ShouldContain(" at ");
+        // The database keeps the short message.
+        _store.History.Single().Error.ShouldBe("InvalidOperationException: boom");
+    }
+
     [Theory]
     [InlineData("status")]
     [InlineData("validate")]

@@ -100,8 +100,12 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             // A scope per run, so migrations can depend on scoped services.
             await using var scope = services.CreateAsyncScope();
             var backend = MongoDriverBackend.Create(client, options.DatabaseName, options.StateCollection, scope.ServiceProvider, loggerFactory);
-            var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(options), new LoggerEventSink(logger));
-            return await engine.ExecuteAsync(command, arguments, cancellationToken);
+            var sink = new LoggerEventSink(logger);
+            var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(options), sink);
+            var result = await engine.ExecuteAsync(command, arguments, cancellationToken);
+            // The outcome and its warnings (e.g. checksum warnings with OnChecksumMismatch.Warn) go to the log too.
+            sink.OnEvent(new RunnerEvent { Type = EventTypes.Result, Result = result });
+            return result;
         }
         finally
         {
