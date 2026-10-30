@@ -85,16 +85,15 @@ public static class ConfigLoader
 
         var root = Parse(yaml);
         ValidateKeys(root, "");
+        var environments = Environments(root);
 
         if (!string.IsNullOrEmpty(environment))
         {
-            if (root.GetValueOrDefault("environments") is not Dictionary<string, object?> environments ||
-                environments.GetValueOrDefault(environment) is not Dictionary<string, object?> overlay)
+            if (!environments.TryGetValue(environment, out var overlay))
             {
                 throw new ConfigException($"Environment '{environment}' is not defined under 'environments' in the config file.");
             }
 
-            ValidateKeys(overlay, $"environments.{environment}.");
             root = Merge(root, overlay);
         }
 
@@ -297,6 +296,40 @@ public static class ConfigLoader
         YamlScalarNode scalar => scalar.Value is null or "~" or "null" && scalar.Style == YamlDotNet.Core.ScalarStyle.Plain ? null : scalar.Value,
         _ => null,
     };
+
+    /// <summary>
+    /// The <c>environments:</c> entries, every one checked for unknown settings so that a typo is reported whichever
+    /// environment is selected. An entry with nothing under it overrides nothing.
+    /// </summary>
+    private static Dictionary<string, Dictionary<string, object?>> Environments(Dictionary<string, object?> root)
+    {
+        var result = new Dictionary<string, Dictionary<string, object?>>(StringComparer.Ordinal);
+
+        // `key:` with nothing after it reads as an empty string.
+        switch (root.GetValueOrDefault("environments"))
+        {
+            case null or "":
+                break;
+            case Dictionary<string, object?> environments:
+                foreach (var (name, value) in environments)
+                {
+                    var overlay = value switch
+                    {
+                        null or "" => new Dictionary<string, object?>(StringComparer.Ordinal),
+                        Dictionary<string, object?> map => map,
+                        _ => throw new ConfigException($"Config setting 'environments.{name}' must be a mapping."),
+                    };
+                    ValidateKeys(overlay, $"environments.{name}.");
+                    result[name] = overlay;
+                }
+
+                break;
+            default:
+                throw new ConfigException("Config setting 'environments' must be a mapping.");
+        }
+
+        return result;
+    }
 
     private static Dictionary<string, object?> Merge(Dictionary<string, object?> baseMap, Dictionary<string, object?> overlay)
     {

@@ -334,7 +334,7 @@ internal sealed class ToolCommands(string workingDirectory)
         var info = ProcessRunner.StartInfo(fileName, [.. prefix, ProtocolVersions.ProtocolArgument, protocol.ToString(CultureInfo.InvariantCulture)], workingDir);
         info.RedirectStandardInput = true;
 
-        using var process = Process.Start(info) ?? throw new ToolException(ExitCodes.Failure, $"Failed to start the runner '{fileName}'.");
+        using var process = ProcessRunner.Start(info);
         process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data is not null)

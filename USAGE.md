@@ -64,7 +64,7 @@ There's also a [Docker image](#docker).
 
 Migrations live in a small console project that you own. The tool builds it with your SDK and runs it on your runtime,
 using the library and `MongoDB.Driver` versions you choose (3.9 or later). The tool itself never loads the driver, so
-upgrading either side doesn't break the other.
+upgrading either side doesn't break the other. The database must be MongoDB 5.0 or later.
 
 ### `init`
 
@@ -148,7 +148,8 @@ always use the built-in templates, not `migrationTemplate`.
 ## Configuration
 
 `migrate-mongo.yaml` (or `migrate-mongo.yml`) is found in the current directory, or passed with `-f <path>`. Any value
-can reference environment variables with `${NAME}`. Unknown settings are errors, so typos don't go unnoticed.
+can reference environment variables with `${NAME}`. Unknown settings are errors, in every environment and not just
+the one `--env` selects, so typos don't go unnoticed.
 
 ```yaml
 project: src/MyApp.Migrations        # the migrations project, relative to this file
@@ -196,7 +197,7 @@ environments:
 | `results.captureStatements` | `true` | Record each [tracked operation](#recording-results)'s filter, update or index keys. `false` keeps only the kind, counts and timings. |
 | `results.maxBytes` | `65536` | The most a migration's named results can take up. A migration that records more fails. |
 | `tunnel` | | See [Tunnelling through a bastion](#tunnelling-through-a-bastion). |
-| `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings. |
+| `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings; an empty one changes nothing. |
 
 ## Writing migrations
 
@@ -437,7 +438,8 @@ If the template lives inside the migrations project, don't give it a `.cs` exten
 
 ### Build errors
 
-The source generator finds migrations at compile time and reports mistakes as build errors:
+The source generator finds migrations (classes and records marked with `[Migration]`) at compile time and reports
+mistakes as build errors:
 
 | Code | Meaning |
 |---|---|
@@ -824,7 +826,7 @@ migrate-mongo up --env prod --runner ./out/MyApp.Migrations
 - `ghcr.io/kevbite/migrate-mongo:<version>` is the tool on the .NET 10 SDK, so it can build and run your migrations
   project. A `global.json` that pins an older SDK won't work in it.
 - `ghcr.io/kevbite/migrate-mongo:<version>-bundle` is the tool without .NET, for running [bundles](#bundles) with
-  `--runner`.
+  `--runner`. It can't build a project, so without `--runner` it stops and asks for one.
 
 The working directory is `/src`. Run the SDK image as your user so build output in the mount isn't owned by root:
 

@@ -222,6 +222,26 @@ public sealed class MigrationEngineTests
         result.Issues!.ShouldContain(i => i.Kind == "unsupportedState");
     }
 
+    [Theory]
+    [InlineData("mark", "20260101000001", true)]
+    [InlineData("mark", "20260101000001", false)]
+    [InlineData("mark", "20260101000002", true)]
+    [InlineData("baseline", "20260101000002", null)]
+    public async Task Mark_and_baseline_refuse_to_write_while_state_from_a_newer_schema_version_exists(string command, string id, bool? applied)
+    {
+        _store.States["20260101000001"] = new StoredMigrationState { Id = "20260101000001", V = 2, State = "applied", Batch = 1 };
+        var engine = Engine([Migrations.Create("20260101000001", "a"), Migrations.Create("20260101000002", "b")]);
+        var arguments = command == "mark" ? new CommandArguments { Id = id, Applied = applied } : new CommandArguments { To = id };
+
+        var result = await engine.ExecuteAsync(command, arguments, CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        result.Issues!.ShouldContain(i => i.Kind == "unsupportedState" && i.MigrationId == "20260101000001");
+        _store.States.Values.Select(s => (s.Id, s.V)).ShouldBe([("20260101000001", 2)]);
+        _store.History.ShouldBeEmpty();
+        _store.Lock.ShouldBeNull();
+    }
+
     [Fact]
     public async Task Up_times_out_when_another_run_holds_the_lock()
     {

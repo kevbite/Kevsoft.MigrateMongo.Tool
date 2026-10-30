@@ -20,7 +20,7 @@ line, your build server or your application.
 
 ## Getting started
 
-You need a [.NET SDK](https://dotnet.microsoft.com/download) (10 or later) and MongoDB 4.2 or later. Transactions need a
+You need a [.NET SDK](https://dotnet.microsoft.com/download) (10 or later) and MongoDB 5.0 or later. Transactions need a
 replica set or sharded cluster. Locally, [MongoDB Atlas Local](https://hub.docker.com/r/mongodb/mongodb-atlas-local)
 works well:
 

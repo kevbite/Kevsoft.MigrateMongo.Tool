@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
+using Kevsoft.MigrateMongo.Protocol;
 
 namespace Kevsoft.MigrateMongo.Tool;
 
@@ -32,10 +34,29 @@ internal static class ProcessRunner
         return info;
     }
 
+    /// <summary>
+    /// Starts a process. One that can't be started is a <see cref="ToolException"/>: most often dotnet on a machine
+    /// without the .NET SDK, such as in the <c>-bundle</c> Docker image.
+    /// </summary>
+    public static Process Start(ProcessStartInfo info)
+    {
+        try
+        {
+            return Process.Start(info) ?? throw new ToolException(ExitCodes.Failure, $"Failed to start '{info.FileName}'.");
+        }
+        catch (Win32Exception e)
+        {
+            var reason = new Win32Exception(e.NativeErrorCode).Message.TrimEnd('.');
+            var dotnet = string.Equals(Path.GetFileNameWithoutExtension(info.FileName), "dotnet", StringComparison.OrdinalIgnoreCase);
+            throw new ToolException(ExitCodes.Failure, dotnet
+                ? $"Couldn't run dotnet ({reason}). Building the migrations project needs the .NET SDK; without it, pass --runner with a bundle made by `migrate-mongo bundle`."
+                : $"Couldn't run '{info.FileName}' ({reason}).");
+        }
+    }
+
     public static async Task<ProcessResult> RunAsync(string fileName, IEnumerable<string> arguments, string workingDirectory, CancellationToken cancellationToken)
     {
-        using var process = Process.Start(StartInfo(fileName, arguments, workingDirectory))
-                            ?? throw new InvalidOperationException($"Failed to start '{fileName}'.");
+        using var process = Start(StartInfo(fileName, arguments, workingDirectory));
         var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
         try

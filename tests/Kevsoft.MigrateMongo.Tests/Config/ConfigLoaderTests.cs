@@ -70,6 +70,36 @@ public sealed class ConfigLoaderTests
     }
 
     [Fact]
+    public void Every_environment_is_checked_for_unknown_settings_whichever_is_selected()
+    {
+        const string yaml = """
+            mongodb:
+              url: mongodb://local:27017
+              databaseName: myapp
+            environments:
+              prod:
+                lockWaitTimeout: 5
+              staging:
+                mongodb:
+                  uri: ${STAGING_MONGODB_URL}
+            """;
+
+        Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, "prod", Env)).Message
+            .ShouldBe("Unknown config setting 'environments.staging.mongodb.uri'.");
+        Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message
+            .ShouldBe("Unknown config setting 'environments.staging.mongodb.uri'.");
+    }
+
+    [Fact]
+    public void An_environment_with_nothing_under_it_uses_the_top_level_settings()
+    {
+        var config = ConfigLoader.Load("mongodb:\n  url: mongodb://local\n  databaseName: app\nenvironments:\n  local:\n", "local", Env);
+
+        config.Environment.ShouldBe("local");
+        config.MongoUrl.ShouldBe("mongodb://local");
+    }
+
+    [Fact]
     public void Missing_environment_variable_is_an_error()
     {
         Should.Throw<ConfigException>(() => ConfigLoader.Load(Yaml, null, _ => null)).Message.ShouldContain("MONGODB_URL");
@@ -98,6 +128,9 @@ public sealed class ConfigLoaderTests
     [InlineData("lockTtl: soon", "lockTtl")]
     [InlineData("results:\n  maxSize: 10", "results.maxSize")]
     [InlineData("results: 5", "results")]
+    [InlineData("environments: prod", "Config setting 'environments' must be a mapping")]
+    [InlineData("environments:\n  prod: mongodb://prod", "Config setting 'environments.prod' must be a mapping")]
+    [InlineData("environments:\n  prod:\n    lockTimeout: 5", "environments.prod.lockTimeout")]
     public void Invalid_settings_are_reported(string yaml, string expected)
     {
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message.ShouldContain(expected);
