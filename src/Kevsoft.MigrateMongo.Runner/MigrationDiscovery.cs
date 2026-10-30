@@ -6,6 +6,9 @@ internal static class MigrationDiscovery
 {
     private const string AbstractionsAssembly = "Kevsoft.MigrateMongo.Abstractions";
 
+    // .NET, the MongoDB driver and this library, which never contain migrations.
+    private static readonly string[] SkippedAssemblies = ["System", "Microsoft", "MongoDB.Bson", "MongoDB.Driver", "Kevsoft.MigrateMongo"];
+
     public static List<MigrationDescriptor> Discover(MigrateMongoRunnerOptions options, Assembly? entryAssembly)
     {
         var assemblies = options.Assemblies.Count > 0
@@ -33,10 +36,7 @@ internal static class MigrationDiscovery
         result.Add(entryAssembly);
         foreach (var reference in entryAssembly.GetReferencedAssemblies())
         {
-            if (reference.Name is null || reference.Name.StartsWith("System", StringComparison.Ordinal) ||
-                reference.Name.StartsWith("Microsoft", StringComparison.Ordinal) ||
-                reference.Name.StartsWith("MongoDB", StringComparison.Ordinal) ||
-                reference.Name.StartsWith("Kevsoft.MigrateMongo", StringComparison.Ordinal))
+            if (reference.Name is null || IsSkipped(reference.Name))
             {
                 continue;
             }
@@ -57,4 +57,11 @@ internal static class MigrationDiscovery
 
         return result;
     }
+
+    /// <summary>
+    /// Whether an assembly is one of <see cref="SkippedAssemblies"/> or below it, matching whole dotted segments so
+    /// that projects such as <c>MongoDBShop.Migrations</c> and <c>MongoDB.Migrations</c> are still scanned.
+    /// </summary>
+    internal static bool IsSkipped(string name) => SkippedAssemblies.Any(skipped =>
+        name.StartsWith(skipped, StringComparison.Ordinal) && (name.Length == skipped.Length || name[skipped.Length] == '.'));
 }
