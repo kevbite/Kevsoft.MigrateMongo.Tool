@@ -5,9 +5,6 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <!-- The libraries compile against the oldest supported MongoDB.Driver, whose transitive packages have advisories;
-         consumers pick their own (newer) driver version. -->
-    <NuGetAuditMode>direct</NuGetAuditMode>
   </PropertyGroup>
 
   <ItemGroup>

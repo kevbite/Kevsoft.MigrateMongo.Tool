@@ -5,7 +5,7 @@ Database migrations for [MongoDB](https://www.mongodb.com/) in .NET. Write migra
 line, your build server or your application.
 
 - **Your SDK, your runtime, your driver.** Migrations live in a small console project you own. The `migrate-mongo`
-  tool builds and runs it with whatever .NET (10 or later) and `MongoDB.Driver` (3.5 or later) you use, so upgrading
+  tool builds and runs it with whatever .NET (10 or later) and `MongoDB.Driver` (3.9 or later) you use, so upgrading
   either side doesn't break the other.
 - **Safe to run anywhere.** A distributed lock stops concurrent runs, migrations run in transactions where possible,
   and checksums catch migrations edited after they were applied.
