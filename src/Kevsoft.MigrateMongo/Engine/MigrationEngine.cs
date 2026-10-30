@@ -454,6 +454,11 @@ public sealed class MigrationEngine
 
     public async Task<CommandResult> HistoryAsync(string? id, int? limit, CancellationToken cancellationToken)
     {
+        if (limit is < 1)
+        {
+            return new CommandResult { ExitCode = ExitCodes.Failure, Message = "--limit must be at least 1." };
+        }
+
         var history = await _store.GetHistoryAsync(id, limit ?? DefaultHistoryLimit, cancellationToken);
         return new CommandResult { ExitCode = ExitCodes.Success, History = history.ToList() };
     }
@@ -657,8 +662,9 @@ public sealed class MigrationEngine
                 await _executor.ExecuteAsync(scope, migration, run, cancellationToken);
                 var state = NewState(migration, MigrationStates.Applied, batch, transactional);
                 state.DurationMs = stopwatch.ElapsedMilliseconds;
-                await _store.SaveStateAsync(state, scope, cancellationToken);
-                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null), scope, cancellationToken);
+                var record = RecordingToken(scope, cancellationToken);
+                await _store.SaveStateAsync(state, scope, record);
+                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null), scope, record);
             }, cancellationToken);
         }
         catch (Exception e)
@@ -713,8 +719,9 @@ public sealed class MigrationEngine
             await RunInScopeAsync(migration, transactional, async scope =>
             {
                 await _executor.ExecuteAsync(scope, migration, run, cancellationToken);
-                await _store.DeleteStateAsync(migration.Id, scope, cancellationToken);
-                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null), scope, cancellationToken);
+                var record = RecordingToken(scope, cancellationToken);
+                await _store.DeleteStateAsync(migration.Id, scope, record);
+                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null), scope, record);
             }, cancellationToken);
         }
         catch (Exception e)
@@ -736,6 +743,13 @@ public sealed class MigrationEngine
         Emit(EventTypes.MigrationCompleted, migration, "down", transactional, stopwatch.ElapsedMilliseconds, null);
         return null;
     }
+
+    /// <summary>
+    /// The token for recording a migration whose code has returned. Outside a transaction its changes are already made,
+    /// so they're recorded even if cancellation was requested meanwhile; inside one, cancelling still rolls it all back.
+    /// </summary>
+    private static CancellationToken RecordingToken(IExecutionScope scope, CancellationToken cancellationToken) =>
+        scope.Transactional ? cancellationToken : CancellationToken.None;
 
     /// <summary>
     /// Runs <paramref name="body"/> in a new scope and commits it. Transactions are retried like the driver's
@@ -813,11 +827,15 @@ public sealed class MigrationEngine
             };
         }
 
-        using var lockLost = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var heartbeat = HeartbeatAsync(lockLost, acquired.Value.Requested);
+        // The heartbeat runs until the action returns, not until cancellation is requested: migration code that doesn't
+        // stop straight away is still changing the database, and the lock must not expire under it.
+        using var lockLost = new CancellationTokenSource();
+        using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lockLost.Token);
+        using var finished = new CancellationTokenSource();
+        var heartbeat = HeartbeatAsync(lockLost, acquired.Value.Requested, finished.Token);
         try
         {
-            return await action(lockLost.Token);
+            return await action(cancelled.Token);
         }
         catch (MigrationEngineException e)
         {
@@ -825,7 +843,8 @@ public sealed class MigrationEngine
         }
         finally
         {
-            await StopHeartbeatAsync(lockLost, heartbeat);
+            await finished.CancelAsync();
+            await heartbeat;
             await _store.ReleaseLockAsync(RunId, CancellationToken.None);
         }
     }
@@ -872,16 +891,17 @@ public sealed class MigrationEngine
         }
     }
 
-    /// <param name="lockLost">Cancelled when the lock is lost.</param>
+    /// <param name="lockLost">Cancelled by the heartbeat when the lock is lost.</param>
     /// <param name="renewed">When the request that took the lock was sent (a <see cref="TimeProvider.GetTimestamp"/>).</param>
-    private async Task HeartbeatAsync(CancellationTokenSource lockLost, long renewed)
+    /// <param name="finished">Cancelled when the work holding the lock has finished.</param>
+    private async Task HeartbeatAsync(CancellationTokenSource lockLost, long renewed, CancellationToken finished)
     {
         var interval = _options.LockTtl / 3;
-        while (!lockLost.IsCancellationRequested)
+        while (!finished.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(interval, _time, lockLost.Token);
+                await Task.Delay(interval, _time, finished);
             }
             catch (OperationCanceledException)
             {
@@ -891,7 +911,7 @@ public sealed class MigrationEngine
             var requested = _time.GetTimestamp();
             try
             {
-                if (await _store.RenewLockAsync(RunId, _options.LockTtl, lockLost.Token))
+                if (await _store.RenewLockAsync(RunId, _options.LockTtl, finished))
                 {
                     renewed = requested;
                     continue;
@@ -901,7 +921,7 @@ public sealed class MigrationEngine
                 await lockLost.CancelAsync();
                 return;
             }
-            catch (OperationCanceledException) when (lockLost.IsCancellationRequested)
+            catch (OperationCanceledException) when (finished.IsCancellationRequested)
             {
                 return;
             }
@@ -932,16 +952,6 @@ public sealed class MigrationEngine
         return lockToken.IsCancellationRequested
             ? new CommandResult { ExitCode = ExitCodes.Failure, Message = "Lost the migration lock; stopped before the next migration." }
             : null;
-    }
-
-    private static async Task StopHeartbeatAsync(CancellationTokenSource lockLost, Task heartbeat)
-    {
-        if (!lockLost.IsCancellationRequested)
-        {
-            await lockLost.CancelAsync();
-        }
-
-        await heartbeat;
     }
 
     private StoredMigrationState NewState(MigrationDescriptor migration, string state, int batch, bool transactional)

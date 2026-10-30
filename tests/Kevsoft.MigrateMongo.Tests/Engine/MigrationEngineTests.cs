@@ -236,6 +236,62 @@ public sealed class MigrationEngineTests
     }
 
     [Fact]
+    public async Task History_rejects_a_limit_below_one()
+    {
+        var result = await Engine([]).HistoryAsync(null, 0, CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        result.Message.ShouldBe("--limit must be at least 1.");
+    }
+
+    [Fact]
+    public async Task Cancelling_keeps_the_lock_until_a_running_migration_returns_and_records_what_it_did()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var renewals = 0;
+        var renewalsWhenCancelled = 0;
+        _store.RenewFailure = () =>
+        {
+            Interlocked.Increment(ref renewals);
+            return null;
+        };
+        var engine = Engine(
+            [
+                // Outside a transaction and ignoring its token: it keeps changing the database after the cancel.
+                Migrations.Create("20260101000001", "slow", transaction: TransactionMode.Never, up: async () =>
+                {
+                    await cancellation.CancelAsync();
+                    renewalsWhenCancelled = Volatile.Read(ref renewals);
+                    await Task.Delay(TimeSpan.FromMilliseconds(900));
+                }),
+                Migrations.Create("20260101000002", "next"),
+            ],
+            configure: o => o.LockTtl = TimeSpan.FromMilliseconds(300));
+
+        await Should.ThrowAsync<OperationCanceledException>(() => engine.UpAsync(null, cancellation.Token));
+
+        // The lock was renewed while the migration carried on, and released once the run stopped.
+        renewals.ShouldBeGreaterThan(renewalsWhenCancelled + 3);
+        _store.ReleaseCount.ShouldBe(1);
+        // It finished, so it's recorded as applied rather than failed; the next one never started.
+        _store.States.Values.Select(s => (s.Id, s.State)).ShouldBe([("20260101000001", "applied")]);
+        _store.History.Select(h => (h.MigrationId, h.Event)).ShouldBe([("20260101000001", "applied")]);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_transactional_migration_before_it_commits_rolls_it_back()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var engine = Engine([Migrations.Create("20260101000001", "tx", up: () => cancellation.CancelAsync())]);
+
+        await engine.UpAsync(null, cancellation.Token);
+
+        _store.States.ShouldBeEmpty();
+        _store.History.Select(h => (h.MigrationId, h.Event, h.Error)).ShouldBe([("20260101000001", "failed", "The operation was cancelled.")]);
+        _store.ReleaseCount.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task A_failed_migration_reports_its_exception_with_the_stack_trace()
     {
         var failing = Migrations.Create("20260101000001", "broken", up: () => throw new InvalidOperationException("boom"));

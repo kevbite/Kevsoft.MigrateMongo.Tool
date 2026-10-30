@@ -28,8 +28,11 @@ internal sealed class FakeStore(Func<DateTime>? clock = null) : IMigrationStore
     public Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<StoredMigrationState>>(States.Values.Select(Clone).ToList());
 
+    // Writes fail on a cancelled token, as the driver's do.
+
     public Task SaveStateAsync(StoredMigrationState state, IExecutionScope? scope, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var copy = Clone(state);
         Write(scope, () => States[copy.Id] = copy);
         return Task.CompletedTask;
@@ -37,12 +40,14 @@ internal sealed class FakeStore(Func<DateTime>? clock = null) : IMigrationStore
 
     public Task DeleteStateAsync(string id, IExecutionScope? scope, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Write(scope, () => States.Remove(id));
         return Task.CompletedTask;
     }
 
     public Task AppendHistoryAsync(HistoryRecord record, IExecutionScope? scope, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Write(scope, () => History.Add(record));
         return Task.CompletedTask;
     }
@@ -156,6 +161,12 @@ internal sealed class FakeScope(bool transactional, Func<Exception?>? commitFail
 
     public Task CommitAsync(CancellationToken cancellationToken)
     {
+        // Like MongoExecutionScope: committing a transaction honours the token; there's nothing to commit otherwise.
+        if (Transactional)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
         if (commitFailure?.Invoke() is { } failure)
         {
             throw failure;

@@ -481,7 +481,7 @@ $ migrate-mongo history
  2026-10-14 16:40:54  20261014164029  split-full-name           rolledBack  2      ff621741  kev-laptop
 ```
 
-Pass an id to see one migration, and `--limit <n>` to change the number of entries (default 50).
+Pass an id to see one migration, and `--limit <n>` to change the number of entries (default 50, at least 1).
 
 ### `bundle` and `version`
 
@@ -556,8 +556,12 @@ into a warning.
 ```
 
 Locks are renewed while a run is in progress and expire `lockTtl` seconds after a run dies. Remove one sooner with
-`unlock --force`, but only if you're sure its run has stopped. Ctrl+C and `SIGTERM` cancel the running migration
-(through its `CancellationToken`) and release the lock.
+`unlock --force`, but only if you're sure its run has stopped.
+
+Ctrl+C and `SIGTERM` cancel the running migration through its `CancellationToken`, so pass it to every driver call.
+The lock is kept until the migration's code returns, even if it ignores the token, and is then released. A
+transactional migration is rolled back; one outside a transaction that ran to the end is recorded as applied, so a
+cancel doesn't leave a finished migration marked `failed`.
 
 **The tool is older than the runner** (exit code `5`): update the tool (`dotnet tool update Kevsoft.MigrateMongo.Tool`).
 
