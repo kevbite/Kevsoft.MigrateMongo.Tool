@@ -19,6 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The collection definition tests drive the engine directly, with definitions written in the tests. -->
+    <ProjectReference Include="..\..\src\Kevsoft.MigrateMongo.MongoDriver\Kevsoft.MigrateMongo.MongoDriver.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="Tunnel\Dockerfile" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

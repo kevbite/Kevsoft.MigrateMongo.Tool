@@ -36,6 +36,21 @@ internal sealed class LoggerEventSink(ILogger logger) : IMigrationEventSink
             case EventTypes.MigrationFailed:
                 Log.MigrationFailed(logger, e.MigrationId, e.Name, e.Error);
                 break;
+            case EventTypes.CollectionStarted:
+                Log.CollectionChanging(logger, e.Collection);
+                break;
+            case EventTypes.CollectionCompleted when e.Changes is { Count: > 0 } changes:
+                Log.CollectionChanged(logger, e.Collection, e.DurationMs, changes.Count);
+                break;
+            case EventTypes.CollectionCompleted:
+                Log.CollectionInSync(logger, e.Collection);
+                break;
+            case EventTypes.CollectionFailed:
+                Log.CollectionFailed(logger, e.Collection, e.Error);
+                break;
+            case EventTypes.CollectionSkipped:
+                Log.CollectionSkipped(logger, e.Message);
+                break;
             case EventTypes.Result when e.Result is { } result:
                 if (result.ExitCode == ExitCodes.Success)
                 {

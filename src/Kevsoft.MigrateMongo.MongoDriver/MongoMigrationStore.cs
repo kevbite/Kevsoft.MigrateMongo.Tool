@@ -7,8 +7,9 @@ using MongoDB.Driver;
 namespace Kevsoft.MigrateMongo.MongoDriver;
 
 /// <summary>
-/// Stores migration state in <c>{name}</c>, history in <c>{name}.history</c> and the lock in <c>{name}.lock</c>.
-/// Documents are mapped by hand (no class maps) so nothing depends on driver serialization conventions.
+/// Stores migration state in <c>{name}</c>, history in <c>{name}.history</c>, the lock in <c>{name}.lock</c> and collection
+/// definition state in <c>{name}.collections</c>. Documents are mapped by hand (no class maps) so nothing depends on driver
+/// serialization conventions.
 /// </summary>
 public sealed class MongoMigrationStore : IMigrationStore
 {
@@ -17,6 +18,7 @@ public sealed class MongoMigrationStore : IMigrationStore
     private readonly IMongoCollection<BsonDocument> _states;
     private readonly IMongoCollection<BsonDocument> _history;
     private readonly IMongoCollection<BsonDocument> _lock;
+    private readonly IMongoCollection<BsonDocument> _collections;
     private bool _initialized;
 
     public MongoMigrationStore(IMongoDatabase database, string stateCollection)
@@ -24,7 +26,17 @@ public sealed class MongoMigrationStore : IMigrationStore
         _states = database.GetCollection<BsonDocument>(stateCollection);
         _history = database.GetCollection<BsonDocument>(stateCollection + ".history");
         _lock = database.GetCollection<BsonDocument>(stateCollection + ".lock");
+        _collections = database.GetCollection<BsonDocument>(stateCollection + ".collections");
     }
+
+    public async Task<IReadOnlyList<StoredCollectionState>> GetCollectionStatesAsync(CancellationToken cancellationToken)
+    {
+        var documents = await _collections.Find(FilterDefinition<BsonDocument>.Empty).ToListAsync(cancellationToken);
+        return documents.Select(ToCollectionState).ToList();
+    }
+
+    public Task SaveCollectionStateAsync(StoredCollectionState state, CancellationToken cancellationToken) =>
+        _collections.ReplaceOneAsync(new BsonDocument("_id", state.Name), ToDocument(state), new ReplaceOptions { IsUpsert = true }, cancellationToken);
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
@@ -82,6 +94,7 @@ public sealed class MongoMigrationStore : IMigrationStore
             { "runId", record.RunId },
             { "at", record.At },
         };
+        AddIfNotNull(document, "kind", record.Kind);
         AddIfNotNull(document, "batch", record.Batch);
         AddIfNotNull(document, "durationMs", record.DurationMs);
         AddIfNotNull(document, "checksum", record.Checksum);
@@ -106,6 +119,7 @@ public sealed class MongoMigrationStore : IMigrationStore
         {
             MigrationId = d["migrationId"].AsString,
             Name = GetString(d, "name") ?? "",
+            Kind = GetString(d, "kind"),
             Event = GetString(d, "event") ?? "",
             Direction = GetString(d, "direction") ?? "",
             RunId = GetString(d, "runId") ?? "",
@@ -221,24 +235,81 @@ public sealed class MongoMigrationStore : IMigrationStore
         AddIfNotNull(document, "durationMs", state.DurationMs);
         document.Add("runId", state.RunId);
         AddIfNotNull(document, "error", state.Error);
-
-        var appliedBy = new BsonDocument
-        {
-            { "host", state.AppliedBy.Host },
-            { "user", state.AppliedBy.User },
-        };
-        AddIfNotNull(appliedBy, "tool", state.AppliedBy.Tool);
-        appliedBy.Add("library", state.AppliedBy.Library);
-        appliedBy.Add("driver", state.AppliedBy.Driver);
-        appliedBy.Add("runtime", state.AppliedBy.Runtime);
-        document.Add("appliedBy", appliedBy);
+        document.Add("appliedBy", ToDocument(state.AppliedBy));
         MigrationOutputMapper.Write(document, state.Output);
         return document;
     }
 
-    private static StoredMigrationState ToState(BsonDocument d)
+    private static BsonDocument ToDocument(StoredCollectionState state)
+    {
+        var document = new BsonDocument
+        {
+            { "_id", state.Name },
+            { "v", state.V },
+            { "source", state.Source },
+            { "origin", state.Origin },
+            { "declaration", state.Declaration },
+        };
+        AddIfNotNull(document, "previousDeclaration", state.PreviousDeclaration);
+        AddIfNotNull(document, "replacedAt", state.ReplacedAt);
+        document.Add("reconciledAt", state.ReconciledAt);
+        AddIfNotNull(document, "durationMs", state.DurationMs);
+        document.Add("runId", state.RunId);
+        document.Add("appliedBy", ToDocument(state.AppliedBy));
+        document.Add("hidden", new BsonDocument(state.Hidden.Select(h => new BsonElement(h.Key, h.Value))));
+        MigrationOutputMapper.Write(document, state.Output);
+        return document;
+    }
+
+    private static BsonDocument ToDocument(Provenance provenance)
+    {
+        var document = new BsonDocument
+        {
+            { "host", provenance.Host },
+            { "user", provenance.User },
+        };
+        AddIfNotNull(document, "tool", provenance.Tool);
+        document.Add("library", provenance.Library);
+        document.Add("driver", provenance.Driver);
+        document.Add("runtime", provenance.Runtime);
+        return document;
+    }
+
+    private static StoredCollectionState ToCollectionState(BsonDocument d) => new()
+    {
+        Name = d["_id"].ToString()!,
+        V = d.TryGetValue("v", out var v) && v.IsNumeric ? v.ToInt32() : 1,
+        Source = GetString(d, "source") ?? "",
+        Origin = GetString(d, "origin") ?? "",
+        Declaration = GetString(d, "declaration") ?? "",
+        PreviousDeclaration = GetString(d, "previousDeclaration"),
+        ReplacedAt = d.TryGetValue("replacedAt", out var replacedAt) && replacedAt.IsValidDateTime ? replacedAt.ToUniversalTime() : null,
+        ReconciledAt = d.TryGetValue("reconciledAt", out var reconciledAt) && reconciledAt.IsValidDateTime ? reconciledAt.ToUniversalTime() : default,
+        DurationMs = d.TryGetValue("durationMs", out var duration) && duration.IsNumeric ? duration.ToInt64() : null,
+        RunId = GetString(d, "runId") ?? "",
+        AppliedBy = ToProvenance(d),
+        Hidden = d.TryGetValue("hidden", out var hidden) && hidden.IsBsonDocument
+            ? hidden.AsBsonDocument.Where(h => h.Value.IsValidDateTime).ToDictionary(h => h.Name, h => h.Value.ToUniversalTime(), StringComparer.Ordinal)
+            : new Dictionary<string, DateTime>(StringComparer.Ordinal),
+        Output = MigrationOutputMapper.Read(d),
+    };
+
+    private static Provenance ToProvenance(BsonDocument d)
     {
         var appliedBy = d.TryGetValue("appliedBy", out var by) && by.IsBsonDocument ? by.AsBsonDocument : new BsonDocument();
+        return new Provenance
+        {
+            Host = GetString(appliedBy, "host") ?? "",
+            User = GetString(appliedBy, "user") ?? "",
+            Tool = GetString(appliedBy, "tool"),
+            Library = GetString(appliedBy, "library") ?? "",
+            Driver = GetString(appliedBy, "driver") ?? "",
+            Runtime = GetString(appliedBy, "runtime") ?? "",
+        };
+    }
+
+    private static StoredMigrationState ToState(BsonDocument d)
+    {
         return new StoredMigrationState
         {
             Id = d["_id"].ToString()!,
@@ -256,15 +327,7 @@ public sealed class MongoMigrationStore : IMigrationStore
             DurationMs = d.TryGetValue("durationMs", out var duration) && duration.IsNumeric ? duration.ToInt64() : null,
             RunId = GetString(d, "runId") ?? "",
             Error = GetString(d, "error"),
-            AppliedBy = new Provenance
-            {
-                Host = GetString(appliedBy, "host") ?? "",
-                User = GetString(appliedBy, "user") ?? "",
-                Tool = GetString(appliedBy, "tool"),
-                Library = GetString(appliedBy, "library") ?? "",
-                Driver = GetString(appliedBy, "driver") ?? "",
-                Runtime = GetString(appliedBy, "runtime") ?? "",
-            },
+            AppliedBy = ToProvenance(d),
             Output = MigrationOutputMapper.Read(d),
         };
     }

@@ -13,6 +13,8 @@ line, your build server or your application.
   operation's filter, update and counts. `migrate-mongo show <id>` lists it all, alongside who ran it and when.
   Statements are stored as sent, so [leave them out](USAGE.md#recording-results) for commands or filters that hold
   passwords or personal data.
+- **Indexes kept in line with the code.** A `[ManagedCollection]` class declares a collection's indexes; every `up`
+  creates what's missing, changes what it can in place, and reports, hides or drops what isn't declared.
 - **Built for CI.** Meaningful exit codes, `--json` output, per-environment config with `${ENV_VAR}` secrets, dry
   runs, SSH tunnels through a bastion, AWS IAM authentication, and self-contained bundles for agents without .NET.
 - **Mistakes caught at compile time.** A source generator finds migrations without reflection and reports duplicate
@@ -20,9 +22,12 @@ line, your build server or your application.
 
 ## Getting started
 
-You need a [.NET SDK](https://dotnet.microsoft.com/download) (8 or later) and MongoDB 4.2 or later. Transactions need a
-replica set or sharded cluster. Locally, [MongoDB Atlas Local](https://hub.docker.com/r/mongodb/mongodb-atlas-local)
-works well:
+You need a [.NET SDK](https://dotnet.microsoft.com/download) (8 or later) and MongoDB 4.2 or later; managing a
+collection's indexes with
+[collection definitions](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#managing-collections)
+needs MongoDB 5.0 or later.
+Transactions need a replica set or sharded cluster. Locally,
+[MongoDB Atlas Local](https://hub.docker.com/r/mongodb/mongodb-atlas-local) works well:
 
 ```bash
 docker run -d -p 27017:27017 mongodb/mongodb-atlas-local:8.0
@@ -80,32 +85,62 @@ migrate-mongo create AddEmailIndexToUsers
 public sealed class AddEmailIndexToUsers : IMigration
 {
     public Task UpAsync(MigrationContext context, CancellationToken cancellationToken) =>
-        context.Database.GetCollection<BsonDocument>("users").Indexes.CreateOneAsync(
+        Users(context).CreateIndexAsync(
             new CreateIndexModel<BsonDocument>(
                 Builders<BsonDocument>.IndexKeys.Ascending("email"),
                 new CreateIndexOptions { Unique = true, Name = "email_1" }),
             cancellationToken: cancellationToken);
 
     public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) =>
-        context.Database.GetCollection<BsonDocument>("users").Indexes.DropOneAsync("email_1", cancellationToken);
+        Users(context).DropIndexAsync("email_1", cancellationToken: cancellationToken);
+
+    // Records each operation, so `migrate-mongo show 20261014164028` lists what ran.
+    private static TrackedCollection<BsonDocument> Users(MigrationContext context) =>
+        context.Track(context.Database.GetCollection<BsonDocument>("users"));
 }
 ```
 
-### 4. Run it
+### 4. Declare a collection's indexes
+
+A migration runs once. A collection definition says what a collection's indexes should be now, and every `up` makes
+only the changes needed to get there. Add one to the migrations project:
+
+```csharp
+[ManagedCollection("orders")]
+public sealed class Orders : ICollectionDefinition<BsonDocument>
+{
+    public void Define(CollectionBuilder<BsonDocument> collection) =>
+        collection.Indexes
+            .Add(k => k.Ascending("companyId").Descending("createdAt"))
+            .Add(k => k.Ascending("reference"), new() { Unique = true })
+            .Add(k => k.Ascending("closedAt"), new() { ExpireAfter = TimeSpan.FromDays(30) })
+            .Ignore("adhoc_*");
+}
+```
+
+`up` creates the indexes that are missing and changes the ones it can in place. Indexes that aren't declared are
+reported, or hidden or dropped if you set `indexes.prune`, and `Ignore` leaves the ones you make by hand alone. Existing
+indexes are matched by their keys, collation and partial filter whatever they're called, so a database that already has
+them is adopted as it is. Options are the driver's own `CreateIndexOptions<TDocument>`, and a typed definition
+(`ICollectionDefinition<Order>`) renders its keys through your class maps. See
+[Managing collections](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#managing-collections)
+for rebuilds, pruning and rolling deploys.
+
+### 5. Run it
 
 ```bash
 export MONGODB_URL="mongodb://localhost:27017/?directConnection=true"
 
-migrate-mongo status            # every migration and its state
-migrate-mongo up --dry-run      # what would be applied, without changing anything
-migrate-mongo up                # apply pending migrations
-migrate-mongo down              # roll back the last one
+migrate-mongo status            # every migration and collection, and its state
+migrate-mongo up --dry-run      # what would be applied and changed, without changing anything
+migrate-mongo up                # apply pending migrations, then bring collections in line
+migrate-mongo down              # roll back the last migration
 migrate-mongo up --env prod     # use the prod environment
 ```
 
 In CI, `migrate-mongo validate` fails if an applied migration was edited, and `migrate-mongo bundle -r linux-x64`
-builds a single executable to run on deploy agents without .NET. To apply migrations when your app starts, use
-`Kevsoft.MigrateMongo.Hosting`:
+builds a single executable to run on deploy agents without .NET. To apply migrations and collection definitions when
+your app starts, use `Kevsoft.MigrateMongo.Hosting`:
 
 ```csharp
 builder.Services
@@ -118,6 +153,9 @@ builder.Services
     .RunOnStartup();
 ```
 
+Index builds and blocked index changes delay or stop startup; see
+[Running from your application](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#running-from-your-application).
+
 ## Documentation
 
 [USAGE.md](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md) covers everything in detail:
@@ -127,6 +165,8 @@ builder.Services
 - [Configuration](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#configuration)
 - [Writing migrations](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#writing-migrations):
   transactions, recording results, dependency injection and custom templates
+- [Managing collections](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#managing-collections):
+  declaring indexes, rebuilds, pruning and rolling deploys
 - [Commands](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#commands) and
   [exit codes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#exit-codes)
 - [When something goes wrong](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#when-something-goes-wrong)

@@ -21,6 +21,18 @@ internal sealed record MigrationModel(
     bool HasConstructor,
     Location Location);
 
+internal sealed record CollectionModel(
+    string Name,
+    string TypeName,
+    string DisplayName,
+    string DocumentType,
+    int DefinitionCount,
+    EquatableArray<string> Parameters,
+    bool IsAbstract,
+    bool IsAccessible,
+    bool HasConstructor,
+    Location Location);
+
 /// <summary>Value-equality wrapper so the incremental pipeline can cache models.</summary>
 internal readonly struct EquatableArray<T>(ImmutableArray<T> items) : IEquatable<EquatableArray<T>>, IEnumerable<T>
     where T : IEquatable<T>

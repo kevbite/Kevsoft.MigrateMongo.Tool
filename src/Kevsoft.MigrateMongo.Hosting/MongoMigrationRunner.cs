@@ -73,7 +73,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
         var options = registration.CreateOptions(services);
         var loggerFactory = services.GetService<ILoggerFactory>() ?? NullLoggerFactory.Instance;
         var logger = loggerFactory.CreateLogger("Kevsoft.MigrateMongo");
-        var migrations = registration.Discover(logger);
+        var (migrations, collections) = registration.Discover(logger);
 
         IMongoClient client;
         MongoClient? ownedClient = null;
@@ -109,7 +109,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             // A scope per run, so migrations can depend on scoped services.
             await using var scope = services.CreateAsyncScope();
             var backend = MongoDriverBackend.Create(client, options.DatabaseName, options.StateCollection, scope.ServiceProvider, loggerFactory);
-            var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(options), new LoggerEventSink(logger));
+            var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(options), new LoggerEventSink(logger), collections: collections);
             return await engine.ExecuteAsync(command, arguments, cancellationToken);
         }
         finally
@@ -142,6 +142,10 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             Environment = options.Environment ?? host?.EnvironmentName,
             CaptureStatements = options.CaptureStatements,
             ResultsMaxBytes = options.ResultsMaxBytes,
+            IndexesPrune = options.IndexPrune.ToString().ToLowerInvariant(),
+            IndexesOnRebuild = options.IndexRebuild.ToString().ToLowerInvariant(),
+            IndexesDropHiddenAfter = options.DropHiddenIndexesAfter,
+            IndexesSupersededWindow = options.SupersededDefinitionWindow,
             Provenance = new Provenance
             {
                 Host = System.Environment.MachineName,

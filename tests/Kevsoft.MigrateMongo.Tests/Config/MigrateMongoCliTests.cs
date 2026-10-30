@@ -167,4 +167,30 @@ public sealed class MigrateMongoCliTests
         (await Parse(true, command)).Invocation!.Arguments.NoCaptureStatements.ShouldBeFalse();
         (await Parse(true, command, "--no-capture-statements")).Invocation!.Arguments.NoCaptureStatements.ShouldBeTrue();
     }
+
+    [Theory]
+    [InlineData("up")]
+    [InlineData("plan")]
+    public async Task Up_and_plan_take_the_collection_options(string command)
+    {
+        var none = (await Parse(true, command)).Invocation!.Arguments;
+        (none.Only, none.AllowRebuild, none.AllowUnmatched, none.AllowSuperseded).ShouldBe((null, null, null, false));
+
+        var (exitCode, invocation) = await Parse(true, command,
+            "--only", "collections", "--allow-rebuild", "users.email_1", "--allow-rebuild", "orders.status_1", "--allow-unmatched", "users", "--allow-superseded");
+
+        exitCode.ShouldBe(0);
+        var arguments = invocation!.Arguments;
+        arguments.Only.ShouldBe("collections");
+        arguments.AllowRebuild.ShouldBe(["users.email_1", "orders.status_1"]);
+        arguments.AllowUnmatched.ShouldBe(["users"]);
+        arguments.AllowSuperseded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Only_accepts_migrations_or_collections()
+    {
+        (await Parse(true, "up", "--only", "migrations")).Invocation!.Arguments.Only.ShouldBe("migrations");
+        (await Parse(true, "up", "--only", "indexes")).ExitCode.ShouldNotBe(0);
+    }
 }

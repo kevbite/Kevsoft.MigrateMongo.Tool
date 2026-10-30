@@ -127,7 +127,7 @@ public sealed class HostingTests
         var builder = services.AddMongoMigrations(o => o.DatabaseName = "app").FromAssemblyContaining<HostingTests>();
         var logger = new RecordingLogger();
 
-        builder.Registration.Discover(logger).ShouldBeEmpty();
+        builder.Registration.Discover(logger).Migrations.ShouldBeEmpty();
 
         logger.Entries.ShouldBe([(LogLevel.Warning, "Assembly Kevsoft.MigrateMongo.Tests doesn't contain any migrations.")]);
     }
@@ -141,6 +141,37 @@ public sealed class HostingTests
         await service.StartingAsync(CancellationToken.None);
 
         runner.UpCalls.ShouldBe(1);
+        runner.UpArguments!.Only.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Startup_service_can_leave_collection_definitions_to_a_deploy_step()
+    {
+        var runner = new FakeRunner(new CommandResult { ExitCode = 0 });
+        var service = StartupService(runner, o => o.Collections = false);
+
+        await service.StartingAsync(CancellationToken.None);
+
+        runner.UpArguments!.Only.ShouldBe("migrations");
+    }
+
+    [Fact]
+    public async Task Startup_service_passes_allowances_for_refused_collection_changes()
+    {
+        var runner = new FakeRunner(new CommandResult { ExitCode = 0 });
+        var service = StartupService(runner, o =>
+        {
+            o.AllowRebuild = ["orders.reference_1"];
+            o.AllowUnmatched = ["customers"];
+            o.AllowSuperseded = true;
+        });
+
+        await service.StartingAsync(CancellationToken.None);
+
+        var arguments = runner.UpArguments!;
+        arguments.AllowRebuild.ShouldBe(["orders.reference_1"]);
+        arguments.AllowUnmatched.ShouldBe(["customers"]);
+        arguments.AllowSuperseded.ShouldBeTrue();
     }
 
     [Fact]
@@ -196,6 +227,33 @@ public sealed class HostingTests
         ]);
     }
 
+    [Fact]
+    public void Collection_events_are_written_to_the_application_log()
+    {
+        var logger = new RecordingLogger();
+        var sink = new LoggerEventSink(logger);
+
+        sink.OnEvent(new RunnerEvent { Type = EventTypes.CollectionStarted, Collection = "cases" });
+        sink.OnEvent(new RunnerEvent
+        {
+            Type = EventTypes.CollectionCompleted,
+            Collection = "cases",
+            DurationMs = 40,
+            Changes = [new IndexChangeInfo { Action = "create", Index = "status_1" }, new IndexChangeInfo { Action = "hide", Index = "old_1" }],
+        });
+        sink.OnEvent(new RunnerEvent { Type = EventTypes.CollectionCompleted, Collection = "users", Changes = [] });
+        sink.OnEvent(new RunnerEvent { Type = EventTypes.CollectionSkipped, Collection = "orders", Message = "orders: superseded." });
+        sink.OnEvent(new RunnerEvent { Type = EventTypes.CollectionFailed, Collection = "events", Error = "rebuild blocked" });
+
+        logger.Entries.ShouldBe([
+            (LogLevel.Information, "Changing collection cases's indexes"),
+            (LogLevel.Information, "Made 2 change(s) to collection cases's indexes in 40ms"),
+            (LogLevel.Debug, "Collection users's indexes match its definition"),
+            (LogLevel.Warning, "orders: superseded."),
+            (LogLevel.Error, "Collection events failed: rebuild blocked"),
+        ]);
+    }
+
     private static IMongoMigrationRunner Runner(Action<IServiceCollection> configure)
     {
         var services = new ServiceCollection();
@@ -203,10 +261,10 @@ public sealed class HostingTests
         return services.BuildServiceProvider().GetRequiredService<IMongoMigrationRunner>();
     }
 
-    private static IHostedLifecycleService StartupService(IMongoMigrationRunner runner)
+    private static IHostedLifecycleService StartupService(IMongoMigrationRunner runner, Action<MongoMigrationStartupOptions>? configure = null)
     {
         var services = new ServiceCollection();
-        services.AddMongoMigrations(o => o.DatabaseName = "app").RunOnStartup();
+        services.AddMongoMigrations(o => o.DatabaseName = "app").RunOnStartup(configure);
         services.AddSingleton(runner);
         return (IHostedLifecycleService)services.BuildServiceProvider().GetServices<IHostedService>().Single();
     }
@@ -238,8 +296,18 @@ public sealed class HostingTests
 
         public Task<CommandResult> ShowAsync(string id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public CommandArguments? UpArguments { get; private set; }
+
+        public Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken = default)
+        {
+            if (command != "up")
+            {
+                throw new NotSupportedException();
+            }
+
+            UpArguments = arguments;
+            return UpAsync(arguments.To, cancellationToken);
+        }
     }
 
     private sealed class RecordingLogger : ILogger

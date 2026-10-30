@@ -13,10 +13,11 @@ internal static class RelaxedExtendedJson
 {
     private static readonly JsonWriterSettings Relaxed = new() { OutputMode = JsonOutputMode.RelaxedExtendedJson };
 
-    /// <summary>Relaxes every Extended JSON value in the event (results, statements, status, history and show).</summary>
+    /// <summary>Relaxes every Extended JSON value in the event (results, statements, index keys, status, history and show).</summary>
     public static void Relax(RunnerEvent runnerEvent)
     {
         Relax(runnerEvent.Output);
+        Relax(runnerEvent.Changes);
         if (runnerEvent.Result is not { } result)
         {
             return;
@@ -40,6 +41,22 @@ internal static class RelaxedExtendedJson
                 Relax(record.Output);
             }
         }
+
+        foreach (var collection in (result.Collections ?? []).Append(result.ShowCollection).OfType<CollectionInfo>())
+        {
+            Relax(collection.Changes);
+            Relax(collection.Output);
+            foreach (var index in collection.Indexes ?? [])
+            {
+                index.Keys = index.Keys is { } keys ? ToRelaxed(keys) : null;
+                index.Options = index.Options is { } options ? ToRelaxed(options) : null;
+            }
+
+            foreach (var record in collection.History ?? [])
+            {
+                Relax(record.Output);
+            }
+        }
     }
 
     /// <summary>A canonical Extended JSON document as relaxed Extended JSON.</summary>
@@ -47,6 +64,14 @@ internal static class RelaxedExtendedJson
     {
         using var relaxed = JsonDocument.Parse(BsonDocument.Parse(document.GetRawText()).ToJson(Relaxed));
         return relaxed.RootElement.Clone();
+    }
+
+    private static void Relax(List<IndexChangeInfo>? changes)
+    {
+        foreach (var change in changes ?? [])
+        {
+            change.Keys = change.Keys is { } keys ? ToRelaxed(keys) : null;
+        }
     }
 
     private static void Relax(MigrationOutputInfo? output)

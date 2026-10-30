@@ -30,4 +30,19 @@ internal static partial class Log
 
     [LoggerMessage(EventId = 9, Level = LogLevel.Warning, Message = "Assembly {Assembly} doesn't contain any migrations.")]
     public static partial void AssemblyHasNoMigrations(ILogger logger, string? assembly);
+
+    [LoggerMessage(EventId = 10, Level = LogLevel.Information, Message = "Changing collection {Collection}'s indexes")]
+    public static partial void CollectionChanging(ILogger logger, string? collection);
+
+    [LoggerMessage(EventId = 11, Level = LogLevel.Information, Message = "Made {Changes} change(s) to collection {Collection}'s indexes in {DurationMs}ms")]
+    public static partial void CollectionChanged(ILogger logger, string? collection, long? durationMs, int changes);
+
+    [LoggerMessage(EventId = 12, Level = LogLevel.Debug, Message = "Collection {Collection}'s indexes match its definition")]
+    public static partial void CollectionInSync(ILogger logger, string? collection);
+
+    [LoggerMessage(EventId = 13, Level = LogLevel.Error, Message = "Collection {Collection} failed: {Error}")]
+    public static partial void CollectionFailed(ILogger logger, string? collection, string? error);
+
+    [LoggerMessage(EventId = 14, Level = LogLevel.Warning, Message = "{Message}")]
+    public static partial void CollectionSkipped(ILogger logger, string? message);
 }
