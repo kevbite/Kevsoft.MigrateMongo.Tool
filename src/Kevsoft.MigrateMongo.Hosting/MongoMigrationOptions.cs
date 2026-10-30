@@ -46,6 +46,15 @@ public sealed class MongoMigrationOptions
     public string? Environment { get; set; }
 
     /// <summary>
+    /// Record the statements (filters, updates, index keys, …) run through <c>context.Track(...)</c>, like
+    /// <c>results.captureStatements</c>. Counts and durations are always recorded.
+    /// </summary>
+    public bool CaptureStatements { get; set; } = true;
+
+    /// <summary>The largest a migration's named results may be, in BSON bytes (<c>results.maxBytes</c>); more fails the migration.</summary>
+    public int ResultsMaxBytes { get; set; } = 64 * 1024;
+
+    /// <summary>
     /// An SSH tunnel to connect through, like the <c>tunnel</c> config section. Needs <see cref="ConnectionString"/> and a
     /// <see cref="TunnelProvider"/>. The tunnel is open only while migrations run.
     /// </summary>
@@ -90,6 +99,11 @@ public sealed class MongoMigrationOptions
         if (TransactionRetryTimeout < TimeSpan.Zero)
         {
             errors.Add($"{nameof(TransactionRetryTimeout)} can't be negative.");
+        }
+
+        if (ResultsMaxBytes < 1)
+        {
+            errors.Add($"{nameof(ResultsMaxBytes)} must be positive.");
         }
 
         if (errors.Count > 0)

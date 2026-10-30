@@ -39,6 +39,7 @@ public sealed class TemplateTests(IntegrationEnvironment environment)
         source.ShouldContain("namespace Shop.Migrations.Migrations;");
         source.ShouldContain($"[Migration(\"{id}\", \"import-csv-data-v-2\")]");
         source.ShouldContain("public sealed class ImportCSVDataV2 : IMigration");
+        source.ShouldContain($"// See what ran with `migrate-mongo show {id}`.");
 
         var notImplemented = "throw new NotImplementedException();";
         var firstThrow = source.IndexOf(notImplemented, StringComparison.Ordinal);
@@ -52,6 +53,13 @@ public sealed class TemplateTests(IntegrationEnvironment environment)
         workspace.Find("products").ShouldBe([new BsonDocument("_id", "widget")]);
         workspace.Find("_migrations").Select(s => (s["_id"].AsString, s["name"].AsString, s["origin"].AsString))
             .ShouldBe([(id, "import-csv-data-v-2", "Shop.Migrations.Migrations.ImportCSVDataV2")]);
+
+        await DotnetNewAsync(workspace, hive,
+            "migratemongo-migration-minimal", "-n", "AddPrices", "-o", "src/Shop.Migrations/Migrations");
+        var minimalSource = File.ReadAllText(Directory.GetFiles(workspace.PathOf("src", "Shop.Migrations", "Migrations"), "M*_AddPrices.cs").ShouldHaveSingleItem());
+        minimalSource.ShouldContain("namespace Shop.Migrations.Migrations;");
+        minimalSource.ShouldContain("public sealed class AddPrices : IMigration");
+        minimalSource.ShouldNotContain("context.Track");
     }
 
     [Fact]

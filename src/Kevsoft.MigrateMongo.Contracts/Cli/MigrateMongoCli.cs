@@ -32,6 +32,9 @@ public sealed class CliInvocation
     /// <summary><c>create &lt;name&gt;</c>.</summary>
     public string? Name { get; init; }
 
+    /// <summary><c>create --minimal</c>: use the minimal built-in template instead of the default or <c>migrationTemplate</c>.</summary>
+    public bool Minimal { get; init; }
+
     /// <summary><c>bundle --runtime</c>: the runtime identifier to publish for (default: the current one).</summary>
     public string? RuntimeIdentifier { get; init; }
 
@@ -48,7 +51,7 @@ public static class MigrateMongoCli
     /// <summary>Commands that need the migrations (and run inside the runner).</summary>
     public static readonly IReadOnlySet<string> RunnerCommands = new HashSet<string>(StringComparer.Ordinal)
     {
-        "status", "plan", "up", "down", "validate", "baseline", "mark", "unlock", "history",
+        "status", "plan", "up", "down", "validate", "baseline", "mark", "unlock", "history", "show",
     };
 
     public static RootCommand Create(
@@ -101,8 +104,9 @@ public static class MigrateMongoCli
                 p => new CliInvocation { Command = "init", Project = p.GetValue(projectOption), Auth = p.GetValue(authOption), ConfigFile = p.GetValue(file), Json = p.GetValue(json) });
 
             var nameArgument = new Argument<string>("name") { Description = "Name of the migration, e.g. AddEmailIndexToUsers." };
-            Add(new Command("create", "Create a new migration file.") { nameArgument },
-                p => new CliInvocation { Command = "create", Name = p.GetValue(nameArgument), ConfigFile = p.GetValue(file), Environment = p.GetValue(env), Json = p.GetValue(json) });
+            var minimal = new Option<bool>("--minimal") { Description = "Use the minimal template, without the results and tracking examples." };
+            Add(new Command("create", "Create a new migration file.") { nameArgument, minimal },
+                p => new CliInvocation { Command = "create", Name = p.GetValue(nameArgument), Minimal = p.GetValue(minimal), ConfigFile = p.GetValue(file), Environment = p.GetValue(env), Json = p.GetValue(json) });
 
             var runtime = new Option<string?>("--runtime", "-r") { Description = "Runtime identifier to bundle for, e.g. linux-x64 (default: this machine's)." };
             var output = new Option<string>("--output", "-o") { Description = "Directory to write the bundle to.", DefaultValueFactory = _ => "bundle" };
@@ -128,14 +132,16 @@ public static class MigrateMongoCli
 
         var upTo = new Option<string?>("--to") { Description = "Stop after this migration id." };
         var upDryRun = new Option<bool>("--dry-run") { Description = "Show what would be applied without changing anything (no lock, no writes, no migration code runs)." };
-        Add(new Command("up", "Apply pending migrations.") { upTo, upDryRun },
-            p => Common(p, "up", new CommandArguments { To = p.GetValue(upTo), DryRun = p.GetValue(upDryRun) }));
+        var upNoCapture = NoCaptureStatementsOption();
+        Add(new Command("up", "Apply pending migrations.") { upTo, upDryRun, upNoCapture },
+            p => Common(p, "up", new CommandArguments { To = p.GetValue(upTo), DryRun = p.GetValue(upDryRun), NoCaptureStatements = p.GetValue(upNoCapture) }));
 
         var downTo = new Option<string?>("--to") { Description = "Roll back every migration after this id (exclusive)." };
         var count = new Option<int?>("--count", "-n") { Description = "Number of migrations to roll back (default 1)." };
         var batch = new Option<bool>("--batch") { Description = "Roll back the whole last batch." };
         var downDryRun = new Option<bool>("--dry-run") { Description = "Show what would be rolled back without changing anything." };
-        var down = new Command("down", "Roll back applied migrations.") { downTo, count, batch, downDryRun };
+        var downNoCapture = NoCaptureStatementsOption();
+        var down = new Command("down", "Roll back applied migrations.") { downTo, count, batch, downDryRun, downNoCapture };
         down.Validators.Add(r =>
         {
             var selected = (r.GetValue(downTo) is not null ? 1 : 0) + (r.GetValue(count) is not null ? 1 : 0) + (r.GetValue(batch) ? 1 : 0);
@@ -149,7 +155,14 @@ public static class MigrateMongoCli
                 r.AddError("--count must be at least 1.");
             }
         });
-        Add(down, p => Common(p, "down", new CommandArguments { To = p.GetValue(downTo), Count = p.GetValue(count), Batch = p.GetValue(batch), DryRun = p.GetValue(downDryRun) }));
+        Add(down, p => Common(p, "down", new CommandArguments
+        {
+            To = p.GetValue(downTo),
+            Count = p.GetValue(count),
+            Batch = p.GetValue(batch),
+            DryRun = p.GetValue(downDryRun),
+            NoCaptureStatements = p.GetValue(downNoCapture),
+        }));
 
         Add(new Command("validate", "Check applied migrations against the code (checksums, missing and out-of-order migrations)."), p => Common(p, "validate"));
 
@@ -186,6 +199,22 @@ public static class MigrateMongoCli
         });
         Add(history, p => Common(p, "history", new CommandArguments { Id = p.GetValue(historyId), Limit = p.GetValue(limit) }));
 
+        var showId = new Argument<string>("id") { Description = "Migration id, or a unique prefix of one (e.g. its timestamp)." };
+        var showHistory = new Option<int?>("--history") { Description = "Number of history entries to show (default 10, 0 for none)." };
+        var noStatements = new Option<bool>("--no-statements") { Description = "Leave out the recorded filters, updates and commands." };
+        var show = new Command("show", "Show one migration in detail: its state, results, notes, operations and history.") { showId, showHistory, noStatements };
+        show.Validators.Add(r =>
+        {
+            if (r.GetValue(showHistory) is < 0)
+            {
+                r.AddError("--history can't be negative.");
+            }
+        });
+        Add(show, p => Common(p, "show", new CommandArguments { Id = p.GetValue(showId), Limit = p.GetValue(showHistory), NoStatements = p.GetValue(noStatements) }));
+
         return root;
     }
+
+    private static Option<bool> NoCaptureStatementsOption() =>
+        new("--no-capture-statements") { Description = "Don't record the filters, updates and commands run through context.Track(...) (overrides results.captureStatements)." };
 }

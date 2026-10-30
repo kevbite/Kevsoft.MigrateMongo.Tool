@@ -48,7 +48,11 @@ internal sealed class LoggerEventSink(ILogger logger) : IMigrationEventSink
 
                 if (result.ExitCode is ExitCodes.Success or ExitCodes.PendingMigrations)
                 {
-                    Log.Message(logger, LogLevel.Information, result.Message ?? "Migrations finished.");
+                    // history and show results have nothing to summarise.
+                    if (result.Message is { } message)
+                    {
+                        Log.Message(logger, LogLevel.Information, message);
+                    }
                 }
                 else
                 {

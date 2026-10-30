@@ -1,4 +1,5 @@
 using Kevsoft.MigrateMongo.Engine;
+using Kevsoft.MigrateMongo.Protocol;
 using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -60,15 +61,28 @@ public sealed class MongoMigrationExecutor(
         return TransactionErrorKind.None;
     }
 
-    public Task ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, CancellationToken cancellationToken)
+    public async Task<MigrationOutputInfo?> ExecuteAsync(IExecutionScope scope, MigrationDescriptor migration, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken)
     {
         var session = ((MongoExecutionScope)scope).Session;
         var logger = loggerFactory.CreateLogger($"Migration.{migration.Id}");
-        var context = new MigrationContext(database, session, logger, services, run);
-        var instance = migration.Create(services);
-        return run.Direction == MigrationDirection.Up
-            ? instance.UpAsync(context, cancellationToken)
-            : instance.DownAsync(context, cancellationToken);
+        var results = new MigrationResults(options.CaptureStatements);
+        var context = new MigrationContext(database, session, logger, services, run, results);
+        try
+        {
+            var instance = migration.Create(services);
+            await (run.Direction == MigrationDirection.Up
+                ? instance.UpAsync(context, cancellationToken)
+                : instance.DownAsync(context, cancellationToken));
+        }
+        catch (Exception e)
+        {
+            throw new MigrationExecutionException(MigrationOutputMapper.From(results, options.MaxResultsBytes, out _), e);
+        }
+
+        var output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out var tooLarge);
+        return tooLarge is null
+            ? output
+            : throw new MigrationExecutionException(output, new InvalidOperationException(tooLarge));
     }
 }
 

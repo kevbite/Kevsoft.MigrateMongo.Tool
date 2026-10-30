@@ -6,13 +6,14 @@ using Microsoft.Extensions.Logging;
 
 namespace Kevsoft.MigrateMongo.Runner;
 
-/// <summary>Writes each event as a JSON line (the runner protocol, also used for <c>--json</c>).</summary>
+/// <summary>Writes each event as a JSON line (the runner protocol, also used for <c>--json</c>), with recorded values in relaxed Extended JSON.</summary>
 internal sealed class JsonLineEventSink(TextWriter output) : IMigrationEventSink
 {
     private readonly object _gate = new();
 
     public void OnEvent(RunnerEvent runnerEvent)
     {
+        RelaxedExtendedJson.Relax(runnerEvent);
         var json = JsonSerializer.Serialize(runnerEvent, ProtocolJsonContext.Default.RunnerEvent);
         lock (_gate)
         {

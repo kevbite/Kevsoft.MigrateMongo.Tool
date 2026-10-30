@@ -318,6 +318,8 @@ public static class MigrateMongoRunner
         AllowOutOfOrder = config.AllowOutOfOrder,
         TransactionRetryTimeout = TimeSpan.FromSeconds(config.TransactionRetryTimeoutSeconds),
         Environment = config.Environment,
+        CaptureStatements = config.ResultsCaptureStatements,
+        ResultsMaxBytes = config.ResultsMaxBytes,
         Provenance = new Provenance
         {
             Host = Environment.MachineName,

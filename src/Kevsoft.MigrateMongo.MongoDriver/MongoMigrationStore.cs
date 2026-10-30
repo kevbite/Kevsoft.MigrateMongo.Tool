@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Kevsoft.MigrateMongo.Engine;
 using Kevsoft.MigrateMongo.Protocol;
 using MongoDB.Bson;
@@ -94,6 +95,7 @@ public sealed class MongoMigrationStore : IMigrationStore
         AddIfNotNull(document, "checksum", record.Checksum);
         AddIfNotNull(document, "error", record.Error);
         AddIfNotNull(document, "host", record.Host);
+        MigrationOutputMapper.Write(document, record.Output);
 
         return SessionOf(scope) is { } session
             ? _history.InsertOneAsync(session, document, options: null, cancellationToken)
@@ -121,7 +123,16 @@ public sealed class MongoMigrationStore : IMigrationStore
             Checksum = GetString(d, "checksum"),
             Error = GetString(d, "error"),
             Host = GetString(d, "host"),
+            Output = MigrationOutputMapper.Read(d),
         }).ToList();
+    }
+
+    public async Task<IReadOnlyList<string>> GetHistoryIdsAsync(string prefix, CancellationToken cancellationToken)
+    {
+        // An anchored prefix match can use the migrationId index.
+        var filter = new BsonDocument("migrationId", new BsonRegularExpression("^" + Regex.Escape(prefix)));
+        using var cursor = await _history.DistinctAsync<string>("migrationId", filter, cancellationToken: cancellationToken);
+        return await cursor.ToListAsync(cancellationToken);
     }
 
     // The lock's times all come from the server's clock ($$NOW), so runs on machines whose clocks disagree still agree on
@@ -246,6 +257,7 @@ public sealed class MongoMigrationStore : IMigrationStore
         appliedBy.Add("driver", state.AppliedBy.Driver);
         appliedBy.Add("runtime", state.AppliedBy.Runtime);
         document.Add("appliedBy", appliedBy);
+        MigrationOutputMapper.Write(document, state.Output);
         return document;
     }
 
@@ -278,6 +290,7 @@ public sealed class MongoMigrationStore : IMigrationStore
                 Driver = GetString(appliedBy, "driver") ?? "",
                 Runtime = GetString(appliedBy, "runtime") ?? "",
             },
+            Output = MigrationOutputMapper.Read(d),
         };
     }
 
