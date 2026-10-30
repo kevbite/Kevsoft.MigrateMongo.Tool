@@ -64,4 +64,42 @@ public sealed class RelaxedExtendedJsonTests
         JsonSerializer.Serialize(output.GetProperty("results")).ShouldBe("""{"skipped":3}""");
         JsonSerializer.Serialize(output.GetProperty("operations")[0].GetProperty("statement")).ShouldBe("""{"update":{"$set":{"tier":"gold","n":1}}}""");
     }
+
+    [Fact]
+    public void Json_lines_carry_relaxed_collection_index_keys_and_options()
+    {
+        using var writer = new StringWriter();
+        var sink = new JsonLineEventSink(writer);
+
+        sink.OnEvent(new RunnerEvent
+        {
+            Type = EventTypes.CollectionCompleted,
+            Changes =
+            [
+                new IndexChangeInfo { Action = IndexActions.Create, Index = "age_1", Keys = Json("""{"age":{"$numberInt":"1"}}""") },
+            ],
+            Result = new CommandResult
+            {
+                ShowCollection = new CollectionInfo
+                {
+                    Name = "orders",
+                    Indexes =
+                    [
+                        new IndexInfo
+                        {
+                            Name = "expiresAt_1",
+                            Keys = Json("""{"expiresAt":{"$numberInt":"1"}}"""),
+                            Options = Json("""{"expireAfterSeconds":{"$numberLong":"3600"}}"""),
+                        },
+                    ],
+                },
+            },
+        });
+
+        using var line = JsonDocument.Parse(writer.ToString());
+        JsonSerializer.Serialize(line.RootElement.GetProperty("changes")[0].GetProperty("keys")).ShouldBe("""{"age":1}""");
+        var index = line.RootElement.GetProperty("result").GetProperty("showCollection").GetProperty("indexes")[0];
+        JsonSerializer.Serialize(index.GetProperty("keys")).ShouldBe("""{"expiresAt":1}""");
+        JsonSerializer.Serialize(index.GetProperty("options")).ShouldBe("""{"expireAfterSeconds":3600}""");
+    }
 }

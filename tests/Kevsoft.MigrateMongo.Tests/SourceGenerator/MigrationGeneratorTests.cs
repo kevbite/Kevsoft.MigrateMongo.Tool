@@ -181,6 +181,93 @@ public sealed class MigrationGeneratorTests
     }
 
     [Fact]
+    public void Collection_definitions_are_registered_by_name_alongside_migrations()
+    {
+        var (diagnostics, assembly) = Run($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            using MongoDB.Driver;
+            namespace App;
+            public sealed class Greeter { }
+
+            [ManagedCollection("users")]
+            public sealed class Users : ICollectionDefinition<BsonDocument>
+            {
+                public Users(Greeter greeter) { }
+                public void Define(CollectionBuilder<BsonDocument> collection) =>
+                    collection.Indexes.Add(k => k.Ascending("email"), new CreateIndexOptions<BsonDocument> { Unique = true });
+            }
+
+            [ManagedCollection("orders")]
+            internal sealed class Orders : ICollectionDefinition<BsonDocument>
+            {
+                public void Define(CollectionBuilder<BsonDocument> collection) => collection.Indexes.Add(k => k.Ascending("status"));
+            }
+            """);
+
+        diagnostics.ShouldBeEmpty();
+        var source = MigrationRegistry.ForAssembly(assembly!)!;
+        source.GetMigrations().ShouldBeEmpty();
+        var collections = source.GetCollections();
+        collections.Select(c => (c.Name, c.Source, c.Origin)).ShouldBe([("orders", "csharp", "App.Orders"), ("users", "csharp", "App.Users")]);
+
+        var greeterType = assembly!.GetType("App.Greeter")!;
+        var database = new MongoDB.Driver.MongoClient("mongodb://localhost:27017").GetDatabase("generated");
+        var users = collections.Single(c => c.Name == "users").Declare(new Services(new() { [greeterType] = Activator.CreateInstance(greeterType)! }), database);
+        users.Indexes.ShouldHaveSingleItem().Options.ShouldBe(new MongoDB.Bson.BsonDocument("unique", true));
+        Should.Throw<InvalidOperationException>(() => collections.Single(c => c.Name == "users").Declare(new Services([]), database))
+            .Message.ShouldBe("Unable to resolve service 'App.Greeter' for collection definition 'App.Users'. Register it in the runner's service configuration.");
+    }
+
+    [Fact]
+    public void Records_can_be_collection_definitions()
+    {
+        var (diagnostics, assembly) = Run($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            namespace App;
+
+            [ManagedCollection("users")]
+            public sealed record Users : ICollectionDefinition<BsonDocument>
+            {
+                {{DefineBody}}
+            }
+            """);
+
+        diagnostics.ShouldBeEmpty();
+        MigrationRegistry.ForAssembly(assembly!)!.GetCollections().Select(c => (c.Name, c.Origin)).ShouldBe([("users", "App.Users")]);
+    }
+
+    [Theory]
+    [InlineData("[ManagedCollection(\"users\")] public sealed class A { }", "MM0006")]
+    [InlineData("[ManagedCollection(\"\")] public sealed class A : ICollectionDefinition<BsonDocument> { " + DefineBody + " }", "MM0007")]
+    [InlineData("[ManagedCollection(\"system.users\")] public sealed class A : ICollectionDefinition<BsonDocument> { " + DefineBody + " }", "MM0007")]
+    [InlineData("[ManagedCollection(\"a$b\")] public sealed class A : ICollectionDefinition<BsonDocument> { " + DefineBody + " }", "MM0007")]
+    [InlineData("[ManagedCollection(\"users\")] public abstract class A : ICollectionDefinition<BsonDocument> { " + DefineBody + " }", "MM0008")]
+    public void Invalid_collection_definitions_are_reported(string declaration, string expectedId)
+    {
+        var (diagnostics, _) = Run(Usings + "using MongoDB.Bson;\nnamespace App;\n" + declaration);
+
+        diagnostics.Select(d => d.Id).ShouldBe([expectedId]);
+    }
+
+    [Fact]
+    public void A_collection_defined_twice_is_reported_on_both()
+    {
+        var (diagnostics, _) = Run($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            namespace App;
+            [ManagedCollection("users")] public sealed class A : ICollectionDefinition<BsonDocument> { {{DefineBody}} }
+            [ManagedCollection("users")] public sealed class B : ICollectionDefinition<BsonDocument> { {{DefineBody}} }
+            """);
+
+        diagnostics.Select(d => d.Id).ShouldBe(["MM0009", "MM0009"]);
+    }
+
+    private const string DefineBody = "public void Define(CollectionBuilder<BsonDocument> collection) { }";
+
+    [Fact]
     public void Checksum_ignores_whitespace_and_comments_but_not_code()
     {
         var original = Checksum("""

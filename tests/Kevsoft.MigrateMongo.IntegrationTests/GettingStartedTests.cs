@@ -29,7 +29,7 @@ public sealed class GettingStartedTests(IntegrationEnvironment environment)
         // With no migrations yet the run says so, rather than looking the same as a build that skipped the generator.
         var empty = await workspace.RunAsync(["status"], environmentVariables);
         empty.ExitCode.ShouldBe(0, empty.ToString());
-        empty.Output.ShouldContain("No migrations were found.");
+        empty.Output.ShouldContain("No migrations or collection definitions were found.");
 
         var create = await workspace.RunAsync("create", "AddProducts");
         create.ExitCode.ShouldBe(0, create.ToString());

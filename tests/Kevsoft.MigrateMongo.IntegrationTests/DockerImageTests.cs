@@ -30,6 +30,40 @@ public sealed class DockerImageTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task Tool_image_applies_and_reports_collection_definitions()
+    {
+        var image = ImageOrSkip("MIGRATE_MONGO_TEST_TOOL_IMAGE");
+        await using var workspace = CreateWorkspace("CollectionMigrations");
+        File.WriteAllText(workspace.PathOf("nuget.config"), File.ReadAllText(workspace.PathOf("nuget.config")).Replace(environment.PackageFeed, "/feed"));
+        File.Delete(workspace.PathOf("global.json"));
+        string[] feed = ["-v", $"{environment.PackageFeed}:/feed:ro"];
+
+        // The AOT tool reads the runner's collection events and results, and writes them as text and as JSON.
+        var up = await DockerRunAsync(image, workspace, feed, "up");
+        up.ExitCode.ShouldBe(0, up.ToString());
+        up.Output.ShouldContain("⟳ orders");
+        up.Output.ShouldContain("+ create   companyId_1_createdAt_-1   { companyId: 1, createdAt: -1 }");
+        up.Output.ShouldContain("Applied 1 migration(s) in batch 1 and changed 2 collection(s).");
+        workspace.Database.GetCollection<MongoDB.Bson.BsonDocument>("orders").Indexes.List().ToList().Count.ShouldBe(8);
+
+        var status = await DockerRunAsync(image, workspace, feed, "status", "--check", "--no-build");
+        status.ExitCode.ShouldBe(0, status.ToString());
+        status.Output.ShouldContain(" orders      in sync");
+
+        var show = await DockerRunAsync(image, workspace, feed, "show", "orders", "--no-build");
+        show.ExitCode.ShouldBe(0, show.ToString());
+        show.Output.ShouldContain("orders (collection)");
+        show.Output.ShouldContain("customer_ci               { customer: 1 }  collation");
+
+        var plan = await DockerRunAsync(image, workspace, feed, "plan", "--json", "--no-build");
+        plan.ExitCode.ShouldBe(0, plan.ToString());
+        var result = System.Text.Json.JsonDocument.Parse(plan.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1]).RootElement.GetProperty("result");
+        result.GetProperty("collections").EnumerateArray()
+            .Select(c => (c.GetProperty("name").GetString(), c.GetProperty("state").GetString()))
+            .ShouldBe([("customers", "inSync"), ("orders", "inSync")]);
+    }
+
+    [Fact]
     public async Task Bundle_image_drives_a_bundle_through_the_tool()
     {
         var image = ImageOrSkip("MIGRATE_MONGO_TEST_BUNDLE_IMAGE");
@@ -68,11 +102,11 @@ public sealed class DockerImageTests(IntegrationEnvironment environment)
         return image!;
     }
 
-    private Workspace CreateWorkspace()
+    private Workspace CreateWorkspace(string fixture = "BasicMigrations")
     {
-        var workspace = Workspace.FromFixture(environment, "BasicMigrations");
+        var workspace = Workspace.FromFixture(environment, fixture);
         workspace.WriteConfigFile($$"""
-            project: BasicMigrations
+            project: {{fixture}}
             mongodb:
               url: ${{{UrlVariable}}}
               databaseName: {{workspace.DatabaseName}}

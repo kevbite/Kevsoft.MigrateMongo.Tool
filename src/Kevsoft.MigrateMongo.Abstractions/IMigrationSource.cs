@@ -7,4 +7,7 @@ namespace Kevsoft.MigrateMongo;
 public interface IMigrationSource
 {
     IReadOnlyCollection<MigrationDescriptor> GetMigrations();
+
+    /// <summary>The collection definitions (<c>[ManagedCollection]</c> classes) this source provides.</summary>
+    IReadOnlyCollection<CollectionDescriptor> GetCollections() => [];
 }

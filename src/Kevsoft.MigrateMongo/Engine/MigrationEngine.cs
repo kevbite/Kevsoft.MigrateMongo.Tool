@@ -7,7 +7,7 @@ namespace Kevsoft.MigrateMongo.Engine;
 /// Plans and executes migrations. Never touches the MongoDB driver directly; all database access goes through
 /// <see cref="IMigrationStore"/> and <see cref="IMigrationExecutor"/>.
 /// </summary>
-public sealed class MigrationEngine
+public sealed partial class MigrationEngine
 {
     private const int DefaultHistoryLimit = 50;
     private const int DefaultShowHistoryLimit = 10;
@@ -16,6 +16,8 @@ public sealed class MigrationEngine
     private readonly IMigrationExecutor _executor;
     private readonly IReadOnlyList<MigrationDescriptor> _migrations;
     private readonly Dictionary<string, MigrationDescriptor> _byId;
+    private readonly List<CollectionDescriptor> _collections;
+    private readonly Dictionary<string, CollectionDescriptor> _collectionsByName;
     private readonly EngineOptions _options;
     private readonly IMigrationEventSink _events;
     private readonly TimeProvider _time;
@@ -27,7 +29,8 @@ public sealed class MigrationEngine
         IEnumerable<MigrationDescriptor> migrations,
         EngineOptions options,
         IMigrationEventSink events,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        IEnumerable<CollectionDescriptor>? collections = null)
     {
         _store = store;
         _executor = executor;
@@ -44,6 +47,16 @@ public sealed class MigrationEngine
         }
 
         _byId = _migrations.ToDictionary(m => m.Id, StringComparer.Ordinal);
+
+        _collections = (collections ?? []).OrderBy(c => c.Name, StringComparer.Ordinal).ToList();
+        var duplicateCollection = _collections.GroupBy(c => c.Name).FirstOrDefault(g => g.Count() > 1);
+        if (duplicateCollection is not null)
+        {
+            throw new InvalidOperationException(
+                $"Collection '{duplicateCollection.Key}' is defined more than once ({string.Join(", ", duplicateCollection.Select(d => d.Origin))}).");
+        }
+
+        _collectionsByName = _collections.ToDictionary(c => c.Name, StringComparer.Ordinal);
     }
 
     public string RunId { get; } = Guid.NewGuid().ToString("N");
@@ -52,10 +65,12 @@ public sealed class MigrationEngine
     {
         _ when arguments.DryRun && command is not ("up" or "down") =>
             Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"--dry-run is only supported by 'up' and 'down', not '{command}'." }),
+        _ when arguments.Only is not (null or OnlyScopes.Migrations or OnlyScopes.Collections) =>
+            Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"--only must be '{OnlyScopes.Migrations}' or '{OnlyScopes.Collections}', not '{arguments.Only}'." }),
         "status" => StatusAsync(arguments.Check, cancellationToken),
-        "plan" => PlanAsync(cancellationToken),
-        "up" when arguments.DryRun => DryRunUpAsync(arguments.To, cancellationToken),
-        "up" => UpAsync(arguments.To, OutputOptionsFor(arguments), cancellationToken),
+        "plan" => PreviewUpAsync(null, dryRun: false, arguments, cancellationToken),
+        "up" when arguments.DryRun => PreviewUpAsync(arguments.To, dryRun: true, arguments, cancellationToken),
+        "up" => UpAsync(arguments.To, OutputOptionsFor(arguments), arguments, cancellationToken),
         "down" when arguments.DryRun => DryRunDownAsync(arguments, cancellationToken),
         "down" => DownAsync(arguments, cancellationToken),
         "validate" => ValidateAsync(cancellationToken),
@@ -77,12 +92,22 @@ public sealed class MigrationEngine
         var states = await _store.GetStatesAsync(cancellationToken);
         var status = BuildStatus(states);
         var pending = status.Count(s => s.State == MigrationStates.Pending);
+        var issues = Analyse(states, status);
+        var collections = (await PreviewCollectionsAsync(new CommandArguments(), migrationsRunFirst: pending > 0, issues, cancellationToken))?.Select(c => c.Info).ToList();
+        var changing = collections?.Count(c => c.State is CollectionStates.Changes or CollectionStates.Blocked) ?? 0;
         return new CommandResult
         {
-            ExitCode = check && pending > 0 ? ExitCodes.PendingMigrations : ExitCodes.Success,
+            ExitCode = check && pending + changing > 0 ? ExitCodes.PendingMigrations : ExitCodes.Success,
             Migrations = status,
-            Issues = Analyse(states, status),
-            Message = pending == 0 ? "Database is up to date." : $"{pending} pending migration(s).",
+            Collections = collections,
+            Issues = issues,
+            Message = (pending, changing) switch
+            {
+                (0, 0) => "Database is up to date.",
+                (_, 0) => $"{pending} pending migration(s).",
+                (0, _) => $"{changing} collection(s) out of line with their definitions.",
+                _ => $"{pending} pending migration(s); {changing} collection(s) out of line with their definitions.",
+            },
         };
     }
 
@@ -90,6 +115,7 @@ public sealed class MigrationEngine
     {
         var states = await _store.GetStatesAsync(cancellationToken);
         var issues = Analyse(states, BuildStatus(states));
+        await ValidateCollectionsAsync(issues, cancellationToken);
         var errors = issues.Count(i => i.Severity == "error");
         return new CommandResult
         {
@@ -100,13 +126,13 @@ public sealed class MigrationEngine
     }
 
     /// <summary>Shows what <c>up</c> would do. Exits with <see cref="ExitCodes.PendingMigrations"/> if there is pending work.</summary>
-    public Task<CommandResult> PlanAsync(CancellationToken cancellationToken) => PreviewUpAsync(null, dryRun: false, cancellationToken);
+    public Task<CommandResult> PlanAsync(CancellationToken cancellationToken) => PreviewUpAsync(null, dryRun: false, new CommandArguments(), cancellationToken);
 
     /// <summary>
     /// Reports what <c>up</c> would apply without changing anything: no lock, no state or history writes and no migration
     /// code runs. Exits with the code a real run would (barring the migrations themselves failing or a lock timeout).
     /// </summary>
-    public Task<CommandResult> DryRunUpAsync(string? to, CancellationToken cancellationToken) => PreviewUpAsync(to, dryRun: true, cancellationToken);
+    public Task<CommandResult> DryRunUpAsync(string? to, CancellationToken cancellationToken) => PreviewUpAsync(to, dryRun: true, new CommandArguments(), cancellationToken);
 
     /// <summary>Reports what <c>down</c> would roll back without changing anything.</summary>
     public async Task<CommandResult> DryRunDownAsync(CommandArguments arguments, CancellationToken cancellationToken)
@@ -151,7 +177,7 @@ public sealed class MigrationEngine
     }
 
     // Read-only on purpose (no InitializeAsync, no lock) so it changes nothing and works with a read-only database user.
-    private async Task<CommandResult> PreviewUpAsync(string? to, bool dryRun, CancellationToken cancellationToken)
+    private async Task<CommandResult> PreviewUpAsync(string? to, bool dryRun, CommandArguments arguments, CancellationToken cancellationToken)
     {
         if (to is not null && !_byId.ContainsKey(to))
         {
@@ -168,31 +194,51 @@ public sealed class MigrationEngine
         List<PlannedMigration> plan;
         try
         {
-            plan = await PlanItemsAsync(PendingMigrations(states, to), "up", cancellationToken);
+            plan = arguments.Only == OnlyScopes.Collections ? [] : await PlanItemsAsync(PendingMigrations(states, to), "up", cancellationToken);
         }
         catch (MigrationEngineException e)
         {
             return new CommandResult { ExitCode = ExitCodes.Failure, Issues = issues, Message = e.Message };
         }
 
+        var pendingCount = PendingMigrations(states, null).Count;
+        List<CollectionInfo>? collections = null;
+        if (arguments.Only != OnlyScopes.Migrations && CollectionsRunAfter(to, pendingCount, plan.Count, arguments, issues))
+        {
+            collections = (await PreviewCollectionsAsync(arguments, migrationsRunFirst: plan.Count > 0, issues, cancellationToken))?.Select(c => c.Info).ToList();
+        }
+
         var holder = await ReportHeldLockAsync(issues, cancellationToken);
         var batch = NextBatch(states);
+        var changing = collections?.Count(c => c.State is CollectionStates.Changes or CollectionStates.Blocked) ?? 0;
+        var errors = issues.Any(i => i.Severity == "error");
+        var work = DescribeWork(plan.Count, batch, changing);
         return new CommandResult
         {
-            ExitCode = plan.Count > 0 && !dryRun ? ExitCodes.PendingMigrations : ExitCodes.Success,
+            ExitCode = errors ? ExitCodes.ValidationFailed : plan.Count + changing > 0 && !dryRun ? ExitCodes.PendingMigrations : ExitCodes.Success,
             Plan = plan,
             Batch = plan.Count > 0 ? batch : null,
+            Collections = collections,
             Issues = issues,
             Lock = holder,
-            Message = (plan.Count, dryRun) switch
+            Message = (work, dryRun) switch
             {
-                (0, true) => "Dry run: nothing to apply; database is up to date.",
-                (0, false) => "Nothing to apply; database is up to date.",
-                (_, true) => $"Dry run: would apply {plan.Count} migration(s) as batch {batch}; nothing was changed.",
-                _ => $"Would apply {plan.Count} migration(s) as batch {batch}.",
+                (null, true) => "Dry run: nothing to apply; database is up to date.",
+                (null, false) => "Nothing to apply; database is up to date.",
+                (_, true) => $"Dry run: would {work}; nothing was changed.",
+                _ => $"Would {work}.",
             },
         };
     }
+
+    /// <summary>e.g. <c>apply 2 migration(s) as batch 3 and change 1 collection(s)</c>, or null when there's nothing to do.</summary>
+    private static string? DescribeWork(int migrations, int batch, int collections) => (migrations, collections) switch
+    {
+        (0, 0) => null,
+        (_, 0) => $"apply {migrations} migration(s) as batch {batch}",
+        (0, _) => $"change {collections} collection(s)",
+        _ => $"apply {migrations} migration(s) as batch {batch} and change {collections} collection(s)",
+    };
 
     private async Task<List<PlannedMigration>> PlanItemsAsync(IEnumerable<MigrationDescriptor> migrations, string direction, CancellationToken cancellationToken)
     {
@@ -226,9 +272,9 @@ public sealed class MigrationEngine
     }
 
     public Task<CommandResult> UpAsync(string? to, CancellationToken cancellationToken) =>
-        UpAsync(to, OutputOptionsFor(null), cancellationToken);
+        UpAsync(to, OutputOptionsFor(null), new CommandArguments(), cancellationToken);
 
-    private async Task<CommandResult> UpAsync(string? to, OutputOptions outputOptions, CancellationToken cancellationToken)
+    private async Task<CommandResult> UpAsync(string? to, OutputOptions outputOptions, CommandArguments arguments, CancellationToken cancellationToken)
     {
         if (to is not null && !_byId.ContainsKey(to))
         {
@@ -245,10 +291,21 @@ public sealed class MigrationEngine
                 return blocked;
             }
 
-            var pending = PendingMigrations(states, to);
-            if (pending.Count == 0)
+            var pending = arguments.Only == OnlyScopes.Collections ? [] : PendingMigrations(states, to);
+            var pendingCount = PendingMigrations(states, null).Count;
+            var runCollections = arguments.Only != OnlyScopes.Migrations && CollectionsRunAfter(to, pendingCount, pending.Count, arguments, issues);
+
+            // Stop before any migration runs if a collection definition is invalid, or (when no migration runs first that
+            // could change the indexes, e.g. with --only collections) would make a change that isn't allowed.
+            List<CollectionPreview>? collections = null;
+            if (runCollections)
             {
-                return new CommandResult { ExitCode = ExitCodes.Success, Applied = [], Issues = issues, Message = "Nothing to apply; database is up to date." };
+                var found = new List<ValidationIssue>();
+                collections = await PreviewCollectionsAsync(arguments, migrationsRunFirst: pending.Count > 0, found, ct);
+                if (CollectionsBlocked(collections, found, issues, "Stopped before changing anything") is { } stopped)
+                {
+                    return stopped;
+                }
             }
 
             var batch = NextBatch(states);
@@ -279,13 +336,68 @@ public sealed class MigrationEngine
                 applied.Add(migration.Id);
             }
 
+            var reconciled = new List<string>();
+            if (collections is not null)
+            {
+                // The migrations may have changed the indexes, so check every definition again before changing any.
+                if (applied.Count > 0)
+                {
+                    var found = new List<ValidationIssue>();
+                    collections = await PreviewCollectionsAsync(arguments, migrationsRunFirst: false, found, ct);
+                    if (CollectionsBlocked(collections, found, issues, $"Applied {applied.Count} migration(s) in batch {batch}, then stopped before changing any collection") is { } stopped)
+                    {
+                        stopped.Batch = batch;
+                        stopped.Applied = applied;
+                        return stopped;
+                    }
+                }
+
+                foreach (var collection in collections!)
+                {
+                    if (LockLost(ct, cancellationToken) is { } lost)
+                    {
+                        lost.Batch = applied.Count > 0 ? batch : null;
+                        lost.Applied = applied;
+                        lost.Reconciled = reconciled;
+                        lost.Issues = issues;
+                        return lost;
+                    }
+
+                    var (changed, error) = await ReconcileAsync(collection, arguments, outputOptions, batch, ct);
+                    if (error is not null)
+                    {
+                        return new CommandResult
+                        {
+                            ExitCode = ExitCodes.Failure,
+                            Batch = applied.Count > 0 ? batch : null,
+                            Applied = applied,
+                            Reconciled = reconciled,
+                            Issues = issues,
+                            Message = $"Collection {collection.Collection.Name} failed: {error}",
+                        };
+                    }
+
+                    if (changed)
+                    {
+                        reconciled.Add(collection.Collection.Name);
+                    }
+                }
+            }
+
             return new CommandResult
             {
                 ExitCode = ExitCodes.Success,
-                Batch = batch,
+                Batch = applied.Count > 0 ? batch : null,
                 Applied = applied,
+                Reconciled = runCollections ? reconciled : null,
                 Issues = issues,
-                Message = $"Applied {applied.Count} migration(s) in batch {batch}.",
+                Message = (applied.Count, reconciled.Count) switch
+                {
+                    (0, 0) => "Nothing to apply; database is up to date.",
+                    (_, 0) => $"Applied {applied.Count} migration(s) in batch {batch}.",
+                    (0, _) => $"Changed {reconciled.Count} collection(s).",
+                    _ => $"Applied {applied.Count} migration(s) in batch {batch} and changed {reconciled.Count} collection(s).",
+                },
             };
         }, cancellationToken);
     }
@@ -486,6 +598,11 @@ public sealed class MigrationEngine
     public async Task<CommandResult> ShowAsync(string id, int? historyLimit, bool noStatements, CancellationToken cancellationToken)
     {
         var states = await _store.GetStatesAsync(cancellationToken);
+        if (!_byId.ContainsKey(id) && states.All(s => s.Id != id) &&
+            (_collectionsByName.ContainsKey(id) || (await GetCollectionStatesAsync(cancellationToken)).ContainsKey(id)))
+        {
+            return await ShowCollectionAsync(id, historyLimit ?? DefaultShowHistoryLimit, noStatements, cancellationToken);
+        }
 
         // A rolled-back migration whose code has gone is only in the history.
         var historyIds = id.Length > 0 ? await _store.GetHistoryIdsAsync(id, cancellationToken) : [];

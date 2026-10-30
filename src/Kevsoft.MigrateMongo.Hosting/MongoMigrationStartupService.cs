@@ -14,11 +14,19 @@ public sealed class MongoMigrationException(CommandResult result)
 /// Applies migrations in <see cref="IHostedLifecycleService.StartingAsync"/>, which the host runs before starting any hosted
 /// service, so the app (e.g. the ASP.NET Core server) only starts once the database is up to date.
 /// </summary>
-internal sealed class MongoMigrationStartupService(IMongoMigrationRunner runner) : IHostedLifecycleService
+internal sealed class MongoMigrationStartupService(IMongoMigrationRunner runner, MongoMigrationRegistration registration) : IHostedLifecycleService
 {
     public async Task StartingAsync(CancellationToken cancellationToken)
     {
-        var result = await runner.UpAsync(cancellationToken: cancellationToken);
+        var startup = registration.Startup;
+        var arguments = new CommandArguments
+        {
+            Only = startup.Collections ? null : OnlyScopes.Migrations,
+            AllowRebuild = [.. startup.AllowRebuild],
+            AllowUnmatched = [.. startup.AllowUnmatched],
+            AllowSuperseded = startup.AllowSuperseded,
+        };
+        var result = await runner.ExecuteAsync("up", arguments, cancellationToken);
         if (result.ExitCode != ExitCodes.Success)
         {
             throw new MongoMigrationException(result);

@@ -260,17 +260,17 @@ public static class MigrateMongoRunner
         try
         {
             ConfigLoader.EnsureConnectable(config);
-            var migrations = MigrationDiscovery.Discover(options, entryAssembly);
-            if (migrations.Count == 0 && command is not ("unlock" or "history" or "show"))
+            var (migrations, collections) = MigrationDiscovery.Discover(options, entryAssembly);
+            if (migrations.Count == 0 && collections.Count == 0 && command is not ("unlock" or "history" or "show"))
             {
                 // Silence here would hide a build that skipped the source generator: `up` would report nothing to do.
                 sink.OnEvent(new RunnerEvent
                 {
                     Type = EventTypes.Log,
                     Level = "warning",
-                    Message = "No migrations were found. If you expected some, check the build output for warning CS9057 " +
-                              "(the compiler is too old for the Kevsoft.MigrateMongo source generator), or add the assembly " +
-                              "that contains them to MigrateMongoRunnerOptions.Assemblies.",
+                    Message = "No migrations or collection definitions were found. If you expected some, check the build " +
+                              "output for warning CS9057 (the compiler is too old for the Kevsoft.MigrateMongo source " +
+                              "generator), or add the assembly that contains them to MigrateMongoRunnerOptions.Assemblies.",
                 });
             }
 
@@ -287,7 +287,7 @@ public static class MigrateMongoRunner
             backend = MongoDriverBackend.Create(config, provider, loggerFactory);
             try
             {
-                var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(config, tool), sink);
+                var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(config, tool), sink, collections: collections);
                 return await engine.ExecuteAsync(command, arguments, cancellationToken);
             }
             finally
@@ -320,6 +320,10 @@ public static class MigrateMongoRunner
         Environment = config.Environment,
         CaptureStatements = config.ResultsCaptureStatements,
         ResultsMaxBytes = config.ResultsMaxBytes,
+        IndexesPrune = config.IndexesPrune,
+        IndexesOnRebuild = config.IndexesOnRebuild,
+        IndexesDropHiddenAfter = TimeSpan.FromSeconds(config.IndexesDropHiddenAfterSeconds),
+        IndexesSupersededWindow = TimeSpan.FromSeconds(config.IndexesSupersededWindowSeconds),
         Provenance = new Provenance
         {
             Host = Environment.MachineName,

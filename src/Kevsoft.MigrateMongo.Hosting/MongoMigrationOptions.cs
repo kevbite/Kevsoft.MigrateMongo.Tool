@@ -54,6 +54,21 @@ public sealed class MongoMigrationOptions
     /// <summary>The largest a migration's named results may be, in BSON bytes (<c>results.maxBytes</c>); more fails the migration.</summary>
     public int ResultsMaxBytes { get; set; } = 64 * 1024;
 
+    /// <summary>What happens to indexes a collection definition doesn't declare (<c>indexes.prune</c>).</summary>
+    public IndexPrune IndexPrune { get; set; } = IndexPrune.Report;
+
+    /// <summary>Whether an index may be dropped and created again (<c>indexes.onRebuild</c>).</summary>
+    public IndexRebuild IndexRebuild { get; set; } = IndexRebuild.Allow;
+
+    /// <summary>With <see cref="IndexPrune.Hide"/>, how long an undeclared index stays hidden before it's dropped (<c>indexes.dropHiddenAfter</c>).</summary>
+    public TimeSpan DropHiddenIndexesAfter { get; set; } = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// How long after a collection definition is replaced an instance bringing back the previous one skips it as an older
+    /// build (<c>indexes.supersededWindow</c>). <see cref="TimeSpan.Zero"/> turns the check off.
+    /// </summary>
+    public TimeSpan SupersededDefinitionWindow { get; set; } = TimeSpan.FromHours(1);
+
     /// <summary>
     /// An SSH tunnel to connect through, like the <c>tunnel</c> config section. Needs <see cref="ConnectionString"/> and a
     /// <see cref="TunnelProvider"/>. The tunnel is open only while migrations run.
@@ -104,6 +119,16 @@ public sealed class MongoMigrationOptions
         if (ResultsMaxBytes < 1)
         {
             errors.Add($"{nameof(ResultsMaxBytes)} must be positive.");
+        }
+
+        if (DropHiddenIndexesAfter < TimeSpan.Zero)
+        {
+            errors.Add($"{nameof(DropHiddenIndexesAfter)} can't be negative.");
+        }
+
+        if (SupersededDefinitionWindow < TimeSpan.Zero)
+        {
+            errors.Add($"{nameof(SupersededDefinitionWindow)} can't be negative.");
         }
 
         if (errors.Count > 0)

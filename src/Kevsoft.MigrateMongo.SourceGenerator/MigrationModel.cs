@@ -23,7 +23,7 @@ internal sealed record MigrationModel(
     LocationInfo Location);
 
 /// <summary>
-/// Where a migration's diagnostics go, compared by value. A <see cref="Microsoft.CodeAnalysis.Location"/> holds its
+/// Where a model's diagnostics go, compared by value. A <see cref="Microsoft.CodeAnalysis.Location"/> holds its
 /// syntax tree, so a model with one would differ after any edit to the file (missing the pipeline's cache) and keep
 /// the old tree alive.
 /// </summary>
@@ -34,6 +34,18 @@ internal sealed record LocationInfo(string FilePath, TextSpan TextSpan, LinePosi
 
     public Location ToLocation() => Location.Create(FilePath, TextSpan, LineSpan);
 }
+
+internal sealed record CollectionModel(
+    string Name,
+    string TypeName,
+    string DisplayName,
+    string DocumentType,
+    int DefinitionCount,
+    EquatableArray<string> Parameters,
+    bool IsAbstract,
+    bool IsAccessible,
+    bool HasConstructor,
+    LocationInfo Location);
 
 /// <summary>Value-equality wrapper so the incremental pipeline can cache models.</summary>
 internal readonly struct EquatableArray<T>(ImmutableArray<T> items) : IEquatable<EquatableArray<T>>, IEnumerable<T>

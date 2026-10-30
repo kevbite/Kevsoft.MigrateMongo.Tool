@@ -73,7 +73,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
         var options = registration.CreateOptions(services);
         var loggerFactory = services.GetService<ILoggerFactory>() ?? NullLoggerFactory.Instance;
         var logger = loggerFactory.CreateLogger("Kevsoft.MigrateMongo");
-        var migrations = registration.Discover(logger);
+        var (migrations, collections) = registration.Discover(logger);
 
         IMongoClient client;
         MongoClient? ownedClient = null;
@@ -110,7 +110,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             await using var scope = services.CreateAsyncScope();
             var backend = MongoDriverBackend.Create(client, options.DatabaseName, options.StateCollection, scope.ServiceProvider, loggerFactory);
             var sink = new LoggerEventSink(logger);
-            var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(options), sink);
+            var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(options), sink, collections: collections);
             var result = await engine.ExecuteAsync(command, arguments, cancellationToken);
             // The outcome and its warnings (e.g. checksum warnings with OnChecksumMismatch.Warn) go to the log too.
             sink.OnEvent(new RunnerEvent { Type = EventTypes.Result, Result = result });
@@ -146,6 +146,10 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             Environment = options.Environment ?? host?.EnvironmentName,
             CaptureStatements = options.CaptureStatements,
             ResultsMaxBytes = options.ResultsMaxBytes,
+            IndexesPrune = options.IndexPrune.ToString().ToLowerInvariant(),
+            IndexesOnRebuild = options.IndexRebuild.ToString().ToLowerInvariant(),
+            IndexesDropHiddenAfter = options.DropHiddenIndexesAfter,
+            IndexesSupersededWindow = options.SupersededDefinitionWindow,
             Provenance = new Provenance
             {
                 Host = System.Environment.MachineName,

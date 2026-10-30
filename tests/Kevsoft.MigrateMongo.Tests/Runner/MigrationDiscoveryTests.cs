@@ -53,7 +53,7 @@ public sealed class MigrationDiscoveryTests
             }
             """, shop.Reference);
 
-        var migrations = MigrationDiscovery.Discover(new MigrateMongoRunnerOptions(), entry.Assembly);
+        var (migrations, _) = MigrationDiscovery.Discover(new MigrateMongoRunnerOptions(), entry.Assembly);
 
         migrations.Select(m => m.Origin).ShouldBe(["MongoDBShop.Migrations.AddOrders"]);
     }
