@@ -345,19 +345,21 @@ jobs:
       matrix:
         include:
           # .NET 10+ SDKs install the Native AOT package for the platform.
-          - { name: linux-x64, os: ubuntu-latest, sdk: 10, expect: 'linux-x64; aot' }
-          - { name: linux-arm64, os: ubuntu-24.04-arm, sdk: 10, expect: 'linux-arm64; aot' }
-          - { name: linux-musl-x64, os: ubuntu-latest, sdk: 10, alpine: true, expect: 'linux-musl-x64; aot' }
-          - { name: linux-musl-arm64, os: ubuntu-24.04-arm, sdk: 10, alpine: true, expect: 'linux-musl-arm64; aot' }
-          - { name: win-x64, os: windows-latest, sdk: 10, expect: 'win-x64; aot' }
-          - { name: win-arm64, os: windows-11-arm, sdk: 10, expect: 'win-arm64; aot' }
-          - { name: osx-x64, os: macos-15-intel, sdk: 10, expect: 'osx-x64; aot' }
-          - { name: osx-arm64, os: macos-latest, sdk: 10, expect: 'osx-arm64; aot' }
+          - { name: linux-x64, os: ubuntu-latest, sdk: 10.0.x, expect: 'linux-x64; aot' }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, sdk: 10.0.x, expect: 'linux-arm64; aot' }
+          - { name: linux-musl-x64, os: ubuntu-latest, sdk: 10.0.x, alpine: true, expect: 'linux-musl-x64; aot' }
+          - { name: linux-musl-arm64, os: ubuntu-24.04-arm, sdk: 10.0.x, alpine: true, expect: 'linux-musl-arm64; aot' }
+          - { name: win-x64, os: windows-latest, sdk: 10.0.x, expect: 'win-x64; aot' }
+          - { name: win-arm64, os: windows-11-arm, sdk: 10.0.x, expect: 'win-arm64; aot' }
+          - { name: osx-x64, os: macos-15-intel, sdk: 10.0.x, expect: 'osx-x64; aot' }
+          - { name: osx-arm64, os: macos-latest, sdk: 10.0.x, expect: 'osx-arm64; aot' }
+          # The lowest supported SDK: its compiler must still load the source generator.
+          - { name: linux-x64, os: ubuntu-latest, sdk: 10.0.100, roll-forward: disable, expect: 'linux-x64; aot' }
     steps:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         if: ${{ !matrix.alpine }}
         with:
-          dotnet-version: ${{ matrix.sdk }}.0.x
+          dotnet-version: ${{ matrix.sdk }}
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -374,7 +376,7 @@ jobs:
         shell: bash
         run: |
           # Runners have newer SDKs preinstalled, so pin the one under test.
-          echo '{"sdk":{"version":"${{ matrix.sdk }}.0.100","rollForward":"latestFeature"}}' > global.json
+          echo '{"sdk":{"version":"10.0.100","rollForward":"${{ matrix.roll-forward || 'latestFeature' }}"}}' > global.json
           cat > install.sh <<'EOF'
           set -e
           dotnet --version
@@ -394,6 +396,10 @@ jobs:
           mm init
           mm create AddUsersCollection
           ls Migrations/Migrations
+          # A compiler that's too old skips the source generator with only warning CS9057, leaving no migrations.
+          dotnet build Migrations -p:WarningsAsErrors=CS9057 -p:EmitCompilerGeneratedFiles=true \
+            --source ../packages --source https://api.nuget.org/v3/index.json
+          find Migrations/obj -name MigrateMongo.Migrations.g.cs | grep -q .
           EOF
 
       - name: Install and run the tool

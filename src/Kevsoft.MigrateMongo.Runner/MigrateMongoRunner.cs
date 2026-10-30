@@ -261,6 +261,18 @@ public static class MigrateMongoRunner
         {
             ConfigLoader.EnsureConnectable(config);
             var migrations = MigrationDiscovery.Discover(options, entryAssembly);
+            if (migrations.Count == 0 && command is not ("unlock" or "history"))
+            {
+                // Silence here would hide a build that skipped the source generator: `up` would report nothing to do.
+                sink.OnEvent(new RunnerEvent
+                {
+                    Type = EventTypes.Log,
+                    Level = "warning",
+                    Message = "No migrations were found. If you expected some, check the build output for warning CS9057 " +
+                              "(the compiler is too old for the Kevsoft.MigrateMongo source generator), or add the assembly " +
+                              "that contains them to MigrateMongoRunnerOptions.Assemblies.",
+                });
+            }
 
             using var loggerFactory = new EventSinkLoggerFactory(sink);
             MongoDriverBackend? backend = null;

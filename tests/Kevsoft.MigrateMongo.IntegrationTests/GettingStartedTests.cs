@@ -23,6 +23,12 @@ public sealed class GettingStartedTests(IntegrationEnvironment environment)
         config.ShouldContain("project: src/Shop.Migrations");
         config.ShouldContain("url: ${MONGODB_URL}");
         File.WriteAllText(workspace.ConfigPath, config.Replace("databaseName: shop", $"databaseName: {workspace.DatabaseName}"));
+        var environmentVariables = new Dictionary<string, string?> { ["MONGODB_URL"] = environment.MongoUrl };
+
+        // With no migrations yet the run says so, rather than looking the same as a build that skipped the generator.
+        var empty = await workspace.RunAsync(["status"], environmentVariables);
+        empty.ExitCode.ShouldBe(0, empty.ToString());
+        empty.Output.ShouldContain("No migrations were found.");
 
         var create = await workspace.RunAsync("create", "AddProducts");
         create.ExitCode.ShouldBe(0, create.ToString());
@@ -40,7 +46,6 @@ public sealed class GettingStartedTests(IntegrationEnvironment environment)
         firstThrow.ShouldBeGreaterThan(0);
         File.WriteAllText(migrationFile, source[..firstThrow] + upBody + source[(firstThrow + notImplemented.Length)..]);
 
-        var environmentVariables = new Dictionary<string, string?> { ["MONGODB_URL"] = environment.MongoUrl };
         var up = await workspace.RunAsync(["up"], environmentVariables);
 
         up.ExitCode.ShouldBe(0, up.ToString());
