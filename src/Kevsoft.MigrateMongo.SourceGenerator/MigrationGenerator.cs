@@ -6,13 +6,14 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Kevsoft.MigrateMongo.SourceGenerator;
 
 /// <summary>
-/// Discovers <c>[Migration]</c> classes at compile time and emits a reflection-free migration source plus a
-/// module initializer that registers it with <c>MigrationRegistry</c>.
+/// Discovers <c>[Migration]</c> classes and records at compile time and emits a reflection-free migration source plus
+/// a module initializer that registers it with <c>MigrationRegistry</c>.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class MigrationGenerator : IIncrementalGenerator
@@ -22,10 +23,11 @@ public sealed class MigrationGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        // [Migration] only applies to classes, which includes `record` and `record class` (but not `record struct`).
         var migrations = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 AttributeName,
-                static (node, _) => node is ClassDeclarationSyntax,
+                static (node, _) => node.IsKind(SyntaxKind.ClassDeclaration) || node.IsKind(SyntaxKind.RecordDeclaration),
                 static (ctx, ct) => Transform(ctx, ct))
             .Collect();
 
@@ -35,9 +37,9 @@ public sealed class MigrationGenerator : IIncrementalGenerator
     private static MigrationModel Transform(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
         var symbol = (INamedTypeSymbol)ctx.TargetSymbol;
-        var syntax = (ClassDeclarationSyntax)ctx.TargetNode;
+        var syntax = (TypeDeclarationSyntax)ctx.TargetNode;
         var attribute = ctx.Attributes[0];
-        var location = syntax.Identifier.GetLocation();
+        var location = LocationInfo.From(syntax.Identifier.GetLocation());
 
         var id = attribute.ConstructorArguments.Length > 0 ? attribute.ConstructorArguments[0].Value as string : null;
         var name = attribute.ConstructorArguments.Length > 1 ? attribute.ConstructorArguments[1].Value as string : null;
@@ -93,10 +95,10 @@ public sealed class MigrationGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// SHA-256 over the class's tokens joined by single spaces, so whitespace and comment changes don't alter
+    /// SHA-256 over the type's tokens joined by single spaces, so whitespace and comment changes don't alter
     /// the checksum but any code change does.
     /// </summary>
-    internal static string ComputeChecksum(ClassDeclarationSyntax syntax)
+    internal static string ComputeChecksum(TypeDeclarationSyntax syntax)
     {
         var normalised = string.Join(" ", syntax.DescendantTokens().Select(t => t.Text));
         using var sha = SHA256.Create();
@@ -116,27 +118,28 @@ public sealed class MigrationGenerator : IIncrementalGenerator
         foreach (var item in items)
         {
             var ok = true;
+            var location = item.Location.ToLocation();
             if (!item.ImplementsInterface)
             {
-                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.MustImplementInterface, item.Location, item.DisplayName));
+                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.MustImplementInterface, location, item.DisplayName));
                 ok = false;
             }
 
             if (!IsValidId(item.Id))
             {
-                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidId, item.Location, item.Id, item.DisplayName));
+                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidId, location, item.Id, item.DisplayName));
                 ok = false;
             }
 
             if (string.IsNullOrWhiteSpace(item.Name))
             {
-                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.MissingName, item.Location, item.DisplayName));
+                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.MissingName, location, item.DisplayName));
                 ok = false;
             }
 
             if (item.IsAbstract || !item.IsAccessible || !item.HasConstructor)
             {
-                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.NotConstructible, item.Location, item.DisplayName));
+                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.NotConstructible, location, item.DisplayName));
                 ok = false;
             }
 
@@ -152,7 +155,7 @@ public sealed class MigrationGenerator : IIncrementalGenerator
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     Diagnostics.DuplicateId,
-                    duplicate.Location,
+                    duplicate.Location.ToLocation(),
                     duplicate.Id,
                     string.Join(", ", group.Select(g => g.DisplayName))));
             }

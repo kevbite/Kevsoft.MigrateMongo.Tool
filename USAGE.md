@@ -437,7 +437,8 @@ If the template lives inside the migrations project, don't give it a `.cs` exten
 
 ### Build errors
 
-The source generator finds migrations at compile time and reports mistakes as build errors:
+The source generator finds migrations (classes and records marked with `[Migration]`) at compile time and reports
+mistakes as build errors:
 
 | Code | Meaning |
 |---|---|

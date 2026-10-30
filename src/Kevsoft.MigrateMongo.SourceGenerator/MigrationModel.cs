@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 
 namespace Kevsoft.MigrateMongo.SourceGenerator;
 
@@ -19,7 +20,20 @@ internal sealed record MigrationModel(
     bool IsAbstract,
     bool IsAccessible,
     bool HasConstructor,
-    Location Location);
+    LocationInfo Location);
+
+/// <summary>
+/// Where a migration's diagnostics go, compared by value. A <see cref="Microsoft.CodeAnalysis.Location"/> holds its
+/// syntax tree, so a model with one would differ after any edit to the file (missing the pipeline's cache) and keep
+/// the old tree alive.
+/// </summary>
+internal sealed record LocationInfo(string FilePath, TextSpan TextSpan, LinePositionSpan LineSpan)
+{
+    public static LocationInfo From(Location location) =>
+        new(location.SourceTree?.FilePath ?? string.Empty, location.SourceSpan, location.GetLineSpan().Span);
+
+    public Location ToLocation() => Location.Create(FilePath, TextSpan, LineSpan);
+}
 
 /// <summary>Value-equality wrapper so the incremental pipeline can cache models.</summary>
 internal readonly struct EquatableArray<T>(ImmutableArray<T> items) : IEquatable<EquatableArray<T>>, IEnumerable<T>
