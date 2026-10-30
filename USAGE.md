@@ -75,6 +75,7 @@ $ migrate-mongo init --project src/MyApp.Migrations
 Created migrate-mongo.yaml
 Created src/MyApp.Migrations/MyApp.Migrations.csproj
 Created src/MyApp.Migrations/Program.cs
+Created src/MyApp.Migrations/.editorconfig
 Next: set MONGODB_URL, then run `migrate-mongo create <Name>` and `migrate-mongo status`.
 ```
 
@@ -92,6 +93,10 @@ using Kevsoft.MigrateMongo;
 
 return await MigrateMongoRunner.RunAsync(args);
 ```
+
+`.editorconfig` makes [CA2016](https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca2016) a
+warning, so your editor and `dotnet build` point out calls that take a `CancellationToken` but aren't given the
+migration's. `migrate-mongo` only shows build output when a build fails.
 
 To use an existing project, add `Kevsoft.MigrateMongo.Runner` and `MongoDB.Driver` to it, call
 `MigrateMongoRunner.RunAsync(args)` from `Program.cs`, and point `project:` in `migrate-mongo.yaml` at it.
@@ -722,8 +727,8 @@ into a warning.
 Locks are renewed while a run is in progress and expire `lockTtl` seconds after a run dies. Remove one sooner with
 `unlock --force`, but only if you're sure its run has stopped.
 
-Ctrl+C and `SIGTERM` cancel the running migration through its `CancellationToken`, so pass it to every driver call.
-The lock is kept until the migration's code returns, even if it ignores the token, and is then released. A
+Ctrl+C and `SIGTERM` cancel the running migration through its `CancellationToken`, so pass it to every driver call
+(projects from `init` and `dotnet new migratemongo` warn when you don't). The lock is kept until the migration's code returns, even if it ignores the token, and is then released. A
 transactional migration is rolled back; one outside a transaction that ran to the end is recorded as applied, so a
 cancel doesn't leave a finished migration marked `failed`.
 

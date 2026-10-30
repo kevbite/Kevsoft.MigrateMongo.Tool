@@ -28,6 +28,10 @@ public sealed class TemplateTests
     public void Program_matches_init() =>
         Read("project", "Program.cs").ShouldBe(Normalize(Scaffolding.ProgramFile));
 
+    [Fact]
+    public void EditorConfig_matches_init() =>
+        Read("project", ".editorconfig").ShouldBe(Normalize(Scaffolding.EditorConfigFile));
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

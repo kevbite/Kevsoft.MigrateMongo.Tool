@@ -60,6 +60,14 @@ internal static class Scaffolding
 
         """;
 
+    public const string EditorConfigFile = """
+        # Ctrl+C and SIGTERM stop a running migration through its CancellationToken,
+        # so warn when a method that takes one isn't passed it.
+        [*.cs]
+        dotnet_diagnostic.CA2016.severity = warning
+
+        """;
+
     public static string MigrationFile(string @namespace, string id, string className, string name) => $$"""
         using Kevsoft.MigrateMongo;
         using MongoDB.Bson;

@@ -96,6 +96,13 @@ internal sealed class ToolCommands(string workingDirectory)
                 await File.WriteAllTextAsync(programFile, Scaffolding.ProgramFile, cancellationToken);
                 created.Add(programFile);
             }
+
+            var editorConfigFile = Path.Combine(projectDirectory, ".editorconfig");
+            if (!File.Exists(editorConfigFile))
+            {
+                await File.WriteAllTextAsync(editorConfigFile, Scaffolding.EditorConfigFile, cancellationToken);
+                created.Add(editorConfigFile);
+            }
         }
         else
         {

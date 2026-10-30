@@ -23,6 +23,7 @@ public sealed class TemplateTests(IntegrationEnvironment environment)
         projectFile.ShouldContain("<TargetFramework>net10.0</TargetFramework>");
         projectFile.ShouldContain($"""<PackageReference Include="Kevsoft.MigrateMongo.Runner" Version="{environment.PackageVersion}" />""");
         File.Exists(workspace.PathOf("src", "Shop.Migrations", "obj", "project.assets.json")).ShouldBeTrue("the template restores the project");
+        File.ReadAllText(workspace.PathOf("src", "Shop.Migrations", ".editorconfig")).ShouldContain("dotnet_diagnostic.CA2016.severity = warning");
         var config = File.ReadAllText(workspace.PathOf("src", "Shop.Migrations", "migrate-mongo.yaml"));
         config.ShouldContain("project: .");
         config.ShouldContain($"databaseName: {workspace.DatabaseName}");
