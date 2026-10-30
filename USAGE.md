@@ -372,6 +372,9 @@ $ migrate-mongo status
 States are `pending`, `applied`, `applying`, `rollingBack` and `failed`. Applied migrations that are no longer in the
 code, or whose checksum has changed, are flagged. `--check` exits with code `2` when there are pending migrations.
 
+`status`, `plan`, `validate`, `history` and dry runs only read, so they work with a read-only database user. The
+commands that write (`up`, `down`, `mark` and `baseline`) also create the collections' indexes the first time.
+
 ### `plan`
 
 ```
@@ -440,7 +443,8 @@ Validation passed.
 ```
 
 Exits with code `4` if an applied migration was edited, an applied migration is missing from the code, or a pending
-migration is older than the newest applied one (unless `allowOutOfOrder` is set). Run it in pull request builds.
+migration is older than the newest applied one (unless `allowOutOfOrder` is set). Run it in pull request builds; a
+read-only database user is enough.
 
 ### `baseline`
 

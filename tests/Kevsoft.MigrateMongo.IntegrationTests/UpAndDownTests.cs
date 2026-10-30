@@ -133,6 +133,10 @@ public sealed class UpAndDownTests(IntegrationEnvironment environment)
         workspace.Find("_migrations").ShouldBeEmpty();
 
         (await workspace.RunAsync("status", "--check", "--no-build")).ExitCode.ShouldBe(2);
+        (await workspace.RunAsync("validate", "--no-build")).ExitCode.ShouldBe(0);
+        (await workspace.RunAsync("history", "--no-build")).ExitCode.ShouldBe(0);
+        // Reading commands don't create collections or indexes, so they work with a read-only user.
+        workspace.CollectionNames().ShouldBeEmpty();
         (await workspace.RunAsync("up", "--to", "20260101000002", "--no-build")).ExitCode.ShouldBe(0);
 
         var status = await workspace.RunJsonAsync("status", "--no-build");

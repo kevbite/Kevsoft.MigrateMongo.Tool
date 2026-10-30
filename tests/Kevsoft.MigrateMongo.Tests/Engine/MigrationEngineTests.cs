@@ -235,6 +235,27 @@ public sealed class MigrationEngineTests
         _store.Lock!.RunId.ShouldBe("other");
     }
 
+    [Theory]
+    [InlineData("status")]
+    [InlineData("validate")]
+    [InlineData("history")]
+    [InlineData("unlock")]
+    public async Task Reading_commands_dont_create_indexes(string command)
+    {
+        var result = await Engine([Migrations.Create("20260101000001", "a")]).ExecuteAsync(command, new CommandArguments(), CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Success);
+        _store.InitializeCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Up_creates_the_indexes_before_writing()
+    {
+        await Engine([Migrations.Create("20260101000001", "a")]).UpAsync(null, CancellationToken.None);
+
+        _store.InitializeCount.ShouldBe(1);
+    }
+
     [Fact]
     public async Task Lock_expiry_follows_the_store_clock_not_this_machines()
     {

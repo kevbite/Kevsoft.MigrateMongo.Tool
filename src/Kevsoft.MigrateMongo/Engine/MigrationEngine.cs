@@ -67,9 +67,11 @@ public sealed class MigrationEngine
         _ => Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Unknown command '{command}'." }),
     };
 
+    // status, validate, history and unlock only read (or just delete the lock), so they don't create the collections'
+    // indexes: they work with a read-only database user and leave a database they're pointed at by mistake untouched.
+
     public async Task<CommandResult> StatusAsync(bool check, CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
         var states = await _store.GetStatesAsync(cancellationToken);
         var status = BuildStatus(states);
         var pending = status.Count(s => s.State == MigrationStates.Pending);
@@ -84,7 +86,6 @@ public sealed class MigrationEngine
 
     public async Task<CommandResult> ValidateAsync(CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
         var states = await _store.GetStatesAsync(cancellationToken);
         var issues = Analyse(states, BuildStatus(states));
         var errors = issues.Count(i => i.Severity == "error");
@@ -426,7 +427,6 @@ public sealed class MigrationEngine
 
     public async Task<CommandResult> UnlockAsync(bool force, CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
         var current = await _store.GetLockAsync(cancellationToken);
         if (current is null)
         {
@@ -454,7 +454,6 @@ public sealed class MigrationEngine
 
     public async Task<CommandResult> HistoryAsync(string? id, int? limit, CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
         var history = await _store.GetHistoryAsync(id, limit ?? DefaultHistoryLimit, cancellationToken);
         return new CommandResult { ExitCode = ExitCodes.Success, History = history.ToList() };
     }
