@@ -6,9 +6,9 @@
     <!-- Libraries -->
     <PackageVersion Include="MongoDB.Driver" Version="$(MongoDriverVersion)" />
     <PackageVersion Include="MongoDB.Driver.Authentication.AWS" Version="$(MongoDriverVersion)" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
     <PackageVersion Include="System.CommandLine" Version="2.0.12" />
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
 

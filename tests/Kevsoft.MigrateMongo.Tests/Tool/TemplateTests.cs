@@ -13,7 +13,7 @@ public sealed class TemplateTests
 
     [Theory]
     [InlineData("net10.0", false)]
-    [InlineData("net8.0", false)]
+    [InlineData("net11.0", false)]
     [InlineData("net10.0", true)]
     public void Project_file_matches_init(string framework, bool aws)
     {

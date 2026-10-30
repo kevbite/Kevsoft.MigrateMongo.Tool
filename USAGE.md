@@ -31,13 +31,13 @@ dotnet tool run migrate-mongo version
 
 Or install it globally with `dotnet tool install -g Kevsoft.MigrateMongo.Tool`.
 
-With the .NET 10 SDK or later you get a Native AOT build for your platform (Windows, Linux glibc/musl and macOS on
-x64 and arm64), which starts instantly and doesn't need a .NET runtime. Older SDKs, and other platforms, get a
-framework-dependent build that runs on any .NET runtime from 8 upwards. `migrate-mongo version` shows which you have:
+It needs the .NET 10 SDK or later. You get a Native AOT build for your platform (Windows, Linux glibc/musl and macOS on
+x64 and arm64), which starts instantly and doesn't need a .NET runtime. Other platforms get a framework-dependent
+build that runs on any .NET runtime from 10 upwards. `migrate-mongo version` shows which you have:
 
 ```
 migrate-mongo/0.2.0 (linux-x64; aot)
-migrate-mongo/0.2.0 (win-x64; .NET 8.0.31)
+migrate-mongo/0.2.0 (win-x86; .NET 10.0.12)
 ```
 
 ### Without .NET
@@ -113,7 +113,7 @@ dotnet new migratemongo-migration -n AddEmailIndexToUsers -o src/MyApp.Migration
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--framework` | `net10.0` | `net10.0`, `net9.0` or `net8.0`. |
+| `--framework` | `net10.0` | The target framework (`net10.0`). |
 | `--database-name` | First part of the project name, lower-cased | The database written to `migrate-mongo.yaml`. |
 | `--skip-config` | `false` | Don't create `migrate-mongo.yaml`, e.g. to keep it at the repository root with `migrate-mongo init --project src/MyApp.Migrations`. |
 | `--auth` | `none` | `aws` references `Kevsoft.MigrateMongo.Aws`, like `init --auth aws`. |
@@ -631,8 +631,8 @@ migrate-mongo up --env prod --runner ./out/MyApp.Migrations
 `ghcr.io/kevbite/migrate-mongo` (`linux/amd64` and `linux/arm64`) is tagged with the version (`0.2.0`, `0.2`) and
 `latest`. Pin a version in real pipelines.
 
-- `ghcr.io/kevbite/migrate-mongo:<version>` is the tool on the .NET 10 SDK, with the .NET 8 and 9 runtimes, so it can
-  build and run your migrations project. A `global.json` that pins an older SDK won't work in it.
+- `ghcr.io/kevbite/migrate-mongo:<version>` is the tool on the .NET 10 SDK, so it can build and run your migrations
+  project. A `global.json` that pins an older SDK won't work in it.
 - `ghcr.io/kevbite/migrate-mongo:<version>-bundle` is the tool without .NET, for running [bundles](#bundles) with
   `--runner`.
 

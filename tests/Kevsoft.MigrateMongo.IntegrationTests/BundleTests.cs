@@ -18,7 +18,7 @@ public sealed class BundleTests(IntegrationEnvironment environment)
         var bundle = await workspace.RunAsync(["bundle", "-o", "out"], variables);
 
         bundle.ExitCode.ShouldBe(0, bundle.ToString());
-        bundle.Output.ShouldContain($"Bundle: Kevsoft.MigrateMongo {environment.PackageVersion} · MongoDB.Driver 3.12.0 · .NET 8.0.");
+        bundle.Output.ShouldContain($"Bundle: Kevsoft.MigrateMongo {environment.PackageVersion} · MongoDB.Driver 3.12.0 · .NET 10.0.");
         var executable = workspace.PathOf("out", OperatingSystem.IsWindows() ? "BasicMigrations.exe" : "BasicMigrations");
         File.Exists(executable).ShouldBeTrue();
         File.ReadAllText(workspace.PathOf("out", "migrate-mongo.yaml")).ShouldBe(File.ReadAllText(workspace.ConfigPath));
@@ -59,7 +59,7 @@ public sealed class BundleTests(IntegrationEnvironment environment)
             [
                 "run", "--rm", "--add-host", "host.docker.internal:host-gateway",
                 "-e", $"{UrlVariable}={url}", "-v", $"{workspace.PathOf("out")}:/bundle", "-w", "/",
-                "mcr.microsoft.com/dotnet/runtime-deps:8.0", "/bundle/BasicMigrations", "up",
+                "mcr.microsoft.com/dotnet/runtime-deps:10.0", "/bundle/BasicMigrations", "up",
             ],
             workspace.Directory, null, TimeSpan.FromMinutes(5));
 

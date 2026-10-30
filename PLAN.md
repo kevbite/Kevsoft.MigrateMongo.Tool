@@ -12,12 +12,11 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > adapter, Runner, the `migrate-mongo` tool (all commands in §5), unit tests, Atlas Local integration tests
 > (`tests/Kevsoft.MigrateMongo.IntegrationTests`, fixtures in `tests/fixtures`) and GitHub Actions
 > (`ci.yml`, `release.yml`, `nightly.yml`). Where the build differs from this plan:
-> * The tool is **one package that multi-targets `net8.0;net10.0`**. Each TFM has its own `DotnetToolSettings.xml`:
->   `net8.0` is a framework-dependent tool (`RollForward=LatestMajor`, runs on any runtime ≥ 8), which .NET 8/9 SDKs
->   pick because they reject RID-specific tool packages ("Format version is higher than supported") rather than
->   falling back; `net10.0` points at the RID-specific Native AOT packages (+ `any`), which .NET 10+ SDKs pick.
->   RID packs (`-r <rid>`) build `net10.0` only. `linux-musl-*` must be listed explicitly, otherwise the RID graph
->   would pick the glibc `linux-*` build on Alpine. Standalone AOT binaries are also on GitHub Releases.
+> * **.NET 10 or later only.** .NET 8 and 9 reach end of support on 10 Nov 2026, so the libraries, tool, templates,
+>   fixtures and Docker image target .NET 10. The tool package is a `net10.0` pointer to the RID-specific Native AOT
+>   packages (+ an `any` framework-dependent fallback with `RollForward=LatestMajor`), which .NET 10+ SDKs install.
+>   `linux-musl-*` must be listed explicitly, otherwise the RID graph would pick the glibc `linux-*` build on Alpine.
+>   Standalone AOT binaries are also on GitHub Releases.
 > * Spectre.Console isn't used; the tool has a small hand-written renderer, so AOT has no third-party risk.
 > * `IMigrationSource.GetMigrations()` is synchronous; `init` doesn't scaffold an initial migration.
 > * `create` only reads `project` from the config, so it works without connection variables set.
@@ -36,14 +35,14 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * `bundle` is done (scenario 15): `dotnet publish -c Release -r <rid> --self-contained -p:PublishSingleFile=true`
 >   into `-o` (default `bundle/`), copies the config next to the executable and handshakes with it when the RID is
 >   the current one. Not trimmed (the driver isn't trim-safe). Integration tests run a bundle directly, through
->   `--runner`, and a cross-built `linux-*` bundle in `runtime-deps:8.0` (no .NET).
+>   `--runner`, and a cross-built `linux-*` bundle in `runtime-deps:10.0` (no .NET).
 > * `Kevsoft.MigrateMongo.Tunnel` is done: the SSH code moved out of the tool behind `IMongoTunnelProvider`
 >   (Contracts). The standalone runner, bundles and hosting tunnel when `TunnelProvider = new SshTunnelProvider()`
 >   is set; without it they reject `tunnel:` configs with a hint. In protocol mode the tool still opens the tunnel.
 > * `install.sh` / `install.ps1` and Docker images are done. Release archives are versionless
 >   (`migrate-mongo-<rid>.tar.gz|zip`) so `releases/latest/download/...` always works; the scripts verify
 >   `SHA256SUMS`. Images are `ghcr.io/kevbite/migrate-mongo:{version, major.minor, latest}` (tool: AOT binary on
->   `sdk:10.0` + 8/9 runtimes) and `...-bundle` (`runtime-deps:10.0`), built from the prebuilt AOT binaries.
+>   `sdk:10.0`) and `...-bundle` (`runtime-deps:10.0`), built from the prebuilt AOT binaries.
 >   CI tests the scripts on every RID and both images in the integration tests.
 > * `Kevsoft.MigrateMongo.Aws` is done: `MongoDriverBackend.Create` checks the URL's `authMechanism`; for
 >   `MONGODB-AWS` it registers the driver's AWS mechanism through the package (found by name, so no code changes),
@@ -170,7 +169,6 @@ small, versioned JSON protocol, so no assembly is ever loaded across the boundar
 | Channel | Build | Needs .NET on the machine? |
 |---------|-------|----------------------------|
 | `dotnet tool install -g Kevsoft.MigrateMongo.Tool` (.NET 10+ SDK) | `net10.0` → RID-specific **Native AOT** packages (`win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64`) **+ `any`** fallback for other RIDs | Only the SDK to *install* it; not to run |
-| Same package (.NET 8/9 SDK) | `net8.0` framework-dependent, `<RollForward>LatestMajor</RollForward>` | Any .NET ≥ 8 runtime |
 | GitHub Releases | Standalone AOT binaries + checksums (+ install script) | No |
 | Docker image (`ghcr.io/kevbite/migrate-mongo`) | AOT tool + .NET SDK base (needs to build user projects) and a `runtime-deps` variant for bundles | No (for bundles) |
 | **Migration bundle** (`migrate-mongo bundle`) | `dotnet publish` of the user's migrations project: self-contained single-file runner | No. Runs on deploy agents directly or via the tool's `--runner` |
@@ -716,4 +714,4 @@ before release.
 2. **Driver floor**: 3.5 (needed for SOCKS tunnelling) vs 3.0 with tunnelling disabled on older drivers.
 3. **Migration id type**: timestamp string (proposed) vs `long`.
 4. **Checksum default**: `fail` on changed applied migrations (proposed) vs `warn`.
-5. **Minimum fallback TFM** for the `any` tool package: `net8.0` (proposed). Drop it when .NET 8 goes out of support.
+5. **Minimum fallback TFM** for the `any` tool package: resolved. `net10.0`, since .NET 8 and 9 went out of support.

@@ -32,4 +32,14 @@
     <!-- Lowest supported MongoDB.Driver; CI overrides this to test the compat matrix. -->
     <MongoDriverVersion Condition="'$(MongoDriverVersion)' == ''">3.5.0</MongoDriverVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      MongoDB.Driver 3.5.0-3.8.x depend on these (3.9.0 moved to fixed versions). The libraries compile against the
+      lowest supported driver and users pick their own, so only these advisories are suppressed: raising the floor is
+      a separate decision (https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/issues/12).
+    -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-6c8g-7p36-r338" /> <!-- SharpCompress 0.30.1 -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-pggp-6c3x-2xmx" /> <!-- Snappier 1.0.0 -->
+  </ItemGroup>
 </Project>

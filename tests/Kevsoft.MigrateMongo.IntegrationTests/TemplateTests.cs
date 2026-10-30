@@ -63,9 +63,9 @@ public sealed class TemplateTests(IntegrationEnvironment environment)
             Path.Combine(environment.PackageFeed, $"Kevsoft.MigrateMongo.Templates.{environment.PackageVersion}.nupkg"));
 
         await DotnetNewAsync(workspace, hive,
-            "migratemongo", "-n", "Billing.Migrations", "--framework", "net8.0", "--skip-config", "--no-restore");
+            "migratemongo", "-n", "Billing.Migrations", "--framework", "net10.0", "--skip-config", "--no-restore");
 
-        File.ReadAllText(workspace.PathOf("Billing.Migrations", "Billing.Migrations.csproj")).ShouldContain("<TargetFramework>net8.0</TargetFramework>");
+        File.ReadAllText(workspace.PathOf("Billing.Migrations", "Billing.Migrations.csproj")).ShouldContain("<TargetFramework>net10.0</TargetFramework>");
         File.Exists(workspace.PathOf("Billing.Migrations", "migrate-mongo.yaml")).ShouldBeFalse();
         Directory.Exists(workspace.PathOf("Billing.Migrations", "obj")).ShouldBeFalse();
 

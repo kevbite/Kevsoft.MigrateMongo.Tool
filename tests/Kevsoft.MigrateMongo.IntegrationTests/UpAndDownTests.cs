@@ -4,7 +4,7 @@ using Shouldly;
 
 namespace Kevsoft.MigrateMongo.IntegrationTests;
 
-/// <summary>Applying and rolling back the BasicMigrations fixture (net8.0, MongoDB.Driver 3.12.0).</summary>
+/// <summary>Applying and rolling back the BasicMigrations fixture.</summary>
 public sealed class UpAndDownTests(IntegrationEnvironment environment)
 {
     private const string Checksum = @"^sha256:[0-9a-f]{64}$";
@@ -157,7 +157,7 @@ public sealed class UpAndDownTests(IntegrationEnvironment environment)
     {
         await using var workspace = Workspace.FromFixture(environment, "BasicMigrations");
         (await workspace.RunAsync("plan")).ExitCode.ShouldBe(2);
-        var runner = workspace.PathOf("BasicMigrations", "bin", "Debug", "net8.0", "BasicMigrations.dll");
+        var runner = workspace.PathOf("BasicMigrations", "bin", "Debug", "net10.0", "BasicMigrations.dll");
 
         var up = await ProcessHelper.RunAsync("dotnet", [runner, "up"], workspace.Directory, environment.ProcessEnvironment, TimeSpan.FromMinutes(2));
 

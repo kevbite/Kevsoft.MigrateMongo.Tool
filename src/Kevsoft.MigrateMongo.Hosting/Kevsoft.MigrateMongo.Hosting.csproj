@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <Description>Run Kevsoft.MigrateMongo migrations from your own application: `services.AddMongoMigrations(...).FromAssemblyContaining&lt;T&gt;().RunOnStartup()`. Shares the same state collections and lock as the migrate-mongo tool.</Description>
   </PropertyGroup>

@@ -188,7 +188,7 @@ public sealed class TunnelTests(IntegrationEnvironment environment, TunnelEnviro
         var build = await workspace.RunAsync("status");
         build.ExitCode.ShouldBe(0, build.ToString());
 
-        var up = await ProcessHelper.RunAsync("dotnet", [workspace.PathOf("BasicMigrations", "bin", "Debug", "net8.0", "BasicMigrations.dll"), "up"],
+        var up = await ProcessHelper.RunAsync("dotnet", [workspace.PathOf("BasicMigrations", "bin", "Debug", "net10.0", "BasicMigrations.dll"), "up"],
             workspace.Directory, environment.ProcessEnvironment, TimeSpan.FromMinutes(2));
 
         up.ExitCode.ShouldBe(1, up.ToString());
