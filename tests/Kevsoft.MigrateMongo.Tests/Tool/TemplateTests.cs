@@ -13,7 +13,7 @@ public sealed class TemplateTests
 
     [Theory]
     [InlineData("net10.0", false)]
-    [InlineData("net8.0", false)]
+    [InlineData("net11.0", false)]
     [InlineData("net10.0", true)]
     public void Project_file_matches_init(string framework, bool aws)
     {
@@ -27,6 +27,10 @@ public sealed class TemplateTests
     [Fact]
     public void Program_matches_init() =>
         Read("project", "Program.cs").ShouldBe(Normalize(Scaffolding.ProgramFile));
+
+    [Fact]
+    public void EditorConfig_matches_init() =>
+        Read("project", ".editorconfig").ShouldBe(Normalize(Scaffolding.EditorConfigFile));
 
     [Theory]
     [InlineData(false)]

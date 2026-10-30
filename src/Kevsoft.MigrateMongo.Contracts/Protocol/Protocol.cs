@@ -118,6 +118,13 @@ public sealed class RunnerEvent
 
     public string? Error { get; set; }
 
+    /// <summary>For <c>migrationFailed</c>: the full exception (types, messages and stack traces) behind <see cref="Error"/>.</summary>
+    public string? Details { get; set; }
+
+    /// <summary>For <c>migrationFailed</c> in-process (e.g. Hosting's logging): the exception itself. Never serialised.</summary>
+    [JsonIgnore]
+    public Exception? Exception { get; set; }
+
     /// <summary>On <c>migrationCompleted</c> and <c>migrationFailed</c>: what the migration recorded.</summary>
     public MigrationOutputInfo? Output { get; set; }
 
@@ -344,6 +351,9 @@ public sealed class LockInfo
     public DateTime AcquiredAt { get; set; }
 
     public DateTime ExpiresAt { get; set; }
+
+    /// <summary>Whether the lock had expired when it was read, by the database server's clock.</summary>
+    public bool Expired { get; set; }
 }
 
 [JsonSourceGenerationOptions(

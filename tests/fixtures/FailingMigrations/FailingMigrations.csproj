@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Integration test fixture targeting a different runtime than BasicMigrations to prove the tool is runtime-agnostic. -->
+  <!-- Integration test fixture: the second migration fails. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Kevsoft.MigrateMongo.Runner" Version="$(MigrateMongoVersion)" />
-    <PackageReference Include="MongoDB.Driver" Version="3.12.0" />
+    <PackageReference Include="MongoDB.Driver" Version="$(MigrateMongoDriverVersion)" />
   </ItemGroup>
 
 </Project>

@@ -178,7 +178,8 @@ public sealed class HostingTests
         sink.OnEvent(new RunnerEvent { Type = EventTypes.MigrationCompleted, MigrationId = "20260101000001", Name = "create-users", Direction = "up", DurationMs = 12 });
         sink.OnEvent(new RunnerEvent { Type = EventTypes.MigrationStarted, MigrationId = "20260101000002", Name = "seed", Direction = "down" });
         sink.OnEvent(new RunnerEvent { Type = EventTypes.MigrationCompleted, MigrationId = "20260101000002", Name = "seed", Direction = "down", DurationMs = 5 });
-        sink.OnEvent(new RunnerEvent { Type = EventTypes.MigrationFailed, MigrationId = "20260101000003", Name = "broken", Direction = "up", Error = "E11000 duplicate key" });
+        var duplicateKey = new InvalidOperationException("E11000 duplicate key");
+        sink.OnEvent(new RunnerEvent { Type = EventTypes.MigrationFailed, MigrationId = "20260101000003", Name = "broken", Direction = "up", Error = "E11000 duplicate key", Exception = duplicateKey });
         sink.OnEvent(new RunnerEvent { Type = EventTypes.Result, Result = new CommandResult { ExitCode = 0, Message = "Applied 1 migration." } });
         sink.OnEvent(new RunnerEvent { Type = EventTypes.Result, Result = new CommandResult { ExitCode = 1, Message = "1 migration failed." } });
 
@@ -193,6 +194,45 @@ public sealed class HostingTests
             (LogLevel.Error, "Migration 20260101000003 broken failed: E11000 duplicate key"),
             (LogLevel.Information, "Applied 1 migration."),
             (LogLevel.Error, "Migrations failed (exit code 1): 1 migration failed."),
+        ]);
+        logger.Exceptions[7].ShouldBeSameAs(duplicateKey);
+    }
+
+    [Fact]
+    public void Results_are_logged_with_their_issues()
+    {
+        var logger = new RecordingLogger();
+        var sink = new LoggerEventSink(logger);
+        const string Modified = "20260101000001 first was modified after being applied.";
+
+        sink.OnEvent(new RunnerEvent
+        {
+            Type = EventTypes.Result,
+            Result = new CommandResult
+            {
+                ExitCode = ExitCodes.Success,
+                Message = "Applied 1 migration(s) in batch 2.",
+                Issues = [new ValidationIssue { Severity = "warning", Kind = "checksumMismatch", Message = Modified }],
+            },
+        });
+        sink.OnEvent(new RunnerEvent { Type = EventTypes.Result, Result = new CommandResult { ExitCode = ExitCodes.PendingMigrations, Message = "Would apply 1 migration(s) as batch 3." } });
+        // Errors that stopped the run are already in its message.
+        sink.OnEvent(new RunnerEvent
+        {
+            Type = EventTypes.Result,
+            Result = new CommandResult
+            {
+                ExitCode = ExitCodes.ValidationFailed,
+                Message = Modified,
+                Issues = [new ValidationIssue { Severity = "error", Kind = "checksumMismatch", Message = Modified }],
+            },
+        });
+
+        logger.Entries.ShouldBe([
+            (LogLevel.Warning, Modified),
+            (LogLevel.Information, "Applied 1 migration(s) in batch 2."),
+            (LogLevel.Information, "Would apply 1 migration(s) as batch 3."),
+            (LogLevel.Error, $"Migrations failed (exit code 4): {Modified}"),
         ]);
     }
 
@@ -246,11 +286,17 @@ public sealed class HostingTests
     {
         public List<(LogLevel Level, string Message)> Entries { get; } = [];
 
+        /// <summary>The exception logged with each entry in <see cref="Entries"/>.</summary>
+        public List<Exception?> Exceptions { get; } = [];
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
             Entries.Add((logLevel, formatter(state, exception)));
+            Exceptions.Add(exception);
+        }
     }
 }

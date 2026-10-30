@@ -47,8 +47,8 @@ public sealed class AwsAuthenticationTests(IntegrationEnvironment environment)
         await using var workspace = CreateWorkspace();
         var project = workspace.PathOf("BasicMigrations", "BasicMigrations.csproj");
         File.WriteAllText(project, File.ReadAllText(project).Replace(
-            """<PackageReference Include="MongoDB.Driver" Version="3.12.0" />""",
-            """<PackageReference Include="MongoDB.Driver" Version="3.12.0" /><PackageReference Include="Kevsoft.MigrateMongo.Aws" Version="$(MigrateMongoVersion)" />"""));
+            """<PackageReference Include="MongoDB.Driver" Version="$(MigrateMongoDriverVersion)" />""",
+            """<PackageReference Include="MongoDB.Driver" Version="$(MigrateMongoDriverVersion)" /><PackageReference Include="Kevsoft.MigrateMongo.Aws" Version="$(MigrateMongoVersion)" />"""));
 
         var status = await workspace.RunAsync(["status"], FakeCredentials);
 

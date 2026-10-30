@@ -12,7 +12,7 @@ updates:
       - dependency-name: MongoDB.Driver
       # Kept at the same version as the driver floor (it requires MongoDB.Driver >= its own version).
       - dependency-name: MongoDB.Driver.Authentication.AWS
-      # Shipped libraries target net8.0; a newer major would force it onto every user's project.
+      # Shipped libraries target net10.0; a newer major would force it onto every user's project.
       - dependency-name: Microsoft.Extensions.*
         update-types: ['version-update:semver-major']
       # Roslyn version = minimum compiler/SDK that can load the source generator.

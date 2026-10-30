@@ -236,6 +236,122 @@ public sealed class MigrationEngineTests
     }
 
     [Fact]
+    public async Task History_rejects_a_limit_below_one()
+    {
+        var result = await Engine([]).HistoryAsync(null, 0, CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        result.Message.ShouldBe("--limit must be at least 1.");
+    }
+
+    [Fact]
+    public async Task Cancelling_keeps_the_lock_until_a_running_migration_returns_and_records_what_it_did()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var renewals = 0;
+        var renewalsWhenCancelled = 0;
+        _store.RenewFailure = () =>
+        {
+            Interlocked.Increment(ref renewals);
+            return null;
+        };
+        var engine = Engine(
+            [
+                // Outside a transaction and ignoring its token: it keeps changing the database after the cancel.
+                Migrations.Create("20260101000001", "slow", transaction: TransactionMode.Never, up: async () =>
+                {
+                    await cancellation.CancelAsync();
+                    renewalsWhenCancelled = Volatile.Read(ref renewals);
+                    await Task.Delay(TimeSpan.FromMilliseconds(900));
+                }),
+                Migrations.Create("20260101000002", "next"),
+            ],
+            configure: o => o.LockTtl = TimeSpan.FromMilliseconds(300));
+
+        await Should.ThrowAsync<OperationCanceledException>(() => engine.UpAsync(null, cancellation.Token));
+
+        // The lock was renewed while the migration carried on, and released once the run stopped.
+        renewals.ShouldBeGreaterThan(renewalsWhenCancelled + 3);
+        _store.ReleaseCount.ShouldBe(1);
+        // It finished, so it's recorded as applied rather than failed; the next one never started.
+        _store.States.Values.Select(s => (s.Id, s.State)).ShouldBe([("20260101000001", "applied")]);
+        _store.History.Select(h => (h.MigrationId, h.Event)).ShouldBe([("20260101000001", "applied")]);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_transactional_migration_before_it_commits_rolls_it_back()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var engine = Engine([Migrations.Create("20260101000001", "tx", up: () => cancellation.CancelAsync())]);
+
+        await engine.UpAsync(null, cancellation.Token);
+
+        _store.States.ShouldBeEmpty();
+        _store.History.Select(h => (h.MigrationId, h.Event, h.Error)).ShouldBe([("20260101000001", "failed", "The operation was cancelled.")]);
+        _store.ReleaseCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_failed_migration_reports_its_exception_with_the_stack_trace()
+    {
+        var failing = Migrations.Create("20260101000001", "broken", up: () => throw new InvalidOperationException("boom"));
+
+        await Engine([failing]).UpAsync(null, CancellationToken.None);
+
+        var failed = _sink.Events.Single(e => e.Type == EventTypes.MigrationFailed);
+        failed.Error.ShouldBe("InvalidOperationException: boom");
+        failed.Exception.ShouldBeOfType<InvalidOperationException>();
+        failed.Details!.ShouldStartWith("System.InvalidOperationException: boom");
+        failed.Details.ShouldContain(" at ");
+        // The database keeps the short message.
+        _store.History.Single().Error.ShouldBe("InvalidOperationException: boom");
+    }
+
+    [Theory]
+    [InlineData("status")]
+    [InlineData("validate")]
+    [InlineData("history")]
+    [InlineData("unlock")]
+    public async Task Reading_commands_dont_create_indexes(string command)
+    {
+        var result = await Engine([Migrations.Create("20260101000001", "a")]).ExecuteAsync(command, new CommandArguments(), CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Success);
+        _store.InitializeCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Up_creates_the_indexes_before_writing()
+    {
+        await Engine([Migrations.Create("20260101000001", "a")]).UpAsync(null, CancellationToken.None);
+
+        _store.InitializeCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Lock_expiry_follows_the_store_clock_not_this_machines()
+    {
+        var storeNow = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc);
+        var store = new FakeStore(() => storeNow);
+        store.Lock = new LockInfo { RunId = "other", AcquiredAt = storeNow.AddMinutes(-1), ExpiresAt = storeNow.AddMinutes(4) };
+        MigrationDescriptor[] migrations = [Migrations.Create("20260101000001", "a")];
+        var options = new EngineOptions { LockWaitTimeout = TimeSpan.Zero };
+
+        // This machine's clock is an hour ahead, but the lock hasn't expired as far as the store is concerned.
+        var ahead = new MigrationEngine(store, new FakeExecutor(), migrations, options, _sink, new FixedTime(storeNow.AddHours(1)));
+        (await ahead.UpAsync(null, CancellationToken.None)).ExitCode.ShouldBe(ExitCodes.LockTimeout);
+        (await ahead.UnlockAsync(force: false, CancellationToken.None)).ExitCode.ShouldBe(ExitCodes.Failure);
+        store.Lock!.RunId.ShouldBe("other");
+
+        // Once it has expired by the store's clock, a machine whose clock is an hour behind takes it over.
+        storeNow = storeNow.AddMinutes(5);
+        var behind = new MigrationEngine(store, new FakeExecutor(), migrations, options, _sink, new FixedTime(storeNow.AddHours(-1)));
+        (await behind.UpAsync(null, CancellationToken.None)).ExitCode.ShouldBe(ExitCodes.Success);
+        store.States.Keys.ShouldBe(["20260101000001"]);
+        store.Lock.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Up_takes_over_an_expired_lock()
     {
         _store.Lock = new LockInfo { RunId = "dead", AcquiredAt = DateTime.UtcNow.AddHours(-1), ExpiresAt = DateTime.UtcNow.AddMinutes(-1) };

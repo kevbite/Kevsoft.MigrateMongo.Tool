@@ -189,8 +189,15 @@ public static class MigrateMongoCli
 
         var historyId = new Argument<string?>("id") { Description = "Only show this migration.", Arity = ArgumentArity.ZeroOrOne };
         var limit = new Option<int?>("--limit") { Description = "Maximum entries to show (default 50)." };
-        Add(new Command("history", "Show the audit log.") { historyId, limit },
-            p => Common(p, "history", new CommandArguments { Id = p.GetValue(historyId), Limit = p.GetValue(limit) }));
+        var history = new Command("history", "Show the audit log.") { historyId, limit };
+        history.Validators.Add(r =>
+        {
+            if (r.GetValue(limit) is < 1)
+            {
+                r.AddError("--limit must be at least 1.");
+            }
+        });
+        Add(history, p => Common(p, "history", new CommandArguments { Id = p.GetValue(historyId), Limit = p.GetValue(limit) }));
 
         var showId = new Argument<string>("id") { Description = "Migration id, or a unique prefix of one (e.g. its timestamp)." };
         var showHistory = new Option<int?>("--history") { Description = "Number of history entries to show (default 10, 0 for none)." };

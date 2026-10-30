@@ -4,7 +4,7 @@ using Shouldly;
 
 namespace Kevsoft.MigrateMongo.IntegrationTests;
 
-/// <summary>Applying and rolling back the BasicMigrations fixture (net8.0, MongoDB.Driver 3.12.0).</summary>
+/// <summary>Applying and rolling back the BasicMigrations fixture.</summary>
 public sealed class UpAndDownTests(IntegrationEnvironment environment)
 {
     private const string Checksum = @"^sha256:[0-9a-f]{64}$";
@@ -49,8 +49,8 @@ public sealed class UpAndDownTests(IntegrationEnvironment environment)
             appliedBy["host"].AsString.ShouldBe(Environment.MachineName);
             appliedBy["tool"].AsString.ShouldStartWith($"migrate-mongo/{environment.PackageVersion} (");
             appliedBy["library"].AsString.ShouldBe(environment.PackageVersion);
-            appliedBy["driver"].AsString.ShouldBe("3.12.0");
-            appliedBy["runtime"].AsString.ShouldStartWith("8.0.");
+            appliedBy["driver"].AsString.ShouldBe(environment.DriverVersion);
+            appliedBy["runtime"].AsString.ShouldStartWith("10.0.");
         }
 
         var history = workspace.Find("_migrations.history", sortBy: "at");
@@ -133,6 +133,10 @@ public sealed class UpAndDownTests(IntegrationEnvironment environment)
         workspace.Find("_migrations").ShouldBeEmpty();
 
         (await workspace.RunAsync("status", "--check", "--no-build")).ExitCode.ShouldBe(2);
+        (await workspace.RunAsync("validate", "--no-build")).ExitCode.ShouldBe(0);
+        (await workspace.RunAsync("history", "--no-build")).ExitCode.ShouldBe(0);
+        // Reading commands don't create collections or indexes, so they work with a read-only user.
+        workspace.CollectionNames().ShouldBeEmpty();
         (await workspace.RunAsync("up", "--to", "20260101000002", "--no-build")).ExitCode.ShouldBe(0);
 
         var status = await workspace.RunJsonAsync("status", "--no-build");
@@ -157,7 +161,7 @@ public sealed class UpAndDownTests(IntegrationEnvironment environment)
     {
         await using var workspace = Workspace.FromFixture(environment, "BasicMigrations");
         (await workspace.RunAsync("plan")).ExitCode.ShouldBe(2);
-        var runner = workspace.PathOf("BasicMigrations", "bin", "Debug", "net8.0", "BasicMigrations.dll");
+        var runner = workspace.PathOf("BasicMigrations", "bin", "Debug", "net10.0", "BasicMigrations.dll");
 
         var up = await ProcessHelper.RunAsync("dotnet", [runner, "up"], workspace.Directory, environment.ProcessEnvironment, TimeSpan.FromMinutes(2));
 

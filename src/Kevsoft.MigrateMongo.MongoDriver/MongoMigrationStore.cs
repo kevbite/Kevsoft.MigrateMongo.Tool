@@ -13,6 +13,7 @@ namespace Kevsoft.MigrateMongo.MongoDriver;
 public sealed class MongoMigrationStore : IMigrationStore
 {
     private const string LockId = "lock";
+    private const int DuplicateKeyCode = 11000;
 
     private readonly IMongoCollection<BsonDocument> _states;
     private readonly IMongoCollection<BsonDocument> _history;
@@ -21,6 +22,13 @@ public sealed class MongoMigrationStore : IMigrationStore
 
     public MongoMigrationStore(IMongoDatabase database, string stateCollection)
     {
+        // Always the primary with majority read and write concerns, whatever the connection string (or an application's
+        // IMongoClient) says: a secondary can be missing the latest state or lock, and a write that only one node has
+        // can be rolled back by a failover. Writes inside a transaction use the transaction's concerns instead.
+        database = database
+            .WithReadPreference(ReadPreference.Primary)
+            .WithReadConcern(ReadConcern.Majority)
+            .WithWriteConcern(WriteConcern.WMajority);
         _states = database.GetCollection<BsonDocument>(stateCollection);
         _history = database.GetCollection<BsonDocument>(stateCollection + ".history");
         _lock = database.GetCollection<BsonDocument>(stateCollection + ".lock");
@@ -127,43 +135,47 @@ public sealed class MongoMigrationStore : IMigrationStore
         return await cursor.ToListAsync(cancellationToken);
     }
 
-    public async Task<bool> TryAcquireLockAsync(LockInfo lockInfo, DateTime now, CancellationToken cancellationToken)
+    // The lock's times all come from the server's clock ($$NOW), so runs on machines whose clocks disagree still agree on
+    // whether it has expired.
+
+    public async Task<LockInfo?> TryAcquireLockAsync(string runId, string? host, TimeSpan ttl, CancellationToken cancellationToken)
     {
-        var document = new BsonDocument
-        {
-            { "_id", LockId },
-            { "runId", lockInfo.RunId },
-            { "host", (BsonValue?)lockInfo.Host ?? BsonNull.Value },
-            { "acquiredAt", lockInfo.AcquiredAt },
-            { "expiresAt", lockInfo.ExpiresAt },
-            { "heartbeatAt", lockInfo.AcquiredAt },
-        };
+        // One atomic upsert: take the lock if there isn't one or it has expired (a missing expiresAt sorts before any
+        // date), otherwise leave it as it is. The document it returns says who holds the lock.
+        static BsonDocument IfTaken(BsonValue taken, string field) => new("$cond", new BsonArray { "$_take", taken, "$" + field });
+        var update = Pipeline(
+            new BsonDocument("$set", new BsonDocument("_take", Expired)),
+            new BsonDocument("$set", new BsonDocument
+            {
+                { "runId", IfTaken(new BsonDocument("$literal", runId), "runId") },
+                { "host", IfTaken(new BsonDocument("$literal", (BsonValue?)host ?? BsonNull.Value), "host") },
+                { "acquiredAt", IfTaken("$$NOW", "acquiredAt") },
+                { "expiresAt", IfTaken(ExpiresIn(ttl), "expiresAt") },
+                { "heartbeatAt", IfTaken("$$NOW", "heartbeatAt") },
+            }),
+            new BsonDocument("$unset", "_take"));
 
         try
         {
-            await _lock.InsertOneAsync(document, options: null, cancellationToken);
-            return true;
+            var document = await _lock.FindOneAndUpdateAsync(
+                new BsonDocument("_id", LockId),
+                update,
+                new FindOneAndUpdateOptions<BsonDocument> { IsUpsert = true, ReturnDocument = ReturnDocument.After },
+                cancellationToken);
+            return GetString(document, "runId") == runId ? ToLock(document) : null;
         }
-        catch (MongoWriteException e) when (e.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+        catch (MongoCommandException e) when (e.Code == DuplicateKeyCode)
         {
+            // Another run created the lock at the same moment and the server didn't retry the upsert; that run has it.
+            return null;
         }
-
-        // Take over a lock whose holder stopped renewing it.
-        var expired = new BsonDocument { { "_id", LockId }, { "expiresAt", new BsonDocument("$lt", now) } };
-        var takeover = new BsonDocument("$set", new BsonDocument(document.Where(e => e.Name != "_id")));
-        var result = await _lock.FindOneAndUpdateAsync<BsonDocument>(
-            expired,
-            takeover,
-            new FindOneAndUpdateOptions<BsonDocument> { ReturnDocument = ReturnDocument.After },
-            cancellationToken);
-        return result is not null;
     }
 
-    public async Task<bool> RenewLockAsync(string runId, DateTime expiresAt, CancellationToken cancellationToken)
+    public async Task<bool> RenewLockAsync(string runId, TimeSpan ttl, CancellationToken cancellationToken)
     {
         var result = await _lock.UpdateOneAsync(
             new BsonDocument { { "_id", LockId }, { "runId", runId } },
-            new BsonDocument("$set", new BsonDocument { { "expiresAt", expiresAt }, { "heartbeatAt", DateTime.UtcNow } }),
+            Pipeline(new BsonDocument("$set", new BsonDocument { { "expiresAt", ExpiresIn(ttl) }, { "heartbeatAt", "$$NOW" } })),
             options: null,
             cancellationToken);
         return result.MatchedCount == 1;
@@ -174,29 +186,42 @@ public sealed class MongoMigrationStore : IMigrationStore
 
     public async Task<LockInfo?> GetLockAsync(CancellationToken cancellationToken)
     {
-        var document = await _lock.Find(new BsonDocument("_id", LockId)).FirstOrDefaultAsync(cancellationToken);
-        return document is null
-            ? null
-            : new LockInfo
-            {
-                RunId = GetString(document, "runId") ?? "",
-                Host = GetString(document, "host"),
-                AcquiredAt = document["acquiredAt"].ToUniversalTime(),
-                ExpiresAt = document["expiresAt"].ToUniversalTime(),
-            };
+        var pipeline = PipelineDefinition<BsonDocument, BsonDocument>.Create(
+            new BsonDocument("$match", new BsonDocument("_id", LockId)),
+            new BsonDocument("$set", new BsonDocument("expired", Expired)));
+        using var cursor = await _lock.AggregateAsync(pipeline, options: null, cancellationToken);
+        var document = await cursor.FirstOrDefaultAsync(cancellationToken);
+        return document is null ? null : ToLock(document);
     }
 
-    public async Task<bool> DeleteLockAsync(DateTime? expiredBefore, CancellationToken cancellationToken)
+    public async Task<bool> DeleteLockAsync(bool onlyIfExpired, CancellationToken cancellationToken)
     {
         var filter = new BsonDocument("_id", LockId);
-        if (expiredBefore is not null)
+        if (onlyIfExpired)
         {
-            filter.Add("expiresAt", new BsonDocument("$lt", expiredBefore.Value));
+            filter.Add("$expr", Expired);
         }
 
         var result = await _lock.DeleteOneAsync(filter, cancellationToken);
         return result.DeletedCount == 1;
     }
+
+    /// <summary>Whether the lock document's <c>expiresAt</c> is before the server's current time.</summary>
+    private static BsonDocument Expired => new("$lt", new BsonArray { "$expiresAt", "$$NOW" });
+
+    private static BsonDocument ExpiresIn(TimeSpan ttl) => new("$add", new BsonArray { "$$NOW", (long)ttl.TotalMilliseconds });
+
+    private static PipelineUpdateDefinition<BsonDocument> Pipeline(params BsonDocument[] stages) =>
+        new(PipelineDefinition<BsonDocument, BsonDocument>.Create(stages));
+
+    private static LockInfo ToLock(BsonDocument document) => new()
+    {
+        RunId = GetString(document, "runId") ?? "",
+        Host = GetString(document, "host"),
+        AcquiredAt = document["acquiredAt"].ToUniversalTime(),
+        ExpiresAt = document["expiresAt"].ToUniversalTime(),
+        Expired = document.TryGetValue("expired", out var expired) && expired.IsBoolean && expired.AsBoolean,
+    };
 
     private static IClientSessionHandle? SessionOf(IExecutionScope? scope) =>
         scope is MongoExecutionScope { Transactional: true } mongoScope ? mongoScope.Session : null;

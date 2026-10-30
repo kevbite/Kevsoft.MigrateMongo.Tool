@@ -18,11 +18,18 @@ public sealed class GettingStartedTests(IntegrationEnvironment environment)
         var projectFile = File.ReadAllText(workspace.PathOf("src", "Shop.Migrations", "Shop.Migrations.csproj"));
         projectFile.ShouldContain($"""<PackageReference Include="Kevsoft.MigrateMongo.Runner" Version="{environment.PackageVersion}" />""");
         File.ReadAllText(workspace.PathOf("src", "Shop.Migrations", "Program.cs")).ShouldContain("MigrateMongoRunner.RunAsync(args)");
+        File.ReadAllText(workspace.PathOf("src", "Shop.Migrations", ".editorconfig")).ShouldContain("dotnet_diagnostic.CA2016.severity = warning");
 
         var config = File.ReadAllText(workspace.ConfigPath);
         config.ShouldContain("project: src/Shop.Migrations");
         config.ShouldContain("url: ${MONGODB_URL}");
         File.WriteAllText(workspace.ConfigPath, config.Replace("databaseName: shop", $"databaseName: {workspace.DatabaseName}"));
+        var environmentVariables = new Dictionary<string, string?> { ["MONGODB_URL"] = environment.MongoUrl };
+
+        // With no migrations yet the run says so, rather than looking the same as a build that skipped the generator.
+        var empty = await workspace.RunAsync(["status"], environmentVariables);
+        empty.ExitCode.ShouldBe(0, empty.ToString());
+        empty.Output.ShouldContain("No migrations were found.");
 
         var create = await workspace.RunAsync("create", "AddProducts");
         create.ExitCode.ShouldBe(0, create.ToString());
@@ -41,13 +48,42 @@ public sealed class GettingStartedTests(IntegrationEnvironment environment)
         firstThrow.ShouldBeGreaterThan(0);
         File.WriteAllText(migrationFile, source[..firstThrow] + upBody + source[(firstThrow + notImplemented.Length)..]);
 
-        var environmentVariables = new Dictionary<string, string?> { ["MONGODB_URL"] = environment.MongoUrl };
         var up = await workspace.RunAsync(["up"], environmentVariables);
 
         up.ExitCode.ShouldBe(0, up.ToString());
         workspace.Find("products").ShouldBe([new BsonDocument("_id", "widget")]);
         workspace.Find("_migrations").Select(s => (s["_id"].AsString, s["name"].AsString, s["origin"].AsString))
             .ShouldBe([(id, "add-products", "Shop.Migrations.Migrations.AddProducts")]);
+    }
+
+    [Fact]
+    public async Task The_project_warns_when_a_migration_doesnt_pass_on_its_cancellation_token()
+    {
+        await using var workspace = Workspace.Empty(environment);
+        var init = await workspace.RunAsync("init", "--project", "src/Shop.Migrations");
+        init.ExitCode.ShouldBe(0, init.ToString());
+        File.WriteAllText(workspace.PathOf("src", "Shop.Migrations", "Migrations", "M20260101000001_AddProducts.cs"), """
+            using Kevsoft.MigrateMongo;
+            using MongoDB.Bson;
+
+            namespace Shop.Migrations.Migrations;
+
+            [Migration("20260101000001", "add-products")]
+            public sealed class AddProducts : IMigration
+            {
+                public Task UpAsync(MigrationContext context, CancellationToken cancellationToken) =>
+                    context.Database.GetCollection<BsonDocument>("products").InsertOneAsync(new BsonDocument("_id", "widget"));
+
+                public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+            }
+            """);
+
+        // migrate-mongo only shows build output when the build fails, so build it as an editor or CI would.
+        var build = await ProcessHelper.RunAsync("dotnet", ["build", workspace.PathOf("src", "Shop.Migrations"), "-nologo"],
+            workspace.Directory, environment.ProcessEnvironment, TimeSpan.FromMinutes(5));
+
+        build.ExitCode.ShouldBe(0, build.ToString());
+        build.Output.ShouldContain("warning CA2016");
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MongoDB.Bson;
 using Shouldly;
 
@@ -21,6 +22,7 @@ public sealed class HostingTests(IntegrationEnvironment environment)
         run.ExitCode.ShouldBe(0, run.ToString());
         run.Output.ShouldContain("Applying migration 20260101000001 create-users");
         run.Output.ShouldContain("Applied migration 20260101000003 seed-defaults");
+        run.Output.ShouldContain("Applied 3 migration(s) in batch 1.");
         run.Output.ShouldContain("App started; applied migrations: 3");
 
         var states = workspace.Find("_migrations");
@@ -34,8 +36,8 @@ public sealed class HostingTests(IntegrationEnvironment environment)
             var appliedBy = state["appliedBy"].AsBsonDocument;
             appliedBy["tool"].AsString.ShouldBe("app/HostingApp");
             appliedBy["library"].AsString.ShouldBe(environment.PackageVersion);
-            appliedBy["driver"].AsString.ShouldBe("3.12.0");
-            appliedBy["runtime"].AsString.ShouldStartWith("8.0.");
+            appliedBy["driver"].AsString.ShouldBe(environment.DriverVersion);
+            appliedBy["runtime"].AsString.ShouldStartWith("10.0.");
         }
 
         // SeedDefaults took SeedOptions from the app's service collection.
@@ -54,6 +56,7 @@ public sealed class HostingTests(IntegrationEnvironment environment)
         var restart = await RunAppAsync(workspace);
         restart.ExitCode.ShouldBe(0, restart.ToString());
         restart.Output.ShouldNotContain("Applying migration");
+        restart.Output.ShouldContain("Nothing to apply; database is up to date.");
         restart.Output.ShouldContain("App started; applied migrations: 3");
         workspace.Find("_migrations.history", sortBy: "at").Select(h => (h["migrationId"].AsString, h["event"].AsString))
             .ShouldBe(MigrationIds.Select(id => (id, "applied")));
@@ -122,6 +125,31 @@ public sealed class HostingTests(IntegrationEnvironment environment)
         run.Output.ShouldContain("Dry run: would apply 3 migration(s) as batch 1; nothing was changed.");
         run.Output.ShouldNotContain("Applying migration");
         workspace.CollectionNames().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task The_package_doesnt_bring_in_the_command_line_or_yaml_packages()
+    {
+        await using var workspace = Workspace.Empty(environment);
+        File.WriteAllText(workspace.PathOf("App.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="Kevsoft.MigrateMongo.Hosting" Version="$(MigrateMongoVersion)" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        await Dotnet.RunAsync(workspace.Directory, environment.ProcessEnvironment, "restore", "App.csproj");
+
+        using var assets = JsonDocument.Parse(File.ReadAllText(workspace.PathOf("obj", "project.assets.json")));
+        var packages = assets.RootElement.GetProperty("libraries").EnumerateObject().Select(l => l.Name.Split('/')[0]).ToList();
+        packages.ShouldContain("Kevsoft.MigrateMongo.Contracts");
+        packages.ShouldNotContain("Kevsoft.MigrateMongo.Cli");
+        packages.ShouldNotContain("System.CommandLine");
+        packages.ShouldNotContain("YamlDotNet");
     }
 
     /// <summary>A workspace with BasicMigrations (and its migrate-mongo.yaml) plus HostingApp, built once into <c>app/</c>.</summary>

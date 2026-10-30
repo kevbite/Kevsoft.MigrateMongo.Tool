@@ -23,6 +23,7 @@ public sealed class TemplateTests(IntegrationEnvironment environment)
         projectFile.ShouldContain("<TargetFramework>net10.0</TargetFramework>");
         projectFile.ShouldContain($"""<PackageReference Include="Kevsoft.MigrateMongo.Runner" Version="{environment.PackageVersion}" />""");
         File.Exists(workspace.PathOf("src", "Shop.Migrations", "obj", "project.assets.json")).ShouldBeTrue("the template restores the project");
+        File.ReadAllText(workspace.PathOf("src", "Shop.Migrations", ".editorconfig")).ShouldContain("dotnet_diagnostic.CA2016.severity = warning");
         var config = File.ReadAllText(workspace.PathOf("src", "Shop.Migrations", "migrate-mongo.yaml"));
         config.ShouldContain("project: .");
         config.ShouldContain($"databaseName: {workspace.DatabaseName}");
@@ -71,9 +72,9 @@ public sealed class TemplateTests(IntegrationEnvironment environment)
             Path.Combine(environment.PackageFeed, $"Kevsoft.MigrateMongo.Templates.{environment.PackageVersion}.nupkg"));
 
         await DotnetNewAsync(workspace, hive,
-            "migratemongo", "-n", "Billing.Migrations", "--framework", "net8.0", "--skip-config", "--no-restore");
+            "migratemongo", "-n", "Billing.Migrations", "--framework", "net10.0", "--skip-config", "--no-restore");
 
-        File.ReadAllText(workspace.PathOf("Billing.Migrations", "Billing.Migrations.csproj")).ShouldContain("<TargetFramework>net8.0</TargetFramework>");
+        File.ReadAllText(workspace.PathOf("Billing.Migrations", "Billing.Migrations.csproj")).ShouldContain("<TargetFramework>net10.0</TargetFramework>");
         File.Exists(workspace.PathOf("Billing.Migrations", "migrate-mongo.yaml")).ShouldBeFalse();
         Directory.Exists(workspace.PathOf("Billing.Migrations", "obj")).ShouldBeFalse();
 

@@ -28,7 +28,9 @@ public sealed class MongoMigrationExecutor(
         }
 
         var session = await client.StartSessionAsync(cancellationToken: cancellationToken);
-        session.StartTransaction();
+        // The migration's changes and its state document commit together, so commit them to a majority, and read from
+        // the primary (transactions require it) even if the connection string prefers secondaries.
+        session.StartTransaction(new TransactionOptions(readPreference: ReadPreference.Primary, writeConcern: WriteConcern.WMajority));
         return new MongoExecutionScope(session);
     }
 

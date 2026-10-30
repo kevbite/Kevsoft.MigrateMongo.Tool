@@ -19,16 +19,21 @@ namespace Kevsoft.MigrateMongo.IntegrationTests;
 /// <item><c>MIGRATE_MONGO_TEST_MONGODB_URL</c> – use this MongoDB instead of starting a container (needs a replica set for transactions).</item>
 /// <item><c>MIGRATE_MONGO_TEST_IMAGE</c> – container image to start instead of <c>mongodb/mongodb-atlas-local:8.0</c>.</item>
 /// <item><c>MIGRATE_MONGO_PACKAGE_VERSION</c> + <c>MIGRATE_MONGO_PACKAGE_FEED</c> – use already packed packages instead of packing.</item>
+/// <item><c>MIGRATE_MONGO_TEST_DRIVER_VERSION</c> – the MongoDB.Driver the fixtures run with (default 3.12.0), e.g. the lowest supported one.</item>
 /// </list>
 /// </remarks>
 public sealed class IntegrationEnvironment : IAsyncLifetime
 {
     private const string AtlasLocalImage = "mongodb/mongodb-atlas-local:8.0";
 
+    /// <summary>The first MongoDB.Driver with SOCKS5 proxies, which <c>tunnel</c>'s default <c>socks</c> mode needs.</summary>
+    private static readonly Version SocksDriver = new(3, 12, 0);
+
     private static readonly string[] PackableProjects =
     [
         "Kevsoft.MigrateMongo.Abstractions",
         "Kevsoft.MigrateMongo.Contracts",
+        "Kevsoft.MigrateMongo.Cli",
         "Kevsoft.MigrateMongo",
         "Kevsoft.MigrateMongo.MongoDriver",
         "Kevsoft.MigrateMongo.Runner",
@@ -52,6 +57,14 @@ public sealed class IntegrationEnvironment : IAsyncLifetime
     public string PackageFeed { get; private set; } = "";
 
     public string ToolPath { get; private set; } = "";
+
+    /// <summary>The MongoDB.Driver version the fixtures reference (<c>$(MigrateMongoDriverVersion)</c>).</summary>
+    public string DriverVersion { get; } =
+        Environment.GetEnvironmentVariable("MIGRATE_MONGO_TEST_DRIVER_VERSION") is { Length: > 0 } version ? version : "3.12.0";
+
+    /// <summary>Skips the test when the fixtures' driver is too old for a SOCKS tunnel (see <see cref="DriverVersion"/>).</summary>
+    public void SkipUnlessDriverSupportsSocks() =>
+        Assert.SkipWhen(Version.Parse(DriverVersion.Split('-')[0]) < SocksDriver, $"SOCKS tunnels need MongoDB.Driver {SocksDriver} or later; the fixtures use {DriverVersion}.");
 
     /// <summary>Isolated NuGet package cache so test package versions never leak into the user's global cache.</summary>
     public string NuGetPackages => Path.Combine(ArtifactsDirectory, "nuget-packages");

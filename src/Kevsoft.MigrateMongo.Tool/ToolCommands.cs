@@ -96,6 +96,13 @@ internal sealed class ToolCommands(string workingDirectory)
                 await File.WriteAllTextAsync(programFile, Scaffolding.ProgramFile, cancellationToken);
                 created.Add(programFile);
             }
+
+            var editorConfigFile = Path.Combine(projectDirectory, ".editorconfig");
+            if (!File.Exists(editorConfigFile))
+            {
+                await File.WriteAllTextAsync(editorConfigFile, Scaffolding.EditorConfigFile, cancellationToken);
+                created.Add(editorConfigFile);
+            }
         }
         else
         {
@@ -482,7 +489,7 @@ internal sealed class ToolCommands(string workingDirectory)
         {
             var result = await ProcessRunner.RunAsync(ProcessRunner.DotnetHost, ["--version"], workingDirectory, cancellationToken);
             var major = result.StandardOutput.Trim().Split('.')[0];
-            if (result.ExitCode == 0 && int.TryParse(major, NumberStyles.Integer, CultureInfo.InvariantCulture, out var version) && version >= 8)
+            if (result.ExitCode == 0 && int.TryParse(major, NumberStyles.Integer, CultureInfo.InvariantCulture, out var version) && version >= 10)
             {
                 return $"net{version}.0";
             }
@@ -491,7 +498,7 @@ internal sealed class ToolCommands(string workingDirectory)
         {
         }
 
-        return "net8.0";
+        return "net10.0";
     }
 
     private (string Path, ResolvedConfig Config) LoadConfig(CliInvocation invocation, bool projectOnly = false)

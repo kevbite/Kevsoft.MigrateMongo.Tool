@@ -3,7 +3,7 @@ using Shouldly;
 
 namespace Kevsoft.MigrateMongo.IntegrationTests;
 
-/// <summary>The FailingMigrations fixture targets net10.0, a different runtime than the tool and BasicMigrations.</summary>
+/// <summary>The FailingMigrations fixture: its second migration writes in its transaction and then throws.</summary>
 public sealed class FailureTests(IntegrationEnvironment environment)
 {
     [Fact]
@@ -15,6 +15,8 @@ public sealed class FailureTests(IntegrationEnvironment environment)
 
         up.ExitCode.ShouldBe(1, up.ToString());
         up.Output.ShouldContain("Boom after writing.");
+        // The output has the exception's stack trace, so you can see where the migration failed.
+        up.Output.ShouldContain("ExplodesAfterWrite.UpAsync");
 
         workspace.Find("_migrations").Select(s => (s["_id"].AsString, s["state"].AsString, s["appliedBy"]["runtime"].AsString[..3]))
             .ShouldBe([("20260201000001", "applied", "10.")]);

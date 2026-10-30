@@ -8,7 +8,7 @@ public sealed class DryRunTests
 {
     private static readonly DateTime Now = new(2026, 10, 13, 9, 0, 0, DateTimeKind.Utc);
 
-    private readonly FakeStore _store = new();
+    private readonly FakeStore _store = new(() => Now);
     private readonly RecordingSink _sink = new();
     private readonly FakeExecutor _executor = new();
 
@@ -271,10 +271,5 @@ public sealed class DryRunTests
         result.Message.ShouldBe($"--dry-run is only supported by 'up' and 'down', not '{command}'.");
         _store.States.ShouldBeEmpty();
         ShouldHaveChangedNothing();
-    }
-
-    private sealed class FixedTime(DateTime now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => new(now);
     }
 }

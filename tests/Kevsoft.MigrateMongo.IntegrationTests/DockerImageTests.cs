@@ -14,7 +14,7 @@ public sealed class DockerImageTests(IntegrationEnvironment environment)
     private static readonly string[] AppliedIds = ["20260101000001", "20260101000002", "20260101000003"];
 
     [Fact]
-    public async Task Tool_image_builds_and_runs_a_net8_migrations_project()
+    public async Task Tool_image_builds_and_runs_a_migrations_project()
     {
         var image = ImageOrSkip("MIGRATE_MONGO_TEST_TOOL_IMAGE");
         await using var workspace = CreateWorkspace();

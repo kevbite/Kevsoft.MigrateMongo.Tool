@@ -5,7 +5,7 @@ Database migrations for [MongoDB](https://www.mongodb.com/) in .NET. Write migra
 line, your build server or your application.
 
 - **Your SDK, your runtime, your driver.** Migrations live in a small console project you own. The `migrate-mongo`
-  tool builds and runs it with whatever .NET (8 or later) and `MongoDB.Driver` (3.5 or later) you use, so upgrading
+  tool builds and runs it with whatever .NET (10 or later) and `MongoDB.Driver` (3.5 or later) you use, so upgrading
   either side doesn't break the other.
 - **Safe to run anywhere.** A distributed lock stops concurrent runs, migrations run in transactions where possible,
   and checksums catch migrations edited after they were applied.
@@ -20,7 +20,7 @@ line, your build server or your application.
 
 ## Getting started
 
-You need a [.NET SDK](https://dotnet.microsoft.com/download) (8 or later) and MongoDB 4.2 or later. Transactions need a
+You need a [.NET SDK](https://dotnet.microsoft.com/download) (10 or later) and MongoDB 4.2 or later. Transactions need a
 replica set or sharded cluster. Locally, [MongoDB Atlas Local](https://hub.docker.com/r/mongodb/mongodb-atlas-local)
 works well:
 
@@ -35,7 +35,7 @@ dotnet new tool-manifest
 dotnet tool install Kevsoft.MigrateMongo.Tool
 ```
 
-With the .NET 10 SDK or later you get a Native AOT build that doesn't need a .NET runtime. To install without .NET,
+On Windows, Linux and macOS (x64 and arm64) you get a Native AOT build that doesn't need a .NET runtime. To install without .NET,
 use the install script or the Docker image:
 
 ```bash
@@ -147,7 +147,7 @@ working migrations projects, including one that runs migrations from an app with
 1. Hack!
 1. Pull Request
 
-You'll need the .NET 8 and 10 SDKs ([global.json](global.json) pins the one used to build) and
+You'll need the .NET 10 SDK ([global.json](global.json) pins the one used to build) and
 [Docker](https://www.docker.com/). The integration tests pack the repo into a local NuGet feed, install the tool from
 it, and start MongoDB Atlas Local with [Testcontainers](https://dotnet.testcontainers.org/):
 

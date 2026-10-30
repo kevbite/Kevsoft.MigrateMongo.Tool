@@ -31,13 +31,13 @@ dotnet tool run migrate-mongo version
 
 Or install it globally with `dotnet tool install -g Kevsoft.MigrateMongo.Tool`.
 
-With the .NET 10 SDK or later you get a Native AOT build for your platform (Windows, Linux glibc/musl and macOS on
-x64 and arm64), which starts instantly and doesn't need a .NET runtime. Older SDKs, and other platforms, get a
-framework-dependent build that runs on any .NET runtime from 8 upwards. `migrate-mongo version` shows which you have:
+It needs the .NET 10 SDK or later. You get a Native AOT build for your platform (Windows, Linux glibc/musl and macOS on
+x64 and arm64), which starts instantly and doesn't need a .NET runtime. Other platforms get a framework-dependent
+build that runs on any .NET runtime from 10 upwards. `migrate-mongo version` shows which you have:
 
 ```
 migrate-mongo/0.2.0 (linux-x64; aot)
-migrate-mongo/0.2.0 (win-x64; .NET 8.0.31)
+migrate-mongo/0.2.0 (win-x86; .NET 10.0.12)
 ```
 
 ### Without .NET
@@ -75,6 +75,7 @@ $ migrate-mongo init --project src/MyApp.Migrations
 Created migrate-mongo.yaml
 Created src/MyApp.Migrations/MyApp.Migrations.csproj
 Created src/MyApp.Migrations/Program.cs
+Created src/MyApp.Migrations/.editorconfig
 Next: set MONGODB_URL, then run `migrate-mongo create <Name>` and `migrate-mongo status`.
 ```
 
@@ -92,6 +93,10 @@ using Kevsoft.MigrateMongo;
 
 return await MigrateMongoRunner.RunAsync(args);
 ```
+
+`.editorconfig` makes [CA2016](https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca2016) a
+warning, so your editor and `dotnet build` point out calls that take a `CancellationToken` but aren't given the
+migration's. `migrate-mongo` only shows build output when a build fails.
 
 To use an existing project, add `Kevsoft.MigrateMongo.Runner` and `MongoDB.Driver` to it, call
 `MigrateMongoRunner.RunAsync(args)` from `Program.cs`, and point `project:` in `migrate-mongo.yaml` at it.
@@ -114,7 +119,7 @@ dotnet new migratemongo-migration -n AddEmailIndexToUsers -o src/MyApp.Migration
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--framework` | `net10.0` | `net10.0`, `net9.0` or `net8.0`. |
+| `--framework` | `net10.0` | The target framework (`net10.0`). |
 | `--database-name` | First part of the project name, lower-cased | The database written to `migrate-mongo.yaml`. |
 | `--skip-config` | `false` | Don't create `migrate-mongo.yaml`, e.g. to keep it at the repository root with `migrate-mongo init --project src/MyApp.Migrations`. |
 | `--auth` | `none` | `aws` references `Kevsoft.MigrateMongo.Aws`, like `init --auth aws`. |
@@ -129,11 +134,13 @@ always use the built-in templates, not `migrationTemplate`.
 | Package | Purpose |
 |---|---|
 | `Kevsoft.MigrateMongo.Tool` | The `migrate-mongo` CLI. |
-| `Kevsoft.MigrateMongo.Runner` | Entry point for your migrations project (`MigrateMongoRunner.RunAsync`). Brings in everything below except the opt-in packages. |
+| `Kevsoft.MigrateMongo.Runner` | Entry point for your migrations project (`MigrateMongoRunner.RunAsync`). Brings in Abstractions, the engine, MongoDriver, Contracts and Cli. |
 | `Kevsoft.MigrateMongo.Abstractions` | `IMigration`, `[Migration]`, `MigrationContext` and the source generator. Reference it directly to keep migrations in a class library. |
 | `Kevsoft.MigrateMongo` | The engine: planning, locking, state and checksums. |
 | `Kevsoft.MigrateMongo.MongoDriver` | The engine's MongoDB driver adapter. |
-| `Kevsoft.MigrateMongo.Hosting` | [Run migrations from your application](#running-from-your-application). |
+| `Kevsoft.MigrateMongo.Contracts` | The runner protocol, resolved configuration and tunnel interfaces. No dependencies. |
+| `Kevsoft.MigrateMongo.Cli` | The command line, `migrate-mongo.yaml` loading and console output used by the tool and Runner (System.CommandLine, YamlDotNet). |
+| `Kevsoft.MigrateMongo.Hosting` | [Run migrations from your application](#running-from-your-application). Brings in the same packages as Runner except Cli. |
 | `Kevsoft.MigrateMongo.Tunnel` | Opt-in: lets the runner, bundles and Hosting open [SSH tunnels](#tunnelling-through-a-bastion) themselves. |
 | `Kevsoft.MigrateMongo.Aws` | Opt-in: [AWS IAM authentication](#aws-iam-authentication-atlas). |
 | `Kevsoft.MigrateMongo.Templates` | The `dotnet new` templates. |
@@ -250,7 +257,8 @@ migration is detected. Write a new migration instead.
 
 With `transaction: auto` (the default), each migration runs in a transaction when the deployment supports them
 (replica sets and sharded clusters). Its state document is written in the same transaction, so a failure leaves
-nothing half-applied. Pass `context.Session` to every operation:
+nothing half-applied. The transaction reads from the primary and commits with majority write concern. Pass
+`context.Session` to every operation:
 
 ```csharp
 [Migration("20261014164029", "split-full-name")]
@@ -476,6 +484,9 @@ $ migrate-mongo status
 States are `pending`, `applied`, `applying`, `rollingBack` and `failed`. Applied migrations that are no longer in the
 code, or whose checksum has changed, are flagged. `--check` exits with code `2` when there are pending migrations.
 
+`status`, `plan`, `validate`, `history`, `show` and dry runs only read, so they work with a read-only database user. The
+commands that write (`up`, `down`, `mark` and `baseline`) also create the collections' indexes the first time.
+
 ### `plan`
 
 ```
@@ -545,7 +556,8 @@ Validation passed.
 ```
 
 Exits with code `4` if an applied migration was edited, an applied migration is missing from the code, or a pending
-migration is older than the newest applied one (unless `allowOutOfOrder` is set). Run it in pull request builds.
+migration is older than the newest applied one (unless `allowOutOfOrder` is set). Run it in pull request builds; a
+read-only database user is enough.
 
 ### `baseline`
 
@@ -582,8 +594,8 @@ $ migrate-mongo history
  2026-10-14 16:40:54  20261014164029  split-full-name           rolledBack  2      ff621741  kev-laptop
 ```
 
-Pass an id to see one migration, and `--limit <n>` to change the number of entries (default 50). When any entry has
-[results](#recording-results), a `Results` column summarises them (`status` has one too).
+Pass an id to see one migration, and `--limit <n>` to change the number of entries (default 50, at least 1). When any
+entry has [results](#recording-results), a `Results` column summarises them (`status` has one too).
 
 ### `show`
 
@@ -680,7 +692,15 @@ message.
 Before running a migration, its state is set to `applying` (or `rollingBack`). If the process dies part-way through a
 migration that isn't in a transaction, the state stays there and later runs stop until you resolve it.
 
+These collections are always read from and written to the primary with majority read and write concerns, whatever the
+connection string (or your app's `IMongoClient`) asks for, so a lagging secondary can't hide an applied migration. The
+lock expires by the database server's clock, so agents whose clocks disagree still agree on when it has expired.
+
 ## When something goes wrong
+
+**A migration throws** (exit code `1`): the output shows the exception with its stack trace (with `--json`, it's the
+`details` of the `migrationFailed` event, and Hosting logs the exception itself). The state and history keep the
+one-line error.
 
 **An applied migration was edited** (exit code `4`):
 
@@ -707,8 +727,12 @@ into a warning.
 ```
 
 Locks are renewed while a run is in progress and expire `lockTtl` seconds after a run dies. Remove one sooner with
-`unlock --force`, but only if you're sure its run has stopped. Ctrl+C and `SIGTERM` cancel the running migration
-(through its `CancellationToken`) and release the lock.
+`unlock --force`, but only if you're sure its run has stopped.
+
+Ctrl+C and `SIGTERM` cancel the running migration through its `CancellationToken`, so pass it to every driver call
+(projects from `init` and `dotnet new migratemongo` warn when you don't). The lock is kept until the migration's code returns, even if it ignores the token, and is then released. A
+transactional migration is rolled back; one outside a transaction that ran to the end is recorded as applied, so a
+cancel doesn't leave a finished migration marked `failed`.
 
 **The tool is older than the runner** (exit code `5`): update the tool (`dotnet tool update Kevsoft.MigrateMongo.Tool`).
 
@@ -721,20 +745,22 @@ jobs:
   migrate:
     runs-on: ubuntu-latest
     environment: production
+    # Every command that connects needs these, validate included.
+    env:
+      PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
+      BASTION_SSH_KEY: ${{ secrets.BASTION_SSH_KEY }}   # if prod has a tunnel:
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with: { global-json-file: global.json }
       - run: dotnet tool restore
       - run: dotnet tool run migrate-mongo validate --env prod
       - run: dotnet tool run migrate-mongo up --env prod
-        env:
-          PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }}
-          BASTION_SSH_KEY: ${{ secrets.BASTION_SSH_KEY }}   # if prod has a tunnel:
 ```
 
 As a pull request gate, `migrate-mongo validate --env staging` fails with exit code `4` if someone edited an applied
-migration. `migrate-mongo plan --env prod` exits with `2` if a deployment has migrations to apply.
+migration, and a read-only database user is enough for it. `migrate-mongo plan --env prod` exits with `2` if a
+deployment has migrations to apply.
 
 ### Build once, deploy many
 
@@ -745,19 +771,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with: { global-json-file: global.json }
       - run: dotnet tool restore
       - run: dotnet tool run migrate-mongo bundle -r linux-x64 -o out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: migrations, path: out/ }
 
   deploy:
     needs: build
     runs-on: [self-hosted, production]
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: migrations }
       - run: chmod +x MyApp.Migrations && ./MyApp.Migrations up --env prod
         env: { PROD_MONGODB_URL: ${{ secrets.PROD_MONGODB_URL }} }
@@ -795,8 +821,8 @@ migrate-mongo up --env prod --runner ./out/MyApp.Migrations
 `ghcr.io/kevbite/migrate-mongo` (`linux/amd64` and `linux/arm64`) is tagged with the version (`0.2.0`, `0.2`) and
 `latest`. Pin a version in real pipelines.
 
-- `ghcr.io/kevbite/migrate-mongo:<version>` is the tool on the .NET 10 SDK, with the .NET 8 and 9 runtimes, so it can
-  build and run your migrations project. A `global.json` that pins an older SDK won't work in it.
+- `ghcr.io/kevbite/migrate-mongo:<version>` is the tool on the .NET 10 SDK, so it can build and run your migrations
+  project. A `global.json` that pins an older SDK won't work in it.
 - `ghcr.io/kevbite/migrate-mongo:<version>-bundle` is the tool without .NET, for running [bundles](#bundles) with
   `--runner`.
 
@@ -944,7 +970,8 @@ builder.Services
 
 `RunOnStartup()` applies pending migrations before any hosted service starts, so ASP.NET Core doesn't serve requests
 against an out-of-date database. If a migration fails, or the lock isn't acquired within `LockWaitTimeout`, the host
-fails to start with a `MongoMigrationException`. Progress goes to your app's `ILogger`, and migrations can take your
+fails to start with a `MongoMigrationException`. Progress, warnings (such as checksum warnings with
+`OnChecksumMismatch = Warn`) and the outcome go to your app's `ILogger`, and migrations can take your
 app's services (including scoped ones) as constructor dependencies.
 
 App instances and CLI runs share the same state and lock, so it's safe when many instances start at once: one applies

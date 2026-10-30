@@ -3,42 +3,36 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <!--
-      One package that works with every SDK. Each TFM gets its own tools/<tfm>/any/DotnetToolSettings.xml:
-      * net8.0: a framework-dependent tool. .NET 8/9 SDKs pick this (they reject RID-specific tool packages).
-      * net10.0: a pointer to the RID-specific Native AOT packages, which .NET 10+ SDKs pick.
+      The main package is a pointer to the RID-specific Native AOT packages, which .NET 10+ SDKs install.
       `dotnet pack` makes the main package, `dotnet pack -r <rid>` (on that OS) each Native AOT package, and
       `dotnet pack -r any -p:PublishAot=false` the framework-dependent fallback for RIDs without an AOT build.
-      RID builds only target net10.0. All packages share a version; push the RID packages before the main one.
+      All packages share a version; push the RID packages before the main one.
     -->
-    <TargetFrameworks Condition="'$(RuntimeIdentifier)' == ''">net8.0;net10.0</TargetFrameworks>
-    <TargetFramework Condition="'$(RuntimeIdentifier)' != ''">net10.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>migrate-mongo</AssemblyName>
     <RootNamespace>Kevsoft.MigrateMongo.Tool</RootNamespace>
     <IsPackable>true</IsPackable>
     <PackageId>Kevsoft.MigrateMongo.Tool</PackageId>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>migrate-mongo</ToolCommandName>
-    <!-- Run on whatever .NET is installed (8 or any later major); the tool never loads user code. -->
+    <!-- The framework-dependent fallback runs on whatever .NET is installed (10 or any later major); the tool never loads user code. -->
     <RollForward>LatestMajor</RollForward>
     <IsAotCompatible>true</IsAotCompatible>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Description>The migrate-mongo command line tool for Kevsoft.MigrateMongo: create, apply and roll back MongoDB migrations written in C#. Works with any .NET runtime (8+) and any supported MongoDB driver version because your migrations run in your own project.</Description>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Description>The migrate-mongo command line tool for Kevsoft.MigrateMongo: create, apply and roll back MongoDB migrations written in C#. Works with any .NET runtime (10+) and any supported MongoDB driver version because your migrations run in your own project.</Description>
     <!-- linux-musl-* must be listed, otherwise the RID graph gives Alpine the glibc linux-* build. -->
     <ToolPackageRuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64;any</ToolPackageRuntimeIdentifiers>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
-    <!-- Only the RID builds are Native AOT; the main package (pointer + net8.0) and `-r any -p:PublishAot=false` aren't. -->
+    <!--
+      The RID-specific packages are Native AOT. Native AOT can't cross-compile, so with this set `dotnet pack` without a
+      RID makes only the pointer instead of trying to build every RID; `-r any -p:PublishAot=false` makes the fallback.
+    -->
     <PublishAot>true</PublishAot>
-    <!-- Native AOT binaries have no managed symbols worth a symbol package. -->
+    <!-- Neither the pointer nor the Native AOT binaries have managed symbols worth a symbol package. -->
     <IncludeSymbols>false</IncludeSymbols>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Cli\Kevsoft.MigrateMongo.Cli.csproj" />
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Tunnel\Kevsoft.MigrateMongo.Tunnel.csproj" />
   </ItemGroup>
 
@@ -47,8 +41,8 @@
   </ItemGroup>
 
   <!--
-    SDK 10.0.4xx+ puts a RID-specific pointer's settings file in tools/any/any/, which NuGet ranks below tools/net8.0/,
-    so .NET 10 SDKs would install the net8.0 build. Keep the pointer under its TFM so .NET 10+ SDKs choose it.
+    SDK 10.0.4xx+ puts a RID-specific pointer's settings file in tools/any/any/. Keep it under its TFM, where earlier
+    10.0 SDK bands put it, so the package layout doesn't depend on which SDK packs it.
   -->
   <Target Name="KeepToolPointerUnderTargetFramework" AfterTargets="PackTool"
           Condition="'$(RuntimeIdentifier)' == '' and '$(ToolPackageRuntimeIdentifiers)' != ''">

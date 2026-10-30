@@ -91,6 +91,26 @@ public sealed class MigrateMongoCliTests
     }
 
     [Theory]
+    [InlineData("0")]
+    [InlineData("-5")]
+    public async Task History_rejects_a_limit_below_one(string limit)
+    {
+        var (exitCode, invocation) = await Parse(true, "history", "--limit", limit);
+
+        exitCode.ShouldNotBe(0);
+        invocation.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task History_accepts_a_positive_limit()
+    {
+        var (exitCode, invocation) = await Parse(true, "history", "--limit", "5");
+
+        exitCode.ShouldBe(0);
+        invocation!.Arguments.Limit.ShouldBe(5);
+    }
+
+    [Theory]
     [InlineData("status", "--no-build")]
     [InlineData("bundle")]
     public async Task Standalone_runner_rejects_tool_only_options(params string[] args)

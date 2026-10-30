@@ -18,7 +18,7 @@ public sealed class BundleTests(IntegrationEnvironment environment)
         var bundle = await workspace.RunAsync(["bundle", "-o", "out"], variables);
 
         bundle.ExitCode.ShouldBe(0, bundle.ToString());
-        bundle.Output.ShouldContain($"Bundle: Kevsoft.MigrateMongo {environment.PackageVersion} · MongoDB.Driver 3.12.0 · .NET 8.0.");
+        bundle.Output.ShouldContain($"Bundle: Kevsoft.MigrateMongo {environment.PackageVersion} · MongoDB.Driver {environment.DriverVersion} · .NET 10.0.");
         var executable = workspace.PathOf("out", OperatingSystem.IsWindows() ? "BasicMigrations.exe" : "BasicMigrations");
         File.Exists(executable).ShouldBeTrue();
         File.ReadAllText(workspace.PathOf("out", "migrate-mongo.yaml")).ShouldBe(File.ReadAllText(workspace.ConfigPath));
@@ -31,7 +31,7 @@ public sealed class BundleTests(IntegrationEnvironment environment)
         up.ExitCode.ShouldBe(0, up.ToString());
         var states = workspace.Find("_migrations");
         states.Select(s => s["_id"].AsString).ShouldBe(["20260101000001", "20260101000002", "20260101000003"]);
-        states.ShouldAllBe(s => s["state"].AsString == "applied" && s["appliedBy"]["runtime"].AsString.StartsWith("8.0."));
+        states.ShouldAllBe(s => s["state"].AsString == "applied" && s["appliedBy"]["runtime"].AsString.StartsWith("10.0."));
 
         var down = await workspace.RunAsync(["down", "--batch", "--runner", executable], variables);
 
@@ -59,7 +59,7 @@ public sealed class BundleTests(IntegrationEnvironment environment)
             [
                 "run", "--rm", "--add-host", "host.docker.internal:host-gateway",
                 "-e", $"{UrlVariable}={url}", "-v", $"{workspace.PathOf("out")}:/bundle", "-w", "/",
-                "mcr.microsoft.com/dotnet/runtime-deps:8.0", "/bundle/BasicMigrations", "up",
+                "mcr.microsoft.com/dotnet/runtime-deps:10.0", "/bundle/BasicMigrations", "up",
             ],
             workspace.Directory, null, TimeSpan.FromMinutes(5));
 

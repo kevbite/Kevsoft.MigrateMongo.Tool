@@ -6,14 +6,18 @@
     <!-- Libraries -->
     <PackageVersion Include="MongoDB.Driver" Version="$(MongoDriverVersion)" />
     <PackageVersion Include="MongoDB.Driver.Authentication.AWS" Version="$(MongoDriverVersion)" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
     <PackageVersion Include="System.CommandLine" Version="2.0.12" />
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
 
-    <!-- Source generator (must not exceed the Roslyn version shipped with the lowest supported SDK) -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <!--
+      Source generator: this is the oldest compiler that can load it. A compiler older than this skips the generator
+      with only warning CS9057, so the build passes with no migrations. 4.8 is the .NET 8 SDK's, so every supported
+      SDK (and Visual Studio 17.8+) can load it; CI checks the generator runs on the lowest supported SDK.
+    -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
 
     <!-- Tool -->

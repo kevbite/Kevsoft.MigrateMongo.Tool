@@ -69,9 +69,11 @@ public sealed class MigrationEngine
         _ => Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Unknown command '{command}'." }),
     };
 
+    // status, validate, history, show and unlock only read (or just delete the lock), so they don't create the
+    // collections' indexes: they work with a read-only database user and leave a database pointed at by mistake untouched.
+
     public async Task<CommandResult> StatusAsync(bool check, CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
         var states = await _store.GetStatesAsync(cancellationToken);
         var status = BuildStatus(states);
         var pending = status.Count(s => s.State == MigrationStates.Pending);
@@ -86,7 +88,6 @@ public sealed class MigrationEngine
 
     public async Task<CommandResult> ValidateAsync(CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
         var states = await _store.GetStatesAsync(cancellationToken);
         var issues = Analyse(states, BuildStatus(states));
         var errors = issues.Count(i => i.Severity == "error");
@@ -214,7 +215,7 @@ public sealed class MigrationEngine
     private async Task<LockInfo?> ReportHeldLockAsync(List<ValidationIssue> issues, CancellationToken cancellationToken)
     {
         var holder = await _store.GetLockAsync(cancellationToken);
-        if (holder is null || holder.ExpiresAt <= Now)
+        if (holder is null || holder.Expired)
         {
             return null;
         }
@@ -431,15 +432,13 @@ public sealed class MigrationEngine
 
     public async Task<CommandResult> UnlockAsync(bool force, CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
         var current = await _store.GetLockAsync(cancellationToken);
         if (current is null)
         {
             return new CommandResult { ExitCode = ExitCodes.Success, Message = "No lock is held." };
         }
 
-        var now = Now;
-        if (!force && current.ExpiresAt > now)
+        if (!force && !current.Expired)
         {
             return new CommandResult
             {
@@ -449,7 +448,7 @@ public sealed class MigrationEngine
             };
         }
 
-        var removed = await _store.DeleteLockAsync(force ? null : now, cancellationToken);
+        var removed = await _store.DeleteLockAsync(onlyIfExpired: !force, cancellationToken);
         return new CommandResult
         {
             ExitCode = removed ? ExitCodes.Success : ExitCodes.Failure,
@@ -460,7 +459,11 @@ public sealed class MigrationEngine
 
     public async Task<CommandResult> HistoryAsync(string? id, int? limit, CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
+        if (limit is < 1)
+        {
+            return new CommandResult { ExitCode = ExitCodes.Failure, Message = "--limit must be at least 1." };
+        }
+
         var history = await _store.GetHistoryAsync(id, limit ?? DefaultHistoryLimit, cancellationToken);
         return new CommandResult { ExitCode = ExitCodes.Success, History = history.ToList() };
     }
@@ -472,7 +475,6 @@ public sealed class MigrationEngine
     /// <param name="cancellationToken">Cancels the read.</param>
     public async Task<CommandResult> ShowAsync(string id, int? historyLimit, bool noStatements, CancellationToken cancellationToken)
     {
-        await _store.InitializeAsync(cancellationToken);
         var states = await _store.GetStatesAsync(cancellationToken);
 
         // A rolled-back migration whose code has gone is only in the history.
@@ -763,8 +765,9 @@ public sealed class MigrationEngine
                 var state = NewState(migration, MigrationStates.Applied, batch, transactional);
                 state.DurationMs = stopwatch.ElapsedMilliseconds;
                 state.Output = output;
-                await _store.SaveStateAsync(state, scope, cancellationToken);
-                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null, output), scope, cancellationToken);
+                var record = RecordingToken(scope, cancellationToken);
+                await _store.SaveStateAsync(state, scope, record);
+                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null, output), scope, record);
             }, cancellationToken);
         }
         catch (Exception e)
@@ -782,7 +785,7 @@ public sealed class MigrationEngine
             }
 
             await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Failed, "up", batch, migration.Checksum, stopwatch.ElapsedMilliseconds, error, output), null, CancellationToken.None);
-            Emit(EventTypes.MigrationFailed, migration, "up", transactional, stopwatch.ElapsedMilliseconds, error, output);
+            Emit(EventTypes.MigrationFailed, migration, "up", transactional, stopwatch.ElapsedMilliseconds, error, output, e);
             return error;
         }
 
@@ -823,8 +826,9 @@ public sealed class MigrationEngine
             {
                 output = null;
                 output = Committed(await _executor.ExecuteAsync(scope, migration, run, outputOptions, cancellationToken), true);
-                await _store.DeleteStateAsync(migration.Id, scope, cancellationToken);
-                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null, output), scope, cancellationToken);
+                var record = RecordingToken(scope, cancellationToken);
+                await _store.DeleteStateAsync(migration.Id, scope, record);
+                await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null, output), scope, record);
             }, cancellationToken);
         }
         catch (Exception e)
@@ -841,7 +845,7 @@ public sealed class MigrationEngine
             }
 
             await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Failed, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, error, output), null, CancellationToken.None);
-            Emit(EventTypes.MigrationFailed, migration, "down", transactional, stopwatch.ElapsedMilliseconds, error, output);
+            Emit(EventTypes.MigrationFailed, migration, "down", transactional, stopwatch.ElapsedMilliseconds, error, output, e);
             return error;
         }
 
@@ -871,6 +875,13 @@ public sealed class MigrationEngine
 
     private OutputOptions OutputOptionsFor(CommandArguments? arguments) =>
         new(_options.CaptureStatements && arguments?.NoCaptureStatements != true, _options.ResultsMaxBytes);
+
+    /// <summary>
+    /// The token for recording a migration whose code has returned. Outside a transaction its changes are already made,
+    /// so they're recorded even if cancellation was requested meanwhile; inside one, cancelling still rolls it all back.
+    /// </summary>
+    private static CancellationToken RecordingToken(IExecutionScope scope, CancellationToken cancellationToken) =>
+        scope.Transactional ? cancellationToken : CancellationToken.None;
 
     /// <summary>
     /// Runs <paramref name="body"/> in a new scope and commits it. Transactions are retried like the driver's
@@ -948,11 +959,15 @@ public sealed class MigrationEngine
             };
         }
 
-        using var lockLost = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var heartbeat = HeartbeatAsync(lockLost, acquired.ExpiresAt);
+        // The heartbeat runs until the action returns, not until cancellation is requested: migration code that doesn't
+        // stop straight away is still changing the database, and the lock must not expire under it.
+        using var lockLost = new CancellationTokenSource();
+        using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lockLost.Token);
+        using var finished = new CancellationTokenSource();
+        var heartbeat = HeartbeatAsync(lockLost, acquired.Value.Requested, finished.Token);
         try
         {
-            return await action(lockLost.Token);
+            return await action(cancelled.Token);
         }
         catch (MigrationEngineException e)
         {
@@ -960,33 +975,30 @@ public sealed class MigrationEngine
         }
         finally
         {
-            await StopHeartbeatAsync(lockLost, heartbeat);
+            await finished.CancelAsync();
+            await heartbeat;
             await _store.ReleaseLockAsync(RunId, CancellationToken.None);
         }
     }
 
-    private async Task<LockInfo?> AcquireLockAsync(CancellationToken cancellationToken)
+    /// <returns>
+    /// The lock and when the request that took it was sent (a <see cref="TimeProvider.GetTimestamp"/>), or null if the wait
+    /// timed out.
+    /// </returns>
+    private async Task<(LockInfo Lock, long Requested)?> AcquireLockAsync(CancellationToken cancellationToken)
     {
-        var deadline = Now + _options.LockWaitTimeout;
+        var waiting = _time.GetTimestamp();
         string? reportedHolder = null;
         while (true)
         {
-            var now = Now;
-            var lockInfo = new LockInfo
-            {
-                RunId = RunId,
-                Host = _options.Provenance.Host,
-                AcquiredAt = now,
-                ExpiresAt = now + _options.LockTtl,
-            };
-
-            if (await _store.TryAcquireLockAsync(lockInfo, now, cancellationToken))
+            var requested = _time.GetTimestamp();
+            if (await _store.TryAcquireLockAsync(RunId, _options.Provenance.Host, _options.LockTtl, cancellationToken) is { } acquired)
             {
                 _events.OnEvent(new RunnerEvent { Type = EventTypes.LockAcquired, Message = $"Acquired lock (run {RunId})." });
-                return lockInfo;
+                return (acquired, requested);
             }
 
-            if (Now >= deadline)
+            if (_time.GetElapsedTime(waiting) >= _options.LockWaitTimeout)
             {
                 return null;
             }
@@ -1002,7 +1014,7 @@ public sealed class MigrationEngine
                 });
             }
 
-            var remaining = deadline - Now;
+            var remaining = _options.LockWaitTimeout - _time.GetElapsedTime(waiting);
             var delay = remaining < _options.LockPollInterval ? remaining : _options.LockPollInterval;
             if (delay > TimeSpan.Zero)
             {
@@ -1011,26 +1023,29 @@ public sealed class MigrationEngine
         }
     }
 
-    private async Task HeartbeatAsync(CancellationTokenSource lockLost, DateTime expiresAt)
+    /// <param name="lockLost">Cancelled by the heartbeat when the lock is lost.</param>
+    /// <param name="renewed">When the request that took the lock was sent (a <see cref="TimeProvider.GetTimestamp"/>).</param>
+    /// <param name="finished">Cancelled when the work holding the lock has finished.</param>
+    private async Task HeartbeatAsync(CancellationTokenSource lockLost, long renewed, CancellationToken finished)
     {
         var interval = _options.LockTtl / 3;
-        while (!lockLost.IsCancellationRequested)
+        while (!finished.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(interval, _time, lockLost.Token);
+                await Task.Delay(interval, _time, finished);
             }
             catch (OperationCanceledException)
             {
                 return;
             }
 
-            var renewedUntil = Now + _options.LockTtl;
+            var requested = _time.GetTimestamp();
             try
             {
-                if (await _store.RenewLockAsync(RunId, renewedUntil, lockLost.Token))
+                if (await _store.RenewLockAsync(RunId, _options.LockTtl, finished))
                 {
-                    expiresAt = renewedUntil;
+                    renewed = requested;
                     continue;
                 }
 
@@ -1038,15 +1053,16 @@ public sealed class MigrationEngine
                 await lockLost.CancelAsync();
                 return;
             }
-            catch (OperationCanceledException) when (lockLost.IsCancellationRequested)
+            catch (OperationCanceledException) when (finished.IsCancellationRequested)
             {
                 return;
             }
             catch (Exception e)
             {
                 // Transient errors (elections, network blips) are retried while the lock is still ours; stop the run
-                // before it could expire and be taken by someone else.
-                if (Now + interval >= expiresAt)
+                // before it could expire and be taken by someone else. The server set the expiry to LockTtl after it
+                // received the last renewal, so timing from when that renewal was sent is safe whatever its clock says.
+                if (_time.GetElapsedTime(renewed) + interval >= _options.LockTtl)
                 {
                     _events.OnEvent(new RunnerEvent { Type = EventTypes.Log, Level = "error", Message = $"Couldn't renew the migration lock before it expires ({e.Message}); cancelling." });
                     await lockLost.CancelAsync();
@@ -1068,16 +1084,6 @@ public sealed class MigrationEngine
         return lockToken.IsCancellationRequested
             ? new CommandResult { ExitCode = ExitCodes.Failure, Message = "Lost the migration lock; stopped before the next migration." }
             : null;
-    }
-
-    private static async Task StopHeartbeatAsync(CancellationTokenSource lockLost, Task heartbeat)
-    {
-        if (!lockLost.IsCancellationRequested)
-        {
-            await lockLost.CancelAsync();
-        }
-
-        await heartbeat;
     }
 
     private StoredMigrationState NewState(MigrationDescriptor migration, string state, int batch, bool transactional)
@@ -1118,7 +1124,10 @@ public sealed class MigrationEngine
         Output = output,
     };
 
-    private void Emit(string type, MigrationDescriptor migration, string direction, bool? transactional, long? durationMs, string? error, MigrationOutputInfo? output = null) =>
+    // A failure's exception, with its stack trace, goes in the event; state and history keep the short error.
+    private void Emit(string type, MigrationDescriptor migration, string direction, bool? transactional, long? durationMs, string? error, MigrationOutputInfo? output = null, Exception? exception = null)
+    {
+        var cause = exception is null ? null : Cause(exception);
         _events.OnEvent(new RunnerEvent
         {
             Type = type,
@@ -1128,17 +1137,23 @@ public sealed class MigrationEngine
             Transactional = transactional,
             DurationMs = durationMs,
             Error = error,
+            // A cancellation's stack trace says nothing about the migration.
+            Details = cause is null or OperationCanceledException ? null : cause.ToString(),
+            Exception = cause,
             Output = output,
         });
+    }
 
     private static ValidationIssue Issue(string severity, string kind, string? id, string message) =>
         new() { Severity = severity, Kind = kind, MigrationId = id, Message = message };
 
-    private static string Describe(Exception e) => e switch
+    /// <summary>The exception that made a migration fail, without the executor's wrapper around it.</summary>
+    private static Exception Cause(Exception e) => e is MigrationExecutionException { InnerException: { } inner } ? Cause(inner) : e;
+
+    private static string Describe(Exception e) => Cause(e) switch
     {
-        MigrationExecutionException { InnerException: { } inner } => Describe(inner),
         OperationCanceledException => "The operation was cancelled.",
-        _ => $"{e.GetType().Name}: {e.Message}",
+        var cause => $"{cause.GetType().Name}: {cause.Message}",
     };
 }
 
