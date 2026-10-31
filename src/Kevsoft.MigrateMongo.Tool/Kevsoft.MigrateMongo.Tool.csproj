@@ -55,10 +55,11 @@
 
   <!--
     .NET 10's Swift crypto library has debug info that points at clang module caches on the machine that built it, so
-    dsymutil prints "error: ....pcm: No such file or directory" while making the dSYM. It still succeeds, but the
-    Native AOT targets fail the publish on that text. Until a .NET 10 release has .NET 11's fix (dotnet/runtime#124266),
-    publishing on macOS (which Native AOT only does for macOS) skips the targets' stripping and runs the same commands
-    here instead, without treating their output as errors. Like the link, it only reruns when the link's inputs change.
+    dsymutil prints "warning: ....pcm: No such file or directory" while making the dSYM. It still succeeds, but the
+    Native AOT targets report those lines as MSBuild warnings, and MSBuildTreatWarningsAsErrors (Directory.Build.props)
+    turns them into errors. Until a .NET 10 release has .NET 11's fix (dotnet/runtime#124266), publishing on macOS
+    (which Native AOT only does for macOS) skips the targets' stripping and runs the same commands here instead,
+    without reading warnings or errors from their output. Like the link, it only reruns when the link's inputs change.
   -->
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
     <StripSymbols>false</StripSymbols>
