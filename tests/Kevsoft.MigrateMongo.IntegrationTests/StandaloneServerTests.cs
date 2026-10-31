@@ -53,8 +53,11 @@ public sealed class StandaloneServerTests(IntegrationEnvironment environment, St
 
         public async ValueTask InitializeAsync()
         {
+            // The image turns off glibc's rseq so TCMalloc can use per-CPU caches, but mongod 8.0 won't start with
+            // those on Linux 6.19+ (SERVER-121912), which CI runners have. Let glibc keep it, as Atlas Local does.
             _container = new ContainerBuilder("mongo:8.0")
                 .WithPortBinding(27017, assignRandomHostPort: true)
+                .WithEnvironment("GLIBC_TUNABLES", "glibc.pthread.rseq=1")
                 .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Waiting for connections"))
                 .Build();
             await _container.StartAsync();
