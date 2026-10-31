@@ -9,7 +9,7 @@ internal static class MigrationDiscovery
     // .NET, the MongoDB driver and this library, which never contain migrations.
     private static readonly string[] SkippedAssemblies = ["System", "Microsoft", "MongoDB.Bson", "MongoDB.Driver", "Kevsoft.MigrateMongo"];
 
-    public static List<MigrationDescriptor> Discover(MigrateMongoRunnerOptions options, Assembly? entryAssembly)
+    public static (List<MigrationDescriptor> Migrations, List<CollectionDescriptor> Collections) Discover(MigrateMongoRunnerOptions options, Assembly? entryAssembly)
     {
         var assemblies = options.Assemblies.Count > 0
             ? options.Assemblies.Distinct().ToList()
@@ -19,9 +19,10 @@ internal static class MigrationDiscovery
             .Select(MigrationRegistry.ForAssembly)
             .OfType<IMigrationSource>()
             .Concat(options.Sources)
-            .Distinct();
+            .Distinct()
+            .ToList();
 
-        return sources.SelectMany(s => s.GetMigrations()).ToList();
+        return (sources.SelectMany(s => s.GetMigrations()).ToList(), sources.SelectMany(s => s.GetCollections()).ToList());
     }
 
     /// <summary>The entry assembly plus any directly referenced assembly that references the abstractions.</summary>

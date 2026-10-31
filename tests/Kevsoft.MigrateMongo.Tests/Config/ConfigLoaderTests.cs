@@ -131,6 +131,10 @@ public sealed class ConfigLoaderTests
     [InlineData("environments: prod", "Config setting 'environments' must be a mapping")]
     [InlineData("environments:\n  prod: mongodb://prod", "Config setting 'environments.prod' must be a mapping")]
     [InlineData("environments:\n  prod:\n    lockTimeout: 5", "environments.prod.lockTimeout")]
+    [InlineData("indexes:\n  prune: delete", "prune")]
+    [InlineData("indexes:\n  onRebuild: maybe", "onRebuild")]
+    [InlineData("indexes:\n  dropAfter: 10", "indexes.dropAfter")]
+    [InlineData("indexes: drop", "indexes")]
     public void Invalid_settings_are_reported(string yaml, string expected)
     {
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message.ShouldContain(expected);
@@ -271,6 +275,47 @@ public sealed class ConfigLoaderTests
 
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, "prod", Env)).Message
             .ShouldBe("Unknown config setting 'environments.prod.results.capture'.");
+    }
+
+    [Fact]
+    public void Index_settings_default_to_report_allow_7_days_and_1_hour_and_can_be_changed_per_environment()
+    {
+        var yaml = Yaml + """
+
+            indexes:
+              prune: hide
+              dropHiddenAfter: 86400
+              supersededWindow: 600
+            """;
+        yaml = yaml.Replace("lockWaitTimeout: 5", "lockWaitTimeout: 5\n    indexes:\n      onRebuild: fail", StringComparison.Ordinal);
+
+        var defaults = ConfigLoader.Load(Yaml, null, Env);
+        (defaults.IndexesPrune, defaults.IndexesOnRebuild, defaults.IndexesDropHiddenAfterSeconds, defaults.IndexesSupersededWindowSeconds)
+            .ShouldBe(("report", "allow", 604800, 3600));
+
+        var local = ConfigLoader.Load(yaml, null, Env);
+        (local.IndexesPrune, local.IndexesOnRebuild, local.IndexesDropHiddenAfterSeconds, local.IndexesSupersededWindowSeconds).ShouldBe(("hide", "allow", 86400, 600));
+
+        var prod = ConfigLoader.Load(yaml, "prod", Env);
+        (prod.IndexesPrune, prod.IndexesOnRebuild, prod.IndexesDropHiddenAfterSeconds, prod.IndexesSupersededWindowSeconds).ShouldBe(("hide", "fail", 86400, 600));
+    }
+
+    [Theory]
+    [InlineData("dropHiddenAfter")]
+    [InlineData("supersededWindow")]
+    public void Index_durations_must_not_be_negative(string setting)
+    {
+        var config = new ResolvedConfig { MongoUrl = "mongodb://x", DatabaseName = "db" };
+        if (setting == "dropHiddenAfter")
+        {
+            config.IndexesDropHiddenAfterSeconds = -1;
+        }
+        else
+        {
+            config.IndexesSupersededWindowSeconds = -1;
+        }
+
+        Should.Throw<ConfigException>(() => ConfigLoader.EnsureConnectable(config)).Message.ShouldBe($"'indexes.{setting}' must not be negative.");
     }
 
     [Fact]

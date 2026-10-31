@@ -43,14 +43,48 @@ namespace Kevsoft.MigrateMongo.Hosting
         }
 
         /// <summary>
-        /// Applies pending migrations when the host starts, before any other hosted service (including the ASP.NET Core
-        /// server) starts. If a migration fails, or the lock can't be acquired in time, the host fails to start.
+        /// Applies pending migrations, then brings collections in line with their definitions, when the host starts: before any
+        /// other hosted service (including the ASP.NET Core server) starts. If a migration or a collection change fails, or
+        /// the lock can't be acquired in time, the host fails to start.
         /// </summary>
-        public MongoMigrationsBuilder RunOnStartup()
+        /// <param name="configure">
+        /// Set <see cref="MongoMigrationStartupOptions.Collections"/> to false to leave collection definitions to a deploy step,
+        /// so long index builds and blocked changes don't hold up or stop startup.
+        /// </param>
+        public MongoMigrationsBuilder RunOnStartup(Action<MongoMigrationStartupOptions>? configure = null)
         {
+            configure?.Invoke(Registration.Startup);
             Services.TryAddEnumerable(Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Singleton<IHostedService, MongoMigrationStartupService>());
             return this;
         }
+    }
+
+    /// <summary>
+    /// What <see cref="MongoMigrationsBuilder.RunOnStartup"/> applies. The <c>Allow…</c> options are the CLI's <c>--allow-…</c>
+    /// options, for getting one deploy past a change that's refused; remove them once it has run.
+    /// </summary>
+    public sealed class MongoMigrationStartupOptions
+    {
+        /// <summary>Also bring collections in line with their <c>[ManagedCollection]</c> definitions (default true).</summary>
+        public bool Collections { get; set; } = true;
+
+        /// <summary>
+        /// Rebuilds to allow although <see cref="IndexRebuild.Fail"/> refuses them, as <c>collection.index</c>
+        /// (<c>--allow-rebuild</c>).
+        /// </summary>
+        public IReadOnlyList<string> AllowRebuild { get; set; } = [];
+
+        /// <summary>
+        /// Collections whose declared indexes may use none of the fields the existing ones use (<c>--allow-unmatched</c>), e.g.
+        /// when replacing every index on purpose.
+        /// </summary>
+        public IReadOnlyList<string> AllowUnmatched { get; set; } = [];
+
+        /// <summary>
+        /// Apply definitions a newer run replaced less than <see cref="MongoMigrationOptions.SupersededDefinitionWindow"/> ago
+        /// (<c>--allow-superseded</c>), e.g. when rolling back on purpose.
+        /// </summary>
+        public bool AllowSuperseded { get; set; }
     }
 
     internal sealed class MongoMigrationRegistration
@@ -60,6 +94,8 @@ namespace Kevsoft.MigrateMongo.Hosting
         public List<Assembly> Assemblies { get; } = [];
 
         public List<IMigrationSource> Sources { get; } = [];
+
+        public MongoMigrationStartupOptions Startup { get; } = new();
 
         public MongoMigrationOptions CreateOptions(IServiceProvider services)
         {
@@ -73,7 +109,7 @@ namespace Kevsoft.MigrateMongo.Hosting
             return options;
         }
 
-        public List<MigrationDescriptor> Discover(ILogger logger)
+        public (List<MigrationDescriptor> Migrations, List<CollectionDescriptor> Collections) Discover(ILogger logger)
         {
             if (Assemblies.Count == 0 && Sources.Count == 0)
             {
@@ -95,7 +131,8 @@ namespace Kevsoft.MigrateMongo.Hosting
             }
 
             sources.AddRange(Sources);
-            return sources.Distinct().SelectMany(s => s.GetMigrations()).ToList();
+            var distinct = sources.Distinct().ToList();
+            return (distinct.SelectMany(s => s.GetMigrations()).ToList(), distinct.SelectMany(s => s.GetCollections()).ToList());
         }
     }
 }

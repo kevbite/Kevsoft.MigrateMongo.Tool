@@ -266,4 +266,173 @@ public sealed class ConsoleRendererTests
 
             """.ReplaceLineEndings("\n"));
     }
+
+    [Fact]
+    public void Plan_shows_each_collections_changes()
+    {
+        var text = Render(r => r.RenderResult(new CommandResult
+        {
+            ExitCode = ExitCodes.ValidationFailed,
+            Plan = [new PlannedMigration { Id = "20260101000001", Name = "dedupe", Direction = "up", Transactional = true }],
+            Collections =
+            [
+                new CollectionInfo
+                {
+                    Name = "cases",
+                    State = CollectionStates.Blocked,
+                    Changes =
+                    [
+                        new IndexChangeInfo { Action = "create", Index = "companyId_1_status_1", Keys = Json("""{ "companyId": 1, "status": 1 }"""), Detail = "unique" },
+                        new IndexChangeInfo { Action = "modify", Index = "deletedAt_1", Detail = "expireAfterSeconds 2592000 → 604800" },
+                        new IndexChangeInfo { Action = "rebuild", Index = "by_ref", Detail = "sparse: false → true (drop, then create)", Blocked = true, Reason = "indexes.onRebuild is fail" },
+                        new IndexChangeInfo { Action = "hide", Index = "legacy_1", Detail = "not declared" },
+                        new IndexChangeInfo { Action = "keep", Index = "adhoc_1", Detail = "not declared (prune: report)" },
+                    ],
+                },
+                new CollectionInfo { Name = "users", State = CollectionStates.InSync },
+            ],
+            Issues = [new ValidationIssue { Severity = "error", Kind = "collectionBlocked", Message = "cases: rebuilding by_ref is blocked." }],
+            Message = "Would apply 1 migration(s) as batch 2 and change 1 collection(s).",
+        }));
+
+        text.ShouldBe("""
+              ▶ 20260101000001  dedupe   (transaction)
+              ⟳ cases
+                  + create   companyId_1_status_1   { companyId: 1, status: 1 }  unique
+                  ~ modify   deletedAt_1            expireAfterSeconds 2592000 → 604800
+                  ↻ rebuild  by_ref                 sparse: false → true (drop, then create)   ✖ blocked: indexes.onRebuild is fail
+                  - hide     legacy_1               not declared
+                  ! keep     adhoc_1                not declared (prune: report)
+              ⟳ users   in sync
+            error: cases: rebuilding by_ref is blocked.
+            ✖ Would apply 1 migration(s) as batch 2 and change 1 collection(s).
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void Up_shows_each_collection_as_it_changes()
+    {
+        var text = Render(r =>
+        {
+            r.Render(new RunnerEvent { Type = EventTypes.CollectionStarted, Collection = "cases" });
+            r.Render(new RunnerEvent
+            {
+                Type = EventTypes.CollectionCompleted,
+                Collection = "cases",
+                DurationMs = 38400,
+                Changes = [new IndexChangeInfo { Action = "create", Index = "status_1", Keys = Json("""{ "status": 1 }""") }],
+            });
+            r.Render(new RunnerEvent { Type = EventTypes.CollectionCompleted, Collection = "users", Changes = [] });
+            r.Render(new RunnerEvent { Type = EventTypes.CollectionSkipped, Collection = "orders", Message = "orders: superseded." });
+            r.Render(new RunnerEvent { Type = EventTypes.CollectionFailed, Collection = "events", Error = "blocked." });
+        });
+
+        text.ShouldBe("""
+            ⟳ cases
+              + create   status_1   { status: 1 }
+            ✔ cases   (38.40s)
+            ✔ users   (in sync)
+            ⚠ orders: superseded.
+            ✖ events: blocked.
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void Status_lists_collections_after_the_migrations()
+    {
+        var text = Render(r => r.RenderResult(new CommandResult
+        {
+            ExitCode = 0,
+            Migrations = [new MigrationStatusInfo { Id = "20260101000001", Name = "seed", State = "applied", InCode = true, Batch = 1, AppliedAt = At }],
+            Collections =
+            [
+                new CollectionInfo { Name = "cases", State = CollectionStates.InSync, ReconciledAt = At, Changes = [new IndexChangeInfo { Action = "keep", Index = "old_1" }] },
+                new CollectionInfo
+                {
+                    Name = "users",
+                    State = CollectionStates.Changes,
+                    Changes = [new IndexChangeInfo { Action = "create", Index = "a_1" }, new IndexChangeInfo { Action = "create", Index = "b_1" }, new IndexChangeInfo { Action = "hide", Index = "c_1" }],
+                },
+            ],
+            Message = "1 collection(s) out of line with their definitions.",
+        }));
+
+        text.ShouldBe("""
+             ID              Name  State    Batch  Applied
+             20260101000001  seed  applied  1      2026-10-22 12:31:03
+
+             Collection  State    Reconciled           Changes
+             cases       in sync  2026-10-22 12:31:03  1 kept
+             users       changes                       2 create · 1 hide
+            1 collection(s) out of line with their definitions.
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void Show_prints_a_collections_indexes_pending_changes_and_history()
+    {
+        var text = Render(r => r.RenderResult(new CommandResult
+        {
+            ExitCode = 0,
+            ShowCollection = new CollectionInfo
+            {
+                Name = "cases",
+                Source = "csharp",
+                Origin = "MyApp.Cases",
+                State = CollectionStates.Changes,
+                Declaration = "sha256:aaaa",
+                ReconciledAt = At,
+                User = "kev",
+                Host = "ci-runner",
+                DurationMs = 38400,
+                RunId = "run-1",
+                Indexes =
+                [
+                    new IndexInfo { Name = "_id_", Keys = Json("""{ "_id": 1 }"""), Status = "default" },
+                    new IndexInfo { Name = "by_ref", Keys = Json("""{ "reference": 1 }"""), Options = Json("""{ "unique": true }"""), Status = "declared", DeclaredName = "reference_unique" },
+                    new IndexInfo { Name = "legacy_1", Keys = Json("""{ "legacy": 1 }"""), Options = Json("""{ "hidden": true }"""), Status = "undeclared", HiddenAt = At },
+                    new IndexInfo { Name = "adhoc_x", Keys = Json("""{ "x": -1 }"""), Status = "ignored" },
+                ],
+                Changes = [new IndexChangeInfo { Action = "create", Index = "status_1", Keys = Json("""{ "status": 1 }""") }],
+                Output = new MigrationOutputInfo
+                {
+                    Committed = true,
+                    Operations = [new OperationRecord { Kind = "createIndex", Collection = "cases", DurationMs = 38200, Statement = Json("""{ "keys": { "companyId": 1 } }""") }],
+                },
+                History = [new HistoryRecord { At = At, MigrationId = "cases", Name = "Cases", Kind = "collection", Event = "reconciled", RunId = "run-1", Host = "ci-runner" }],
+            },
+        }));
+
+        text.ShouldBe("""
+            cases (collection)
+              State      changes
+              Reconciled 2026-10-22 12:31:03 by kev@ci-runner (38.40s)
+              Declared   sha256:aaaa
+              Source     csharp MyApp.Cases
+              Run        run-1
+
+            Indexes
+              _id_      { _id: 1 }
+              by_ref    { reference: 1 }  unique  (declared as reference_unique)
+              legacy_1  { legacy: 1 }  hidden  undeclared, hidden 2026-10-22 12:31
+              adhoc_x   { x: -1 }  ignored
+
+            Pending
+              + create   status_1   { status: 1 }
+
+            Last change
+
+            Operations
+              1. createIndex cases  (38.20s)
+                   keys: { companyId: 1 }
+
+            History
+             At                   ID     Name   Event       Batch  Run    Host       Error
+             2026-10-22 12:31:03  cases  Cases  reconciled         run-1  ci-runner
+
+            """.ReplaceLineEndings("\n"));
+    }
 }

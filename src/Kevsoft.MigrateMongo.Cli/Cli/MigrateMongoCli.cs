@@ -124,17 +124,27 @@ public static class MigrateMongoCli
             Add(new Command("version", "Show the tool version."), p => new CliInvocation { Command = "version", Json = p.GetValue(json) });
         }
 
-        var check = new Option<bool>("--check") { Description = "Exit with code 2 if there are pending migrations." };
-        Add(new Command("status", "Show the state of every migration.") { check },
+        var check = new Option<bool>("--check") { Description = "Exit with code 2 if there are pending migrations or collection changes." };
+        Add(new Command("status", "Show the state of every migration and collection definition.") { check },
             p => Common(p, "status", new CommandArguments { Check = p.GetValue(check) }));
 
-        Add(new Command("plan", "Show what 'up' would do. Exits with code 2 if there is pending work."), p => Common(p, "plan"));
+        var planCollections = new CollectionOptions();
+        var plan = new Command("plan", "Show what 'up' would do. Exits with code 2 if there is pending work.");
+        planCollections.AddTo(plan);
+        Add(plan, p => Common(p, "plan", planCollections.Apply(p, new CommandArguments())));
 
         var upTo = new Option<string?>("--to") { Description = "Stop after this migration id." };
         var upDryRun = new Option<bool>("--dry-run") { Description = "Show what would be applied without changing anything (no lock, no writes, no migration code runs)." };
         var upNoCapture = NoCaptureStatementsOption();
-        Add(new Command("up", "Apply pending migrations.") { upTo, upDryRun, upNoCapture },
-            p => Common(p, "up", new CommandArguments { To = p.GetValue(upTo), DryRun = p.GetValue(upDryRun), NoCaptureStatements = p.GetValue(upNoCapture) }));
+        var upCollections = new CollectionOptions();
+        var up = new Command("up", "Apply pending migrations, then bring collections in line with their definitions.") { upTo, upDryRun, upNoCapture };
+        upCollections.AddTo(up);
+        Add(up, p => Common(p, "up", upCollections.Apply(p, new CommandArguments
+        {
+            To = p.GetValue(upTo),
+            DryRun = p.GetValue(upDryRun),
+            NoCaptureStatements = p.GetValue(upNoCapture),
+        })));
 
         var downTo = new Option<string?>("--to") { Description = "Roll back every migration after this id (exclusive)." };
         var count = new Option<int?>("--count", "-n") { Description = "Number of migrations to roll back (default 1)." };
@@ -217,4 +227,42 @@ public static class MigrateMongoCli
 
     private static Option<bool> NoCaptureStatementsOption() =>
         new("--no-capture-statements") { Description = "Don't record the filters, updates and commands run through context.Track(...) (overrides results.captureStatements)." };
+
+    /// <summary>The collection definition options shared by <c>up</c> and <c>plan</c>.</summary>
+    private sealed class CollectionOptions
+    {
+        private readonly Option<string?> _only = new("--only") { Description = "Only apply migrations, or only collection definitions (default: both)." };
+        private readonly Option<string[]> _allowRebuild = new("--allow-rebuild")
+        {
+            Description = "Let this index (collection.index) be dropped and created again even when onRebuild is fail. Repeat for more.",
+            AllowMultipleArgumentsPerToken = false,
+        };
+
+        private readonly Option<string[]> _allowUnmatched = new("--allow-unmatched")
+        {
+            Description = "Change this collection even though none of its existing indexes match the declared ones. Repeat for more.",
+            AllowMultipleArgumentsPerToken = false,
+        };
+
+        private readonly Option<bool> _allowSuperseded = new("--allow-superseded") { Description = "Apply collection definitions that a newer run has already replaced (e.g. when rolling back on purpose)." };
+
+        public CollectionOptions() => _only.AcceptOnlyFromAmong(OnlyScopes.Migrations, OnlyScopes.Collections);
+
+        public void AddTo(Command command)
+        {
+            command.Options.Add(_only);
+            command.Options.Add(_allowRebuild);
+            command.Options.Add(_allowUnmatched);
+            command.Options.Add(_allowSuperseded);
+        }
+
+        public CommandArguments Apply(ParseResult p, CommandArguments arguments)
+        {
+            arguments.Only = p.GetValue(_only);
+            arguments.AllowRebuild = p.GetValue(_allowRebuild) is { Length: > 0 } rebuild ? [.. rebuild] : null;
+            arguments.AllowUnmatched = p.GetValue(_allowUnmatched) is { Length: > 0 } unmatched ? [.. unmatched] : null;
+            arguments.AllowSuperseded = p.GetValue(_allowSuperseded);
+            return arguments;
+        }
+    }
 }

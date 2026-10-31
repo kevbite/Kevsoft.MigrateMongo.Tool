@@ -28,7 +28,18 @@ internal sealed class FakeStore(Func<DateTime>? clock = null) : IMigrationStore
     public Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<StoredMigrationState>>(States.Values.Select(Clone).ToList());
 
+    public Dictionary<string, StoredCollectionState> CollectionStates { get; } = new(StringComparer.Ordinal);
+
+    public Task<IReadOnlyList<StoredCollectionState>> GetCollectionStatesAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<StoredCollectionState>>(CollectionStates.Values.ToList());
+
     // Writes fail on a cancelled token, as the driver's do.
+    public Task SaveCollectionStateAsync(StoredCollectionState state, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CollectionStates[state.Name] = state;
+        return Task.CompletedTask;
+    }
 
     public Task SaveStateAsync(StoredMigrationState state, IExecutionScope? scope, CancellationToken cancellationToken)
     {
@@ -255,6 +266,42 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
         return output;
     }
 
+    /// <summary>The plan for each collection (default: in sync); called for every plan and apply.</summary>
+    public Func<CollectionDescriptor, CollectionPolicy, CollectionPlan>? CollectionPlans { get; set; }
+
+    /// <summary>Called when a collection is applied; return an exception to make it fail.</summary>
+    public Func<CollectionDescriptor, Exception?>? ApplyFailure { get; set; }
+
+    public List<CollectionPolicy> Policies { get; } = [];
+
+    public Task<CollectionPlan> PlanCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken)
+    {
+        Policies.Add(policy);
+        return Task.FromResult(CollectionPlans?.Invoke(collection, policy) ?? new CollectionPlan { Declaration = "sha256:in-sync" });
+    }
+
+    public Task<CollectionApplyResult> ApplyCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken)
+    {
+        Calls.Add($"Apply:{collection.Name}");
+        var plan = CollectionPlans?.Invoke(collection, policy) ?? new CollectionPlan { Declaration = "sha256:in-sync" };
+        if (plan.Invalid || plan.Problems.Count > 0)
+        {
+            return Task.FromResult(new CollectionApplyResult { Plan = plan, Applied = false });
+        }
+
+        if (ApplyFailure?.Invoke(collection) is { } failure)
+        {
+            throw new MigrationExecutionException(new MigrationOutputInfo { Operations = [new OperationRecord { Kind = "createIndex", Collection = collection.Name }] }, failure);
+        }
+
+        return Task.FromResult(new CollectionApplyResult
+        {
+            Plan = plan,
+            Applied = true,
+            Output = plan.HasChanges ? new MigrationOutputInfo { Operations = [new OperationRecord { Kind = "createIndex", Collection = collection.Name }] } : null,
+        });
+    }
+
     private sealed class EmptyServices : IServiceProvider
     {
         public object? GetService(Type serviceType) => null;
@@ -265,6 +312,16 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
 internal sealed class FixedTime(DateTime now) : TimeProvider
 {
     public override DateTimeOffset GetUtcNow() => new(now);
+}
+
+internal static class Collections
+{
+    public static CollectionDescriptor Create(string name) =>
+        new(name, "csharp", $"Test.{char.ToUpperInvariant(name[0])}{name[1..]}", (_, _) => new CollectionDeclaration { Name = name, Indexes = [] });
+
+    public static CollectionPlan Plan(string declaration, params IndexChangeInfo[] changes) => new() { Declaration = declaration, Changes = [.. changes] };
+
+    public static IndexChangeInfo Change(string action, string index, string? detail = null) => new() { Action = action, Index = index, Detail = detail };
 }
 
 internal sealed class RecordingSink : IMigrationEventSink

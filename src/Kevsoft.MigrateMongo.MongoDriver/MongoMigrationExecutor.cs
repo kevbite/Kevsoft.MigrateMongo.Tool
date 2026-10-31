@@ -12,6 +12,143 @@ public sealed class MongoMigrationExecutor(
     IServiceProvider services,
     ILoggerFactory loggerFactory) : IMigrationExecutor
 {
+    /// <summary>MongoDB 6.0, which added converting an index to unique with <c>collMod</c>.</summary>
+    private const int UniqueConversionWireVersion = 17;
+
+    private int? _maxWireVersion;
+
+    // Index changes are planned from the primary's view and written with majority, whatever the connection string says;
+    // migrations keep the user's settings.
+    private IMongoDatabase CollectionsDatabase =>
+        database.WithReadPreference(ReadPreference.Primary).WithWriteConcern(WriteConcern.WMajority);
+
+    public async Task<CollectionPlan> PlanCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken) =>
+        (await PlanIndexesAsync(collection, policy, cancellationToken)).ToCollectionPlan();
+
+    public async Task<CollectionApplyResult> ApplyCollectionAsync(
+        CollectionDescriptor collection,
+        CollectionPolicy policy,
+        MigrationRunInfo run,
+        OutputOptions options,
+        CancellationToken cancellationToken)
+    {
+        var plan = await PlanIndexesAsync(collection, policy, cancellationToken);
+        if (plan.Invalid || plan.Problems.Count > 0)
+        {
+            return new CollectionApplyResult { Plan = plan.ToCollectionPlan(), Applied = false };
+        }
+
+        var results = new MigrationResults(options.CaptureStatements);
+        var context = new MigrationContext(CollectionsDatabase, null, loggerFactory.CreateLogger($"Collection.{collection.Name}"), services, run, results);
+        try
+        {
+            await IndexApplier.ApplyAsync(context, collection.Name, plan, cancellationToken);
+        }
+        catch (Exception e)
+        {
+            throw new MigrationExecutionException(MigrationOutputMapper.From(results, options.MaxResultsBytes, out _), e);
+        }
+
+        return new CollectionApplyResult
+        {
+            Plan = plan.ToCollectionPlan(),
+            Applied = true,
+            Output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out _),
+        };
+    }
+
+    private async Task<IndexPlan> PlanIndexesAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken)
+    {
+        CollectionDeclaration declaration;
+        try
+        {
+            declaration = collection.Declare(services, database);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return IndexPlan.InvalidPlan($"{collection.Name}: {e.Message}");
+        }
+
+        List<BsonDocument> existing;
+        try
+        {
+            using var cursor = await CollectionsDatabase.GetCollection<BsonDocument>(declaration.Name).Indexes.ListAsync(cancellationToken);
+            existing = await cursor.ToListAsync(cancellationToken);
+        }
+        catch (MongoCommandException e) when (e.Code == 26)
+        {
+            // NamespaceNotFound: the collection doesn't exist yet, so every declared index is created (which creates it).
+            existing = [];
+        }
+
+        var canConvertToUnique = await MaxWireVersionAsync(cancellationToken) >= UniqueConversionWireVersion;
+        return IndexPlanner.Plan(
+            declaration,
+            existing,
+            policy,
+            canConvertToUnique,
+            await FilledCollationsAsync(declaration, cancellationToken),
+            await DefaultCollationAsync(declaration.Name, cancellationToken));
+    }
+
+    /// <summary>The collection's default collation, which the server gives an index created without one.</summary>
+    private async Task<BsonDocument?> DefaultCollationAsync(string collection, CancellationToken cancellationToken)
+    {
+        using var cursor = await CollectionsDatabase.ListCollectionsAsync(new ListCollectionsOptions { Filter = new BsonDocument("name", collection) }, cancellationToken);
+        var info = await cursor.FirstOrDefaultAsync(cancellationToken);
+        return info?.GetValue("options", null) is BsonDocument options && options.GetValue("collation", null) is BsonDocument collation ? collation : null;
+    }
+
+    /// <summary>
+    /// Each declared collation as the server fills it in for an index, which depends on the locale (e.g. <c>da</c> puts upper
+    /// case first). Explaining a query with the collation shows it without changing anything. One the server won't explain,
+    /// e.g. an invalid locale that creating the index will report, is left out.
+    /// </summary>
+    private async Task<Dictionary<string, BsonDocument>> FilledCollationsAsync(CollectionDeclaration declaration, CancellationToken cancellationToken)
+    {
+        var filled = new Dictionary<string, BsonDocument>(StringComparer.Ordinal);
+        foreach (var collation in declaration.Indexes.Select(i => i.Options.GetValue("collation", null)).OfType<BsonDocument>())
+        {
+            var key = IndexPlanner.CollationKey(collation);
+            if (filled.ContainsKey(key) || collation.GetValue("locale", "simple") == "simple")
+            {
+                continue;
+            }
+
+            try
+            {
+                var explain = await CollectionsDatabase.RunCommandAsync<BsonDocument>(
+                    new BsonDocument
+                    {
+                        { "explain", new BsonDocument { { "find", declaration.Name }, { "filter", new BsonDocument() }, { "collation", collation } } },
+                        { "verbosity", "queryPlanner" },
+                    },
+                    cancellationToken: cancellationToken);
+                if (IndexPlanner.ExplainedCollation(explain, collation) is { } full)
+                {
+                    filled[key] = full;
+                }
+            }
+            catch (MongoCommandException)
+            {
+                // Compared by the fields it sets instead.
+            }
+        }
+
+        return filled;
+    }
+
+    private async Task<int> MaxWireVersionAsync(CancellationToken cancellationToken)
+    {
+        if (_maxWireVersion is null)
+        {
+            var hello = await database.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1), cancellationToken: cancellationToken);
+            _maxWireVersion = hello.TryGetValue("maxWireVersion", out var version) && version.IsNumeric ? version.ToInt32() : 0;
+        }
+
+        return _maxWireVersion.Value;
+    }
+
     public async Task<bool> SupportsTransactionsAsync(CancellationToken cancellationToken)
     {
         var hello = await database.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1), cancellationToken: cancellationToken);

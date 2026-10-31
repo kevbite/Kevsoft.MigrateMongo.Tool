@@ -45,4 +45,36 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor MustImplementCollectionDefinition = new(
+        "MM0006",
+        "Collection definition must implement ICollectionDefinition<TDocument>",
+        "'{0}' is marked with [ManagedCollection] but does not implement Kevsoft.MigrateMongo.ICollectionDefinition<TDocument> exactly once",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor InvalidCollectionName = new(
+        "MM0007",
+        "Invalid collection name",
+        "Collection name '{0}' on '{1}' must be non-empty, contain no '$' and not start with 'system.'",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor CollectionNotConstructible = new(
+        "MM0008",
+        "Collection definition cannot be constructed",
+        "'{0}' must be a non-abstract public or internal class with a public or internal constructor",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor DuplicateCollection = new(
+        "MM0009",
+        "Duplicate collection definition",
+        "Collection '{0}' is defined by more than one class: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }
