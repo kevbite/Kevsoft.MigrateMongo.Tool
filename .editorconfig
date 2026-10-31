@@ -17,6 +17,8 @@ trim_trailing_whitespace = false
 end_of_line = lf
 
 [*.cs]
+# C# files are committed with CRLF. Unset, dotnet format uses the OS's line ending, so Linux and Windows can disagree.
+end_of_line = crlf
 csharp_style_namespace_declarations = file_scoped:warning
 csharp_using_directive_placement = outside_namespace:warning
 dotnet_sort_system_directives_first = true
