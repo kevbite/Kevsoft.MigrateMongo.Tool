@@ -41,15 +41,16 @@ internal static class Scaffolding
 
           <ItemGroup>
             <PackageReference Include="Kevsoft.MigrateMongo.Runner" Version="{runnerVersion}" />
-        {(aws ? AwsPackageReference(runnerVersion) : "")}    <PackageReference Include="MongoDB.Driver" Version="{driverVersion}" />
+        {(aws ? AwsPackageReference(runnerVersion, driverVersion) : "")}    <PackageReference Include="MongoDB.Driver" Version="{driverVersion}" />
           </ItemGroup>
 
         </Project>
 
         """;
 
-    private static string AwsPackageReference(string version) => $"""
-            <PackageReference Include="Kevsoft.MigrateMongo.Aws" Version="{version}" />
+    private static string AwsPackageReference(string runnerVersion, string driverVersion) => $"""
+            <PackageReference Include="Kevsoft.MigrateMongo.Aws" Version="{runnerVersion}" />
+            <PackageReference Include="MongoDB.Driver.Authentication.AWS" Version="{driverVersion}" />
 
         """;
 

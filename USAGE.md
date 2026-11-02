@@ -1111,6 +1111,10 @@ To connect without a password using an AWS IAM role (MongoDB Atlas "AWS IAM" dat
 dotnet add package Kevsoft.MigrateMongo.Aws     # or: migrate-mongo init --auth aws
 ```
 
+`Kevsoft.MigrateMongo.Aws` pulls in `MongoDB.Driver.Authentication.AWS`, which must stay on the same version as your
+`MongoDB.Driver` reference. `init --auth aws` pins both for you; if you add the package by hand, reference
+`MongoDB.Driver.Authentication.AWS` at the same version as `MongoDB.Driver`.
+
 ```yaml
 environments:
   prod:
