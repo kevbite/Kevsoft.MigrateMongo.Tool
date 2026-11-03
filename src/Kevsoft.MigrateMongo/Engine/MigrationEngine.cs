@@ -1284,8 +1284,14 @@ public sealed partial class MigrationEngine
     private static string Describe(Exception e) => Cause(e) switch
     {
         OperationCanceledException => "The operation was cancelled.",
-        var cause => $"{cause.GetType().Name}: {cause.Message}",
+        var cause => $"{cause.GetType().Name}: {OneFullStop(cause.Message)}",
     };
+
+    /// <summary>
+    /// The driver adds a full stop to the server's message (<c>Command collMod failed: ….</c>), which usually has one already.
+    /// </summary>
+    private static string OneFullStop(string message) =>
+        message.EndsWith("..", StringComparison.Ordinal) && !message.EndsWith("...", StringComparison.Ordinal) ? message[..^1] : message;
 }
 
 public sealed class MigrationEngineException(string message) : Exception(message);

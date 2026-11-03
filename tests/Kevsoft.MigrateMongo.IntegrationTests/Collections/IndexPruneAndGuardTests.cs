@@ -212,6 +212,48 @@ public sealed class IndexPruneAndGuardTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task A_new_name_alone_still_rebuilds_an_index_whose_options_change()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("reference"), new() { Unique = true, Sparse = true })));
+        var renamed = Define(i => i.Add(k => k.Ascending("reference"), new() { Name = "reference_unique", Unique = true }));
+
+        var plan = await mongo.PlanAsync(renamed, Rebuild("fail"));
+        var collection = plan.Collections!.Single();
+        var rebuild = collection.Changes.ShouldHaveSingleItem();
+        (rebuild.Action, rebuild.Index, rebuild.Detail).ShouldBe(("rebuild", "reference_1", "sparse: true → false; name reference_1 → reference_unique (drop, then create)"));
+        collection.Problems!.ShouldHaveSingleItem().ShouldBe(
+            "things: rebuilding reference_1 drops it before the new one builds, and indexes.onRebuild is fail. " +
+            "A new name alone won't build it alongside the old one: MongoDB doesn't allow two indexes with the same keys, collation " +
+            "and partial filter. Give the declared index a new name and a partial filter or collation, or run with --allow-rebuild things.reference_1.");
+
+        // Allowed, it's rebuilt under the declared name.
+        await mongo.ApplyAsync(renamed, Rebuild("fail"), new CommandArguments { AllowRebuild = ["things.reference_1"] });
+        mongo.Operations().ShouldBe(["dropIndex", "createIndex"]);
+        mongo.Indexes().Keys.ShouldBe(["_id_", "reference_unique"], ignoreOrder: true);
+        mongo.Indexes()["reference_unique"].Contains("sparse").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task An_index_whose_options_change_builds_alongside_under_a_new_name_with_a_partial_filter()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("reference"), new() { Unique = true, Sparse = true })));
+
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("reference"), new()
+        {
+            Name = "reference_unique",
+            Unique = true,
+            PartialFilterExpression = Builders<BsonDocument>.Filter.Exists("reference"),
+        })), Rebuild("fail"));
+
+        mongo.Operations().ShouldBe(["createIndex"]);
+        var indexes = mongo.Indexes();
+        indexes.Keys.ShouldBe(["_id_", "reference_1", "reference_unique"], ignoreOrder: true);
+        indexes["reference_unique"]["partialFilterExpression"].ShouldBe(new BsonDocument("reference", new BsonDocument("$exists", true)));
+    }
+
+    [Fact]
     public async Task A_definition_can_refuse_rebuilds_even_when_the_config_allows_them()
     {
         await using var mongo = new CollectionHarness(environment);

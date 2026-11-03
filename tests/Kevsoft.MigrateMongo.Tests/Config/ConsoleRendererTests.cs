@@ -340,6 +340,39 @@ public sealed class ConsoleRendererTests
     }
 
     [Fact]
+    public void A_failure_already_shown_is_not_repeated_by_the_result()
+    {
+        var text = Render(r =>
+        {
+            r.Render(new RunnerEvent { Type = EventTypes.CollectionStarted, Collection = "orders" });
+            r.Render(new RunnerEvent { Type = EventTypes.CollectionFailed, Collection = "orders", Error = "MongoCommandException: Command collMod failed: duplicates." });
+            r.Render(new RunnerEvent
+            {
+                Type = EventTypes.Result,
+                Result = new CommandResult { ExitCode = ExitCodes.Failure, Message = "Collection orders failed: MongoCommandException: Command collMod failed: duplicates." },
+            });
+        });
+
+        text.ShouldBe("""
+            ⟳ orders
+            ✖ orders: MongoCommandException: Command collMod failed: duplicates.
+            ✖ Collection orders failed.
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void A_failure_that_was_not_shown_is_given_in_full_by_the_result()
+    {
+        var text = Render(r => r.RenderResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = "Migration 20260101000002 broken failed: InvalidOperationException: boom" }));
+
+        text.ShouldBe("""
+            ✖ Migration 20260101000002 broken failed: InvalidOperationException: boom
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void Status_lists_collections_after_the_migrations()
     {
         var text = Render(r => r.RenderResult(new CommandResult

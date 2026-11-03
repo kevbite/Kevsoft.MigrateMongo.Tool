@@ -78,6 +78,8 @@ public sealed class IndexChangeTests(IntegrationEnvironment environment)
 
         up.ExitCode.ShouldBe(ExitCodes.Failure);
         up.Message.ShouldStartWith("Collection things failed:");
+        // The driver adds a full stop to the server's message, which has one already.
+        up.Message.ShouldNotEndWith("..");
         var index = mongo.Indexes()["email_1"];
         index.GetValue("unique", false).ToBoolean().ShouldBeFalse();
         index.GetValue("prepareUnique", false).ToBoolean().ShouldBeFalse();
@@ -145,18 +147,42 @@ public sealed class IndexChangeTests(IntegrationEnvironment environment)
         mongo.Indexes()["email_1"].Contains("unique").ShouldBeFalse();
     }
 
-    [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    public async Task Adding_or_removing_a_ttl_rebuilds_the_index(bool before, bool after)
+    [Fact]
+    public async Task Adding_a_ttl_is_made_in_place()
     {
         await using var mongo = new CollectionHarness(environment);
-        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("expiresAt"), new() { ExpireAfter = before ? TimeSpan.FromHours(1) : null })));
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("expiresAt"))));
 
-        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("expiresAt"), new() { ExpireAfter = after ? TimeSpan.FromHours(1) : null })));
+        var next = Define(i => i.Add(k => k.Ascending("expiresAt"), new() { ExpireAfter = TimeSpan.FromHours(1) }));
+        (await mongo.PlanAsync(next)).Collections!.Single().Changes.Single().Detail.ShouldBe("expireAfterSeconds: none → 3600");
+        await mongo.ApplyAsync(next);
+
+        mongo.Operations().ShouldBe(["runCommand"]);
+        mongo.Indexes()["expiresAt_1"]["expireAfterSeconds"].ToInt64().ShouldBe(3600);
+    }
+
+    [Fact]
+    public async Task Adding_a_ttl_to_a_wildcard_index_is_a_rebuild()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Wildcard("attributes"))));
+
+        // Only planned: the server won't build a wildcard index with a TTL, and collMod trying to add one aborts mongod 8.0.
+        var plan = await mongo.PlanAsync(Define(i => i.Add(k => k.Wildcard("attributes"), new() { ExpireAfter = TimeSpan.FromHours(1) })));
+
+        CollectionHarness.Changes(plan).ShouldBe(["rebuild attributes.$**_1"]);
+    }
+
+    [Fact]
+    public async Task Removing_a_ttl_rebuilds_the_index()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("expiresAt"), new() { ExpireAfter = TimeSpan.FromHours(1) })));
+
+        await mongo.ApplyAsync(Define(i => i.Add(k => k.Ascending("expiresAt"))));
 
         mongo.Operations().ShouldBe(["dropIndex", "createIndex"]);
-        mongo.Indexes()["expiresAt_1"].Contains("expireAfterSeconds").ShouldBe(after);
+        mongo.Indexes()["expiresAt_1"].Contains("expireAfterSeconds").ShouldBeFalse();
     }
 
     [Fact]
