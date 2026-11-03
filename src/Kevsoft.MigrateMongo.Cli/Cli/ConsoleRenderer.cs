@@ -14,6 +14,9 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
     private const string Cyan = "\u001b[36m";
     private const string Dim = "\u001b[2m";
 
+    // The error a failed migration or collection has shown, which the result's message would repeat.
+    private string? _shownError;
+
     public void Render(RunnerEvent e)
     {
         switch (e.Type)
@@ -38,6 +41,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
                 break;
             case EventTypes.MigrationFailed:
                 WriteLine(Paint($"✖ {e.MigrationId} {e.Name}: {e.Error}", Red));
+                _shownError = e.Error;
                 RenderOutputSummary(e.Output, e.MigrationId, failed: true);
                 if (e.Details is not null)
                 {
@@ -60,6 +64,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
                 break;
             case EventTypes.CollectionFailed:
                 WriteLine(Paint($"✖ {e.Collection}: {e.Error}", Red));
+                _shownError = e.Error;
                 RenderOutputSummary(e.Output, e.Collection, failed: false);
                 break;
             case EventTypes.CollectionSkipped:
@@ -168,7 +173,11 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         if (!string.IsNullOrEmpty(result.Message))
         {
             var failed = result.ExitCode is not (ExitCodes.Success or ExitCodes.PendingMigrations);
-            WriteLine(failed ? Paint($"✖ {result.Message}", Red) : result.Message);
+            // The failure's own ✖ line gave the error, so "Collection orders failed: {error}" becomes "Collection orders failed."
+            var message = failed && _shownError is { Length: > 0 } shown && result.Message.EndsWith(": " + shown, StringComparison.Ordinal)
+                ? result.Message[..^(shown.Length + 2)] + "."
+                : result.Message;
+            WriteLine(failed ? Paint($"✖ {message}", Red) : message);
         }
     }
 

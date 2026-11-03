@@ -60,6 +60,44 @@ public sealed class IndexPlannerTests
     [Theory]
     [InlineData(true, "modify")]
     [InlineData(false, "rebuild")]
+    public void Adding_a_ttl_uses_collMod_when_the_server_supports_it(bool canAddTtl, string action)
+    {
+        var plan = Plan(
+            [Declared(new BsonDocument("at", 1), new BsonDocument("expireAfterSeconds", 3600L))],
+            [IdIndex, Server("at_1", new BsonDocument("at", 1))],
+            canAddTtl: canAddTtl);
+
+        var change = plan.Changes.ShouldHaveSingleItem();
+        change.Info.Action.ShouldBe(action);
+        change.Info.Detail.ShouldStartWith("expireAfterSeconds: none → 3600");
+        change.CollMods.ShouldBe(canAddTtl ? [new BsonDocument { { "name", "at_1" }, { "expireAfterSeconds", 3600L } }] : []);
+    }
+
+    [Theory]
+    [InlineData("""{ "at": 1, "status": 1 }""")]
+    [InlineData("""{ "$**": 1 }""")]
+    [InlineData("""{ "attributes.$**": 1 }""")]
+    public void A_ttl_is_added_to_a_compound_or_wildcard_index_by_rebuilding_it(string keys)
+    {
+        var key = BsonDocument.Parse(keys);
+        var plan = Plan([Declared(key, new BsonDocument("expireAfterSeconds", 3600L))], [IdIndex, Server("by_at", key)]);
+
+        plan.Changes.ShouldHaveSingleItem().Info.Action.ShouldBe("rebuild");
+    }
+
+    [Fact]
+    public void Removing_a_ttl_rebuilds_the_index()
+    {
+        var plan = Plan([Declared(new BsonDocument("at", 1))], [IdIndex, Server("at_1", new BsonDocument("at", 1), new BsonDocument("expireAfterSeconds", 3600))]);
+
+        var change = plan.Changes.ShouldHaveSingleItem();
+        change.Info.Action.ShouldBe("rebuild");
+        change.Info.Detail.ShouldBe("expireAfterSeconds: 3600 → none (drop, then create)");
+    }
+
+    [Theory]
+    [InlineData(true, "modify")]
+    [InlineData(false, "rebuild")]
     public void Making_an_index_unique_uses_collMod_when_the_server_supports_it(bool canConvert, string action)
     {
         var plan = Plan(
@@ -86,6 +124,19 @@ public sealed class IndexPlannerTests
         change.DropName.ShouldBe("by_email");
         change.Create!["name"].AsString.ShouldBe("by_email");
         change.Info.Blocked.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_rebuild_takes_the_declared_name_and_says_so()
+    {
+        var plan = Plan(
+            [Declared(new BsonDocument("reference", 1), new BsonDocument { { "name", "reference_unique" }, { "unique", true } })],
+            [IdIndex, Server("reference_1", new BsonDocument("reference", 1), new BsonDocument { { "unique", true }, { "sparse", true } })]);
+
+        var change = plan.Changes.ShouldHaveSingleItem();
+        (change.Info.Action, change.Info.Index, change.DropName).ShouldBe(("rebuild", "reference_1", "reference_1"));
+        change.Info.Detail.ShouldBe("sparse: true → false; name reference_1 → reference_unique (drop, then create)");
+        change.Create.ShouldBe(new BsonDocument { { "key", new BsonDocument("reference", 1) }, { "name", "reference_unique" }, { "unique", true } });
     }
 
     [Fact]
@@ -121,12 +172,64 @@ public sealed class IndexPlannerTests
         blocked.Changes.ShouldHaveSingleItem().Info.Blocked.ShouldBe(true);
         blocked.Problems.ShouldBe([
             "users: rebuilding email_1 drops it before the new one builds, and indexes.onRebuild is fail. " +
-            "Give the declared index a new name so it builds alongside the old one, or run with --allow-rebuild users.email_1.",
+            "A new name alone won't build it alongside the old one: MongoDB doesn't allow two indexes with the same keys, collation " +
+            "and partial filter. Give the declared index a new name and a partial filter or collation, or run with --allow-rebuild users.email_1.",
         ]);
 
         var allowed = Plan([declared], existing, Policy(onRebuild: "fail", allowRebuild: ["email_1"]));
         allowed.Problems.ShouldBeEmpty();
         allowed.Changes.ShouldHaveSingleItem().Info.Blocked.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_blocked_rebuild_that_only_changes_options_still_rebuilds_under_a_new_name()
+    {
+        BsonDocument[] existing = [IdIndex, Server("reference_1", new BsonDocument("reference", 1), new BsonDocument { { "unique", true }, { "sparse", true } })];
+
+        var renamed = Plan([Declared(new BsonDocument("reference", 1), new BsonDocument { { "name", "reference_unique" }, { "unique", true } })], existing, Policy(onRebuild: "fail"));
+        Summary(renamed).ShouldBe(["rebuild reference_1"]);
+        renamed.Problems.ShouldHaveSingleItem().ShouldContain("A new name alone won't build it alongside the old one");
+
+        // A partial filter gives it an identity of its own, so it builds alongside.
+        var apart = Plan(
+            [Declared(new BsonDocument("reference", 1), new BsonDocument
+            {
+                { "name", "reference_unique" },
+                { "unique", true },
+                { "partialFilterExpression", new BsonDocument("reference", new BsonDocument("$exists", true)) },
+            })],
+            existing,
+            Policy(onRebuild: "fail"));
+        Summary(apart).ShouldBe(["create reference_unique (unique, partialFilterExpression { reference: { $exists: true } })", "keep reference_1 (not declared (prune: report))"]);
+        apart.Problems.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_blocked_rebuild_of_a_named_index_with_new_keys_can_build_alongside_under_a_new_name()
+    {
+        var plan = Plan(
+            [Declared(new BsonDocument { { "companyId", 1 }, { "status", 1 } }, new BsonDocument("name", "by_company"))],
+            [IdIndex, Server("by_company", new BsonDocument("companyId", 1))],
+            Policy(onRebuild: "fail"));
+
+        plan.Problems.ShouldBe([
+            "users: rebuilding by_company drops it before the new one builds, and indexes.onRebuild is fail. " +
+            "Give the declared index a new name so it builds alongside the old one, or run with --allow-rebuild users.by_company.",
+        ]);
+    }
+
+    [Fact]
+    public void A_blocked_rebuild_of_the_text_index_can_only_be_allowed()
+    {
+        var plan = Plan(
+            [Declared(new BsonDocument("title", "text"))],
+            [IdIndex, Server("body_text", new BsonDocument { { "_fts", "text" }, { "_ftsx", 1 } }, new BsonDocument("weights", new BsonDocument("body", 1)))],
+            Policy(onRebuild: "fail", allowUnmatched: true));
+
+        plan.Problems.ShouldBe([
+            "users: rebuilding body_text drops it before the new one builds, and indexes.onRebuild is fail. " +
+            "A collection can only have one text index, so the new one can't build alongside the old one. Run with --allow-rebuild users.body_text.",
+        ]);
     }
 
     [Fact]
@@ -161,7 +264,7 @@ public sealed class IndexPlannerTests
     {
         var declaration = new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("status", 1))], Prune = IndexPrune.Drop };
 
-        var plan = IndexPlanner.Plan(declaration, [IdIndex, Server("status_1", new BsonDocument("status", 1)), Server("old_1", new BsonDocument("old", 1))], Policy(), true);
+        var plan = IndexPlanner.Plan(declaration, [IdIndex, Server("status_1", new BsonDocument("status", 1)), Server("old_1", new BsonDocument("old", 1))], Policy(), true, true);
 
         Summary(plan).ShouldBe(["drop old_1 (not declared)"]);
     }
@@ -259,6 +362,7 @@ public sealed class IndexPlannerTests
             declaration,
             [IdIndex, Server("status_1", new BsonDocument("status", 1)), Server("adhoc_created", new BsonDocument("createdAt", -1))],
             Policy(prune: "drop"),
+            true,
             true);
 
         plan.Changes.ShouldBeEmpty();
@@ -279,6 +383,7 @@ public sealed class IndexPlannerTests
             declaration,
             [IdIndex, Server("status_1", new BsonDocument("status", 1)), Server("adhoc_email", new BsonDocument { { "email", 1 }, { "createdAt", -1 } })],
             Policy(),
+            true,
             true);
 
         plan.Changes.ShouldNotContain(c => c.Info.Action == "rebuild");
@@ -306,6 +411,7 @@ public sealed class IndexPlannerTests
                 Server("search_text", new BsonDocument { { "_fts", "text" }, { "_ftsx", 1 } }, new BsonDocument("weights", new BsonDocument("body", 1))),
             ],
             Policy(),
+            true,
             true);
 
         plan.Changes.ShouldNotContain(c => c.Info.Action == "rebuild");
@@ -333,6 +439,7 @@ public sealed class IndexPlannerTests
                 Server("search_text", new BsonDocument { { "_fts", "text" }, { "_ftsx", 1 } }, new BsonDocument("weights", new BsonDocument("body", 1))),
             ],
             Policy(),
+            true,
             true);
 
         plan.Problems.ShouldBe([
@@ -346,7 +453,7 @@ public sealed class IndexPlannerTests
     {
         var declaration = new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("status", 1))], Ignored = ["adhoc_*"] };
 
-        var plan = IndexPlanner.Plan(declaration, [IdIndex, Server("adhoc_status", new BsonDocument("status", 1))], Policy(), true);
+        var plan = IndexPlanner.Plan(declaration, [IdIndex, Server("adhoc_status", new BsonDocument("status", 1))], Policy(), true, true);
 
         plan.Changes.ShouldBeEmpty();
         plan.Problems.ShouldBeEmpty();
@@ -462,11 +569,12 @@ public sealed class IndexPlannerTests
     [Fact]
     public void Declaring_the_simple_collation_is_a_different_declaration_from_none()
     {
-        var none = IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("code", 1))] }, [IdIndex], Policy(), true);
+        var none = IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("code", 1))] }, [IdIndex], Policy(), true, true);
         var simple = IndexPlanner.Plan(
             new CollectionDeclaration { Name = "users", Indexes = [Declared(new BsonDocument("code", 1), new BsonDocument("collation", new BsonDocument("locale", "simple")))] },
             [IdIndex],
             Policy(),
+            true,
             true);
 
         simple.Declaration.ShouldNotBe(none.Declaration);
@@ -579,9 +687,10 @@ public sealed class IndexPlannerTests
         BsonDocument[] existing,
         CollectionPolicy? policy = null,
         bool canConvertToUnique = true,
+        bool canAddTtl = true,
         Dictionary<string, BsonDocument>? filledCollations = null,
         BsonDocument? defaultCollation = null) =>
-        IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = declared }, existing, policy ?? Policy(), canConvertToUnique, filledCollations, defaultCollation);
+        IndexPlanner.Plan(new CollectionDeclaration { Name = "users", Indexes = declared }, existing, policy ?? Policy(), canConvertToUnique, canAddTtl, filledCollations, defaultCollation);
 
     private static Dictionary<string, BsonDocument> Filled(params (BsonDocument Declared, BsonDocument Filled)[] collations) =>
         collations.ToDictionary(c => IndexPlanner.CollationKey(c.Declared), c => c.Filled);

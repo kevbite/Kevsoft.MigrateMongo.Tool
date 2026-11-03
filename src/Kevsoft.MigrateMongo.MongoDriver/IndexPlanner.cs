@@ -25,7 +25,8 @@ internal static class IndexPlanner
     private static readonly JsonWriterSettings Canonical = new() { OutputMode = JsonOutputMode.CanonicalExtendedJson };
 
     /// <summary>
-    /// Plans the changes. <paramref name="filledCollations"/> has the declared collations as the server fills them in, by
+    /// Plans the changes. <paramref name="canAddTtl"/> is whether <c>collMod</c> can make an index a TTL one (MongoDB 5.1+).
+    /// <paramref name="filledCollations"/> has the declared collations as the server fills them in, by
     /// <see cref="CollationKey"/>; one that's missing is compared only by the fields it sets. <paramref name="defaultCollation"/>
     /// is the collection's default collation, which the server gives an index declared without one.
     /// </summary>
@@ -34,6 +35,7 @@ internal static class IndexPlanner
         IReadOnlyList<BsonDocument> existingIndexes,
         CollectionPolicy policy,
         bool canConvertToUnique,
+        bool canAddTtl,
         IReadOnlyDictionary<string, BsonDocument>? filledCollations = null,
         BsonDocument? defaultCollation = null)
     {
@@ -132,7 +134,7 @@ internal static class IndexPlanner
                 plan.Problems.Add($"{name}: the declared index {Display(index.Keys)} matches {server.Name}, which is ignored, so it isn't changed " +
                                   $"({string.Join("; ", differences.Select(d => d.Describe()))}). Declare it as it is, or stop ignoring {server.Name}.");
             }
-            else if (differences.All(d => CanModify(d, canConvertToUnique)))
+            else if (differences.All(d => CanModify(d, server, canConvertToUnique, canAddTtl)))
             {
                 modifies.Add(Modify(server, differences));
             }
@@ -296,7 +298,7 @@ internal static class IndexPlanner
         var name = index.NameDeclared ? index.Name : server.Name;
         var change = new PlannedChange
         {
-            Info = Info(IndexActions.Rebuild, server.Name, index.Keys, detail + " (drop, then create)"),
+            Info = Info(IndexActions.Rebuild, server.Name, index.Keys, detail + (name != server.Name ? $"; name {server.Name} → {name}" : "") + " (drop, then create)"),
             Create = CreateSpec(index, name),
             DropName = server.Name,
             Existing = server.Source,
@@ -309,8 +311,15 @@ internal static class IndexPlanner
         {
             change.Info.Blocked = true;
             change.Info.Reason = source;
-            problems.Add($"{declaration.Name}: rebuilding {server.Name} drops it before the new one builds, and {source}. " +
-                         $"Give the declared index a new name so it builds alongside the old one, or run with --allow-rebuild {declaration.Name}.{server.Name}.");
+            var allow = $"--allow-rebuild {declaration.Name}.{server.Name}";
+            // A new name builds it alongside the old one only if that leaves the two indexes with different identities.
+            var advice = index.IsText && server.IsText
+                ? $"A collection can only have one text index, so the new one can't build alongside the old one. Run with {allow}."
+                : SameIdentity(index, server)
+                    ? "A new name alone won't build it alongside the old one: MongoDB doesn't allow two indexes with the same keys, collation " +
+                      $"and partial filter. Give the declared index a new name and a partial filter or collation, or run with {allow}."
+                    : $"Give the declared index a new name so it builds alongside the old one, or run with {allow}.";
+            problems.Add($"{declaration.Name}: rebuilding {server.Name} drops it before the new one builds, and {source}. {advice}");
         }
 
         return change;
@@ -507,13 +516,21 @@ internal static class IndexPlanner
             .Where(d => !Equals(d.Declared, d.Server))
             .ToList();
 
-    private static bool CanModify(Difference difference, bool canConvertToUnique) => difference.Name switch
+    private static bool CanModify(Difference difference, IndexSpec server, bool canConvertToUnique, bool canAddTtl) => difference.Name switch
     {
         "hidden" => true,
-        "expireAfterSeconds" => difference.Declared is not null && difference.Server is not null,
+        // Nothing takes a TTL away in place.
+        "expireAfterSeconds" => difference.Declared is not null && (difference.Server is not null || canAddTtl && CanHaveTtl(server)),
         "unique" => canConvertToUnique && difference.Declared is BsonBoolean { Value: true },
         _ => false,
     };
+
+    /// <summary>
+    /// Whether <c>collMod</c> can add a TTL: only to a single-field index that isn't a wildcard one. A wildcard index can't
+    /// have a TTL, and on MongoDB 8.0 a <c>collMod</c> adding one aborts the server.
+    /// </summary>
+    private static bool CanHaveTtl(IndexSpec server) =>
+        server.Key.ElementCount == 1 && !server.Key.GetElement(0).Name.EndsWith("$**", StringComparison.Ordinal);
 
     internal static IndexSpec FromDeclaration(
         IndexDeclaration declaration,

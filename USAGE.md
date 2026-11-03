@@ -512,8 +512,9 @@ Once matched, the other options are compared:
 |---|---|
 | Declared, not on the server | Creates it. |
 | TTL or `hidden` changed | `collMod`, in place. |
+| TTL added | `collMod`, in place, on a single-field index (MongoDB 5.1+). A compound or wildcard index is rebuilt. |
 | Made unique | `collMod` with `prepareUnique`, then `unique` (MongoDB 6.0+). Fails, leaving the index as it was, if there are duplicates; `prepareUnique` is turned off again, also when the run is cancelled part-way. |
-| Any other option changed | Drops the index and creates it again, under the same name. |
+| Any other option changed, or the TTL removed | Drops the index and creates it again, under its declared name, or the existing one if none is declared. |
 | Same name, different keys | Drops it and creates the declared one. (Creating it would fail with `IndexKeySpecsConflict`.) |
 | Different keys, no name | The new index is created alongside, and the old one is pruned. |
 | On the server, not declared | Depends on `prune` (below). |
@@ -524,17 +525,26 @@ replacement in a rebuild fails or is cancelled (Ctrl+C, or the lock is lost), th
 
 ### Rebuilds
 
-Dropping and re-creating keeps the name, so queries that hint the index by name keep working, but the collection is
-without the index (and, for a unique index, without the constraint) while it builds. To refuse that, set
-`indexes.onRebuild: fail` (per environment if you like). `plan` and `up` then stop with exit code `4` before changing
-anything:
+An index without a declared name keeps the existing one when it's rebuilt, so queries that hint it by name keep
+working. One with a declared name is rebuilt under that name, and the plan shows the rename, e.g. `name reference_1 →
+reference_unique`. Either way the collection is without the index (and, for a unique index, without the constraint)
+while it builds. To refuse that, set `indexes.onRebuild: fail` (per environment if you like). `plan` and `up` then stop
+with exit code `4` before changing anything:
 
 ```
   ⟳ orders
       ↻ rebuild  reference_1   sparse: false → true (drop, then create)   ✖ blocked: indexes.onRebuild is fail
-error: orders: rebuilding reference_1 drops it before the new one builds, and indexes.onRebuild is fail. Give the declared
-index a new name so it builds alongside the old one, or run with --allow-rebuild orders.reference_1.
+error: orders: rebuilding reference_1 drops it before the new one builds, and indexes.onRebuild is fail. A new name
+alone won't build it alongside the old one: MongoDB doesn't allow two indexes with the same keys, collation and partial
+filter. Give the declared index a new name and a partial filter or collation, or run with --allow-rebuild
+orders.reference_1.
 ```
+
+To build the new index alongside the old one instead, it needs a name and an identity of its own. When the keys,
+collation or partial filter change, a new name is enough. When only other options change, as with `sparse` here, add a
+partial filter or collation too, e.g. a `$exists` partial filter in place of `sparse`. The old index is then
+undeclared, so `prune` (below) decides what happens to it. A collection has only one text index, so a text index can
+only be rebuilt.
 
 A definition can make this stricter, not looser: `collection.Indexes.OnRebuild = IndexRebuild.Fail`, or
 `Add(..., onRebuild: IndexRebuild.Fail)` for one index. `--allow-rebuild collection.index` approves one rebuild.

@@ -220,6 +220,20 @@ public sealed class CollectionEngineTests
         _store.CollectionStates.ShouldBeEmpty();
     }
 
+    [Theory]
+    [InlineData("Command collMod failed: Please resolve conflicting documents before running collMod again..", "Command collMod failed: Please resolve conflicting documents before running collMod again.")]
+    [InlineData("Still going...", "Still going...")]
+    public async Task A_failures_message_ends_with_one_full_stop(string message, string shown)
+    {
+        _executor.CollectionPlans = (_, _) => Collections.Plan("sha256:a", CreateStatus);
+        _executor.ApplyFailure = _ => new InvalidOperationException(message);
+
+        var result = await Engine([], "users").UpAsync(null, CancellationToken.None);
+
+        result.Message.ShouldBe($"Collection users failed: InvalidOperationException: {shown}");
+        _store.History.ShouldHaveSingleItem().Error.ShouldBe($"InvalidOperationException: {shown}");
+    }
+
     [Fact]
     public async Task A_definition_that_a_newer_run_replaced_moments_ago_is_skipped()
     {

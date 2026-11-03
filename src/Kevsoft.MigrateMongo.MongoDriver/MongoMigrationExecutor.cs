@@ -15,6 +15,9 @@ public sealed class MongoMigrationExecutor(
     /// <summary>MongoDB 6.0, which added converting an index to unique with <c>collMod</c>.</summary>
     private const int UniqueConversionWireVersion = 17;
 
+    /// <summary>MongoDB 5.1, which added making a non-TTL index a TTL one with <c>collMod</c>.</summary>
+    private const int TtlConversionWireVersion = 14;
+
     private int? _maxWireVersion;
 
     // Index changes are planned from the primary's view and written with majority, whatever the connection string says;
@@ -81,12 +84,13 @@ public sealed class MongoMigrationExecutor(
             existing = [];
         }
 
-        var canConvertToUnique = await MaxWireVersionAsync(cancellationToken) >= UniqueConversionWireVersion;
+        var wireVersion = await MaxWireVersionAsync(cancellationToken);
         return IndexPlanner.Plan(
             declaration,
             existing,
             policy,
-            canConvertToUnique,
+            canConvertToUnique: wireVersion >= UniqueConversionWireVersion,
+            canAddTtl: wireVersion >= TtlConversionWireVersion,
             await FilledCollationsAsync(declaration, cancellationToken),
             await DefaultCollationAsync(declaration.Name, cancellationToken));
     }
