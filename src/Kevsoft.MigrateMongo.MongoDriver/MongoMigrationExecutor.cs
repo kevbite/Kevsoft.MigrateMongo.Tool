@@ -1,4 +1,6 @@
 using Kevsoft.MigrateMongo.Engine;
+using System.Security.Cryptography;
+using System.Text;
 using Kevsoft.MigrateMongo.Protocol;
 using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
@@ -25,8 +27,11 @@ public sealed class MongoMigrationExecutor(
     private IMongoDatabase CollectionsDatabase =>
         database.WithReadPreference(ReadPreference.Primary).WithWriteConcern(WriteConcern.WMajority);
 
-    public async Task<CollectionPlan> PlanCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken) =>
-        (await PlanIndexesAsync(collection, policy, cancellationToken)).ToCollectionPlan();
+    public async Task<CollectionPlan> PlanCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken)
+    {
+        var (index, search) = await PlanAllAsync(collection, policy, cancellationToken);
+        return Merge(index, search);
+    }
 
     public async Task<CollectionApplyResult> ApplyCollectionAsync(
         CollectionDescriptor collection,
@@ -35,17 +40,22 @@ public sealed class MongoMigrationExecutor(
         OutputOptions options,
         CancellationToken cancellationToken)
     {
-        var plan = await PlanIndexesAsync(collection, policy, cancellationToken);
+        var (index, search) = await PlanAllAsync(collection, policy, cancellationToken);
+        var plan = Merge(index, search);
         if (plan.Invalid || plan.Problems.Count > 0)
         {
-            return new CollectionApplyResult { Plan = plan.ToCollectionPlan(), Applied = false };
+            return new CollectionApplyResult { Plan = plan, Applied = false };
         }
 
         var results = new MigrationResults(options.CaptureStatements);
         var context = new MigrationContext(CollectionsDatabase, null, loggerFactory.CreateLogger($"Collection.{collection.Name}"), services, run, results);
         try
         {
-            await IndexApplier.ApplyAsync(context, collection.Name, plan, cancellationToken);
+            await IndexApplier.ApplyAsync(context, collection.Name, index, cancellationToken);
+            if (search is not null)
+            {
+                await SearchIndexApplier.ApplyAsync(context, collection.Name, search, policy.SearchWaitForReady, policy.SearchWaitTimeout, cancellationToken);
+            }
         }
         catch (Exception e)
         {
@@ -54,13 +64,44 @@ public sealed class MongoMigrationExecutor(
 
         return new CollectionApplyResult
         {
-            Plan = plan.ToCollectionPlan(),
+            Plan = plan,
             Applied = true,
             Output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out _),
         };
     }
 
-    private async Task<IndexPlan> PlanIndexesAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken)
+    /// <summary>
+    /// Combines the regular-index plan with the optional search-index plan into one <see cref="CollectionPlan"/>. The
+    /// declaration hash is the index hash alone unless search indexes are declared, so collections with none keep the exact
+    /// hash they recorded before search support existed.
+    /// </summary>
+    private static CollectionPlan Merge(IndexPlan index, SearchIndexPlan? search)
+    {
+        var changes = index.Changes.Select(c => c.Info).ToList();
+        var problems = new List<string>(index.Problems);
+        var indexes = new List<IndexInfo>(index.Indexes);
+        if (search is not null)
+        {
+            changes.AddRange(search.Changes.Select(c => c.Info));
+            problems.AddRange(search.Problems);
+            indexes.AddRange(search.Indexes);
+        }
+
+        return new CollectionPlan
+        {
+            Declaration = search is null || index.Invalid ? index.Declaration : CombineDeclaration(index.Declaration, search.Declaration),
+            Changes = changes,
+            Problems = problems,
+            Invalid = index.Invalid,
+            Indexes = indexes,
+            Hidden = new Dictionary<string, DateTime>(index.Hidden, StringComparer.Ordinal),
+        };
+    }
+
+    private static string CombineDeclaration(string indexHash, string searchHash) =>
+        "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(indexHash + "\n" + searchHash))).ToLowerInvariant();
+
+    private async Task<(IndexPlan Index, SearchIndexPlan? Search)> PlanAllAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken)
     {
         CollectionDeclaration declaration;
         try
@@ -69,9 +110,52 @@ public sealed class MongoMigrationExecutor(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            return IndexPlan.InvalidPlan($"{collection.Name}: {e.Message}");
+            return (IndexPlan.InvalidPlan($"{collection.Name}: {e.Message}"), null);
         }
 
+        var index = await PlanIndexesAsync(declaration, policy, cancellationToken);
+        var search = await PlanSearchAsync(declaration, policy, cancellationToken);
+        return (index, search);
+    }
+
+    /// <summary>
+    /// Plans the collection's search indexes, or null when none are declared (so search indexes are never listed or pruned
+    /// for a collection that doesn't declare any). On a deployment without Atlas search support, returns a plan whose single
+    /// problem blocks the change.
+    /// </summary>
+    private async Task<SearchIndexPlan?> PlanSearchAsync(CollectionDeclaration declaration, CollectionPolicy policy, CancellationToken cancellationToken)
+    {
+        if (declaration.SearchIndexes.Count == 0)
+        {
+            return null;
+        }
+
+        List<BsonDocument> existing;
+        try
+        {
+            using var cursor = await CollectionsDatabase.GetCollection<BsonDocument>(declaration.Name).SearchIndexes.ListAsync(null, null, cancellationToken);
+            existing = await cursor.ToListAsync(cancellationToken);
+        }
+        catch (MongoCommandException e) when (e.Code == 26)
+        {
+            // NamespaceNotFound: the collection doesn't exist yet, so every declared search index is created.
+            existing = [];
+        }
+        catch (MongoException e)
+        {
+            // $listSearchIndexes isn't recognised off Atlas; declaring search indexes there can't be applied.
+            var plan = new SearchIndexPlan();
+            plan.Problems.Add(
+                $"{declaration.Name}: this deployment doesn't support Atlas search indexes ({e.Message}). " +
+                "Search indexes need MongoDB Atlas or a local Atlas deployment (mongodb-atlas-local).");
+            return plan;
+        }
+
+        return SearchIndexPlanner.Plan(declaration, existing, policy);
+    }
+
+    private async Task<IndexPlan> PlanIndexesAsync(CollectionDeclaration declaration, CollectionPolicy policy, CancellationToken cancellationToken)
+    {
         List<BsonDocument> existing;
         try
         {

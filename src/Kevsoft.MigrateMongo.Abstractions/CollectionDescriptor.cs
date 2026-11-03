@@ -48,12 +48,33 @@ public sealed class CollectionDeclaration
 
     public required IReadOnlyList<IndexDeclaration> Indexes { get; init; }
 
+    /// <summary>The Atlas Search and Vector Search indexes the collection should have.</summary>
+    public IReadOnlyList<SearchIndexDeclaration> SearchIndexes { get; init; } = [];
+
     /// <summary>Patterns of index names to leave alone.</summary>
     public IReadOnlyList<string> Ignored { get; init; } = [];
 
+    /// <summary>Patterns of search index names to leave alone.</summary>
+    public IReadOnlyList<string> SearchIgnored { get; init; } = [];
+
     public IndexPrune? Prune { get; init; }
 
+    /// <summary>What happens to search indexes that aren't declared, unless the config sets its own.</summary>
+    public SearchIndexPrune? SearchPrune { get; init; }
+
     public IndexRebuild? OnRebuild { get; init; }
+}
+
+/// <summary>One declared search index, rendered.</summary>
+public sealed class SearchIndexDeclaration
+{
+    public required string Name { get; init; }
+
+    /// <summary>The <c>createSearchIndexes</c> type: <c>search</c> or <c>vectorSearch</c>.</summary>
+    public required string Type { get; init; }
+
+    /// <summary>The index definition, as <c>createSearchIndexes</c> takes it.</summary>
+    public required BsonDocument Definition { get; init; }
 }
 
 /// <summary>One declared index, rendered.</summary>
@@ -99,10 +120,31 @@ internal static class CollectionRendering
         {
             Name = builder.Name,
             Indexes = indexes,
+            SearchIndexes = SearchIndexes(builder),
             Ignored = builder.Indexes.Ignored.ToList(),
+            SearchIgnored = builder.SearchIndexes.Ignored.ToList(),
             Prune = builder.Indexes.Prune,
+            SearchPrune = builder.SearchIndexes.Prune,
             OnRebuild = builder.Indexes.OnRebuild,
         };
+    }
+
+    private static List<SearchIndexDeclaration> SearchIndexes<TDocument>(CollectionBuilder<TDocument> builder)
+    {
+        var declared = builder.SearchIndexes.Declared;
+        var searchIndexes = new List<SearchIndexDeclaration>(declared.Count);
+        for (var i = 0; i < declared.Count; i++)
+        {
+            var search = declared[i];
+            searchIndexes.Add(new SearchIndexDeclaration
+            {
+                Name = search.Name,
+                Type = search.Type == SearchIndexType.VectorSearch ? "vectorSearch" : "search",
+                Definition = (BsonDocument)search.Definition.DeepClone(),
+            });
+        }
+
+        return searchIndexes;
     }
 
     /// <summary>

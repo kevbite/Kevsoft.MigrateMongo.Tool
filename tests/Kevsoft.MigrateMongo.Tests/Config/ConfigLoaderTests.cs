@@ -135,6 +135,9 @@ public sealed class ConfigLoaderTests
     [InlineData("indexes:\n  onRebuild: maybe", "onRebuild")]
     [InlineData("indexes:\n  dropAfter: 10", "indexes.dropAfter")]
     [InlineData("indexes: drop", "indexes")]
+    [InlineData("searchIndexes:\n  prune: hide", "prune")]
+    [InlineData("searchIndexes:\n  wait: true", "searchIndexes.wait")]
+    [InlineData("searchIndexes: drop", "searchIndexes")]
     public void Invalid_settings_are_reported(string yaml, string expected)
     {
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message.ShouldContain(expected);
@@ -298,6 +301,29 @@ public sealed class ConfigLoaderTests
 
         var prod = ConfigLoader.Load(yaml, "prod", Env);
         (prod.IndexesPrune, prod.IndexesOnRebuild, prod.IndexesDropHiddenAfterSeconds, prod.IndexesSupersededWindowSeconds).ShouldBe(("hide", "fail", 86400, 600));
+    }
+
+    [Fact]
+    public void Search_index_settings_default_to_report_no_wait_300s_and_can_be_changed_per_environment()
+    {
+        var yaml = Yaml + """
+
+            searchIndexes:
+              prune: drop
+              waitForReady: true
+              waitTimeout: 600
+            """;
+        yaml = yaml.Replace("lockWaitTimeout: 5", "lockWaitTimeout: 5\n    searchIndexes:\n      waitTimeout: 900", StringComparison.Ordinal);
+
+        var defaults = ConfigLoader.Load(Yaml, null, Env);
+        (defaults.SearchIndexesPrune, defaults.SearchIndexesWaitForReady, defaults.SearchIndexesWaitTimeoutSeconds)
+            .ShouldBe(("report", false, 300));
+
+        var local = ConfigLoader.Load(yaml, null, Env);
+        (local.SearchIndexesPrune, local.SearchIndexesWaitForReady, local.SearchIndexesWaitTimeoutSeconds).ShouldBe(("drop", true, 600));
+
+        var prod = ConfigLoader.Load(yaml, "prod", Env);
+        (prod.SearchIndexesPrune, prod.SearchIndexesWaitForReady, prod.SearchIndexesWaitTimeoutSeconds).ShouldBe(("drop", true, 900));
     }
 
     [Theory]

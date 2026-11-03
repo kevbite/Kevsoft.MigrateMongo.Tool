@@ -134,6 +134,9 @@ public sealed partial class MigrationEngine
     private CollectionPolicy PolicyFor(CollectionDescriptor collection, StoredCollectionState? state, CommandArguments arguments) => new()
     {
         Prune = _options.IndexesPrune,
+        SearchPrune = _options.SearchIndexesPrune,
+        SearchWaitForReady = _options.SearchIndexesWaitForReady,
+        SearchWaitTimeout = _options.SearchIndexesWaitTimeout,
         OnRebuild = _options.IndexesOnRebuild,
         DropHiddenAfter = _options.IndexesDropHiddenAfter,
         AllowRebuild = (arguments.AllowRebuild ?? [])

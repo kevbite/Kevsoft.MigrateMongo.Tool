@@ -399,20 +399,23 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
     private void WriteChanges(List<IndexChangeInfo> changes, string indent)
     {
         var width = changes.Max(c => c.Index.Length);
+        var actionWidth = Math.Max(8, changes.Max(c => c.Action.Length));
         foreach (var change in changes)
         {
             var (symbol, colour) = change.Action switch
             {
                 IndexActions.Create => ("+", Green),
+                IndexActions.CreateSearch => ("+", Green),
                 IndexActions.Modify => ("~", Yellow),
+                IndexActions.UpdateSearch => ("~", Yellow),
                 IndexActions.Rebuild => ("↻", Yellow),
-                IndexActions.Hide or IndexActions.Drop => ("-", Red),
+                IndexActions.Hide or IndexActions.Drop or IndexActions.DropSearch => ("-", Red),
                 _ => ("!", Dim),
             };
             var detail = change.Action == IndexActions.Create
                 ? Keys(change.Keys) + (change.Detail is { } options ? "  " + options : "")
                 : change.Detail ?? "";
-            var line = $"{indent}{symbol} {change.Action,-8} {change.Index.PadRight(width)}   {detail}";
+            var line = $"{indent}{symbol} {change.Action.PadRight(actionWidth)} {change.Index.PadRight(width)}   {detail}";
             WriteLine(change.Blocked == true
                 ? Paint(line + $"   ✖ blocked: {change.Reason}", Red)
                 : Paint(line, colour));

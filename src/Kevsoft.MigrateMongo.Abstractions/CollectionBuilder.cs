@@ -35,6 +35,9 @@ public sealed class CollectionBuilder<TDocument>
     public string Name { get; }
 
     public IndexesBuilder<TDocument> Indexes { get; } = new();
+
+    /// <summary>The collection's Atlas Search and Vector Search indexes (Atlas and Atlas Local only).</summary>
+    public SearchIndexesBuilder<TDocument> SearchIndexes { get; } = new();
 }
 
 /// <summary>The indexes a collection should have.</summary>

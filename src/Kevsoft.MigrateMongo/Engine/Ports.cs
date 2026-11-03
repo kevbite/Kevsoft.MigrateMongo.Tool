@@ -227,6 +227,15 @@ public sealed class CollectionPolicy
     /// <summary><c>report</c>, <c>hide</c> or <c>drop</c>, unless the definition sets its own.</summary>
     public string Prune { get; init; } = "report";
 
+    /// <summary><c>report</c> or <c>drop</c>: what happens to search indexes the definition doesn't declare, unless it sets its own.</summary>
+    public string SearchPrune { get; init; } = "report";
+
+    /// <summary>Wait for created or updated search indexes to become queryable before the plan is counted as applied.</summary>
+    public bool SearchWaitForReady { get; init; }
+
+    /// <summary>When waiting for search indexes, how long before giving up.</summary>
+    public TimeSpan SearchWaitTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
     /// <summary><c>allow</c> or <c>fail</c>. A definition can make it stricter, not looser.</summary>
     public string OnRebuild { get; init; } = "allow";
 
@@ -328,6 +337,15 @@ public sealed class EngineOptions
 
     /// <summary><c>report</c>, <c>hide</c> or <c>drop</c>: what happens to indexes a collection definition doesn't declare.</summary>
     public string IndexesPrune { get; set; } = "report";
+
+    /// <summary><c>report</c> or <c>drop</c>: what happens to Atlas search indexes a collection definition doesn't declare.</summary>
+    public string SearchIndexesPrune { get; set; } = "report";
+
+    /// <summary>Wait for created or updated search indexes to become queryable before a run is counted as applied.</summary>
+    public bool SearchIndexesWaitForReady { get; set; }
+
+    /// <summary>When waiting for search indexes, how long before giving up.</summary>
+    public TimeSpan SearchIndexesWaitTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary><c>allow</c> or <c>fail</c>: whether an index may be dropped and created again.</summary>
     public string IndexesOnRebuild { get; set; } = "allow";

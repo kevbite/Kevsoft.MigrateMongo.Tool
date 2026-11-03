@@ -724,3 +724,108 @@ before release.
 3. **Migration id type**: timestamp string (proposed) vs `long`.
 4. **Checksum default**: `fail` on changed applied migrations (proposed) vs `warn`.
 5. **Minimum fallback TFM** for the `any` tool package: resolved. `net10.0`, since .NET 8 and 9 went out of support.
+
+---
+
+## 12. Future work: Atlas Search / Vector Search index support
+
+A collection definition keeps regular indexes in line with the code (§ README "Managing collections"). This adds
+**Atlas Search and Vector Search indexes** as a second reconciled kind on the same `[ManagedCollection]` class. It is a
+parallel pipeline, not an extension of `IndexPlanner`: search indexes use a different driver surface, a different
+identity, and an asynchronous online build.
+
+### 12.1 How search indexes differ from regular indexes
+
+| | Regular indexes (today) | Search indexes (new) |
+|---|---|---|
+| Driver API | `collection.Indexes` (`listIndexes` / `createIndexes` / `collMod`) | `collection.SearchIndexes` (`$listSearchIndexes` / `createSearchIndexes` / `updateSearchIndex` / `dropSearchIndex`) |
+| Identity | keys + collation + partial filter | **name** (unique per collection) |
+| Definition | key spec + `CreateIndexOptions` | opaque `BsonDocument` (`mappings` / `fields`) plus a `type`: `search` or `vectorSearch` |
+| Change in place | TTL / `hidden` / `unique` via `collMod`; otherwise rebuild | **`updateSearchIndex` is always online** — no drop-and-rebuild gap |
+| Build | effectively synchronous | **asynchronous**: a `status` (PENDING / BUILDING / READY / FAILED) and `queryable` flag |
+| Availability | any MongoDB 5.0+ | **Atlas / Atlas Local only** |
+
+The upside: the `onRebuild` / rebuild-restore machinery is irrelevant (updates are online). The new wrinkles are
+capability detection, name-based diffing, and async build status.
+
+### 12.2 Declaration API (`Kevsoft.MigrateMongo.Abstractions`)
+
+Add a `SearchIndexes` builder to `CollectionBuilder<TDocument>`, mirroring `IndexesBuilder<TDocument>`:
+
+```csharp
+collection.SearchIndexes
+    .Add("default", searchDefinition)            // Atlas Search (type: search)
+    .AddVector("vector_index", vectorDefinition) // Vector Search (type: vectorSearch)
+    .Prune(SearchIndexPrune.Drop)
+    .Ignore("adhoc_*");
+```
+
+* New `DeclaredSearchIndex` record: name, type, definition `BsonDocument` (accepted as `BsonDocument` or JSON string;
+  a typed/fluent vector-definition builder is a later follow-up).
+* Extend `CollectionDeclaration` with `IReadOnlyList<SearchIndexDeclaration>` and render them in `CollectionRendering`
+  (name + type + canonicalized definition BSON). No class-map rendering is needed — definitions reference field paths
+  as strings — which keeps it AOT-simple.
+
+### 12.3 Reconciliation (`Kevsoft.MigrateMongo.MongoDriver`)
+
+New pure `SearchIndexPlanner` + `SearchIndexApplier`, parallel to `IndexPlanner` / `IndexApplier`:
+
+* Match declared ↔ existing **by name**; compare canonicalized `latestDefinition` and `type`.
+* Actions: `Create` (missing), `Update` (definition changed — online, no rebuild), `Drop` (undeclared, per `prune`),
+  `Keep`. A changed `type` ⇒ drop + create (no cross-type update). Search indexes have no "hidden" concept, so prune is
+  `report` / `drop` only.
+* Carry the changes in `CollectionPlan` (new `SearchIndexChanges` list) so `status` / `plan` / `show` render both a
+  regular-index and a search-index section.
+* `MongoMigrationExecutor.PlanCollectionAsync` / `ApplyCollectionAsync` run both planners and merge into one
+  `CollectionPlan`; apply regular indexes first, then search indexes, recording each op via `context.Track(...)`.
+
+### 12.4 Capability detection
+
+Search indexes exist only on Atlas. At plan time, detect support (probe `$listSearchIndexes`, or `hello`/`isAtlas`).
+If a definition declares search indexes but the target isn't Atlas, add a `Problem` that blocks `up` (exit `4`) with a
+clear message. Collections with no search indexes declared leave non-Atlas targets unaffected.
+
+### 12.5 Build-status / wait semantics (key behavioural decision)
+
+Creates and updates return before the index is queryable. Proposed default: fire the create/update, report `BUILDING`,
+and don't block (exit success). Opt-in `--wait` / `searchIndexes.waitForReady` (+ timeout) polls `status` until
+`READY` / `FAILED` (`FAILED` ⇒ error), surfacing status in `status` / `show`. Mirrors the README's "index builds delay
+or stop startup" behaviour for Hosting. (Default blocking-vs-not is an open question — see 12.9.)
+
+### 12.6 Config (`ResolvedConfig`, `ConfigLoader`, `EngineOptions`, `CollectionPolicy`)
+
+Add a `searchIndexes:` block: `prune` (`report` / `drop`, default `report`), `waitForReady` (bool),
+`waitTimeoutSeconds`. Map it in `ConfigLoader` and thread it through `EngineOptions` and `CollectionPolicy`.
+
+### 12.7 No change: source generator & state
+
+`[ManagedCollection]` classes already flow through the generator; search indexes ride along in the same
+`CollectionBuilder`, so no generator change is needed (malformed-definition errors stay render-time, like today's
+index-render errors). `StoredCollectionState.Declaration` hashes the whole declaration, so once search declarations are
+included the superseded / rolling-deploy logic works unchanged; history records search-index ops via the existing
+tracked-output path.
+
+### 12.8 Testing & docs
+
+* **Unit** (`SearchIndexPlanner`): hand-written existing/declared fixtures — create / update / drop / keep /
+  type-change / ignore / prune, canonicalization edge cases, capability-detection branch. Expectations are
+  independent, not shared with production rendering code.
+* **Integration** (`IntegrationTests`, Atlas Local via Testcontainers, which already supports search indexes):
+  `up` creates and lists; changed definition updates online; prune; `--wait` to READY; non-Atlas target blocks clearly.
+* **Docs**: a "Search indexes" subsection under "Managing collections" in `USAGE.md`, a README bullet, and this section.
+
+### 12.9 Phasing and open questions
+
+| Phase | Work | Rough size |
+|---|---|---|
+| 1 | Abstractions + rendering (builder, declaration, canonicalization) | S/M |
+| 2 | Planner + applier + executor wiring + capability detection | L |
+| 3 | Config + CLI flags + `status` / `plan` / `show` rendering | M |
+| 4 | Wait / build-status | M |
+| 5 | Tests (unit + integration) | L |
+| 6 | Docs | S |
+
+* **Scope**: support Atlas Search *and* Vector Search together (same API, differ by `type`). Assumed yes.
+* **Wait behaviour**: default non-blocking with opt-in `--wait`, vs. block-by-default. To confirm.
+* **Prune default** for undeclared search indexes: `report`, consistent with regular indexes.
+* **Definition input**: start with raw `BsonDocument` / JSON; typed/fluent vector-definition builder is a follow-up.
