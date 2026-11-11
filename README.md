@@ -184,7 +184,7 @@ working migrations projects, including one that runs migrations from an app with
 1. Hack!
 1. Pull Request
 
-You'll need the .NET 11 SDK ([global.json](global.json) pins the one used to build) and
+You'll need the .NET 11 SDK ([global.json](global.json) pins the one used to build), the .NET 10 runtime (for tests), and
 [Docker](https://www.docker.com/). The integration tests pack the repo into a local NuGet feed, install the tool from
 it, and start MongoDB Atlas Local with [Testcontainers](https://dotnet.testcontainers.org/):
 
