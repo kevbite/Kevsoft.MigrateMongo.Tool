@@ -54,7 +54,7 @@ public sealed class ConsoleRendererTests
 
     private static readonly DateTime At = new(2026, 10, 22, 12, 31, 3, DateTimeKind.Utc);
 
-    private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
+    private static JsonElement Json(string json) => JsonElement.Parse(json);
 
     private static string Render(Action<ConsoleRenderer> render)
     {

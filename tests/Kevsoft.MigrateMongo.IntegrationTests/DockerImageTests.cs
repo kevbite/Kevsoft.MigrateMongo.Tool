@@ -57,7 +57,7 @@ public sealed class DockerImageTests(IntegrationEnvironment environment)
 
         var plan = await DockerRunAsync(image, workspace, feed, "plan", "--json", "--no-build");
         plan.ExitCode.ShouldBe(0, plan.ToString());
-        var result = System.Text.Json.JsonDocument.Parse(plan.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1]).RootElement.GetProperty("result");
+        var result = System.Text.Json.JsonElement.Parse(plan.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1]).GetProperty("result");
         result.GetProperty("collections").EnumerateArray()
             .Select(c => (c.GetProperty("name").GetString(), c.GetProperty("state").GetString()))
             .ShouldBe([("customers", "inSync"), ("orders", "inSync")]);

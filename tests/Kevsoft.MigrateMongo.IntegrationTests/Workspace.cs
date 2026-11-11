@@ -108,7 +108,7 @@ public sealed class Workspace : IAsyncDisposable
     {
         var process = await RunAsync([.. arguments, "--json"]);
         var lines = process.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var events = lines.Select(l => JsonDocument.Parse(l).RootElement).ToList();
+        var events = lines.Select(l => JsonElement.Parse(l)).ToList();
         var result = events.LastOrDefault(e => e.GetProperty("type").GetString() == "result");
         if (result.ValueKind != JsonValueKind.Object)
         {
