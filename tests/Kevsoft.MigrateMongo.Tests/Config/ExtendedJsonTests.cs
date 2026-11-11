@@ -6,7 +6,7 @@ namespace Kevsoft.MigrateMongo.Tests.Config;
 
 public sealed class ExtendedJsonTests
 {
-    private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
+    private static JsonElement Json(string json) => JsonElement.Parse(json);
 
     [Theory]
     [InlineData("""{"$numberInt":"2"}""", "2")]

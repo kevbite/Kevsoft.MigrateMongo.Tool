@@ -120,7 +120,7 @@ dotnet new migratemongo-migration -n AddEmailIndexToUsers -o src/MyApp.Migration
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--framework` | `net10.0` | The target framework (`net10.0`). |
+| `--framework` | `net10.0` | The target framework (`net10.0` or `net11.0`). |
 | `--database-name` | First part of the project name, lower-cased | The database written to `migrate-mongo.yaml`. |
 | `--skip-config` | `false` | Don't create `migrate-mongo.yaml`, e.g. to keep it at the repository root with `migrate-mongo init --project src/MyApp.Migrations`. |
 | `--auth` | `none` | `aws` references `Kevsoft.MigrateMongo.Aws`, like `init --auth aws`. |
@@ -1039,7 +1039,7 @@ migrate-mongo up --env prod --runner ./out/MyApp.Migrations
 `ghcr.io/kevbite/migrate-mongo` (`linux/amd64` and `linux/arm64`) is tagged with the version (`0.2.0`, `0.2`) and
 `latest`. Pin a version in real pipelines.
 
-- `ghcr.io/kevbite/migrate-mongo:<version>` is the tool on the .NET 10 SDK, so it can build and run your migrations
+- `ghcr.io/kevbite/migrate-mongo:<version>` is the tool on the .NET 11 SDK, so it can build and run your migrations
   project. A `global.json` that pins an older SDK won't work in it.
 - `ghcr.io/kevbite/migrate-mongo:<version>-bundle` is the tool without .NET, for running [bundles](#bundles) with
   `--runner`. It can't build a project, so without `--runner` it stops and asks for one.

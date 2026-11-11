@@ -29,6 +29,13 @@
     <PublishAot>true</PublishAot>
     <!-- Neither the pointer nor the Native AOT binaries have managed symbols worth a symbol package. -->
     <IncludeSymbols>false</IncludeSymbols>
+    <!--
+      The .NET 11 SDK makes a no-RID `dotnet pack` also spawn an inner RID-specific (Native AOT) pack for the host,
+      which needs a RID-specific build the pointer-only pack never produces (it fails copying migrate-mongo.xml).
+      Each RID package is built on its own OS by the `aot` CI job, so the no-RID pack must stay pointer-only. Leaving
+      this default (true) for `-r <rid>`/`-r any` packs keeps their RID suffix (e.g. Kevsoft.MigrateMongo.Tool.any).
+    -->
+    <CreateRidSpecificToolPackages Condition="'$(RuntimeIdentifier)' == ''">false</CreateRidSpecificToolPackages>
   </PropertyGroup>
 
   <ItemGroup>

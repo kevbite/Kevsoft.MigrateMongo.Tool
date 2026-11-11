@@ -7,7 +7,7 @@ namespace Kevsoft.MigrateMongo.Tests.Runner;
 
 public sealed class RelaxedExtendedJsonTests
 {
-    private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
+    private static JsonElement Json(string json) => JsonElement.Parse(json);
 
     [Fact]
     public void Canonical_values_are_relaxed()

@@ -24,8 +24,8 @@ public sealed class MigrationOutputTests
 
     private static MigrationOutputInfo Output(string results) => new()
     {
-        Results = JsonDocument.Parse(results).RootElement.Clone(),
-        Operations = [new OperationRecord { Kind = "updateMany", Collection = "orders", Statement = JsonDocument.Parse("""{"filter":{"a":1}}""").RootElement.Clone(), Counts = [] }],
+        Results = JsonElement.Parse(results),
+        Operations = [new OperationRecord { Kind = "updateMany", Collection = "orders", Statement = JsonElement.Parse("""{"filter":{"a":1}}"""), Counts = [] }],
     };
 
     [Fact]

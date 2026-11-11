@@ -12,8 +12,10 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > adapter, Runner, the `migrate-mongo` tool (all commands in §5), unit tests, Atlas Local integration tests
 > (`tests/Kevsoft.MigrateMongo.IntegrationTests`, fixtures in `tests/fixtures`) and GitHub Actions
 > (`ci.yml`, `release.yml`, `nightly.yml`). Where the build differs from this plan:
-> * **.NET 10 or later only.** .NET 8 and 9 reach end of support on 10 Nov 2026, so the libraries, tool, templates,
->   fixtures and Docker image target .NET 10. The tool package is a `net10.0` pointer to the RID-specific Native AOT
+> * **.NET 10 or later only.** .NET 8 and 9 reach end of support on 10 Nov 2026, so .NET 10 is the floor. The
+>   libraries multi-target `net10.0;net11.0`; the tool, templates (default), fixtures and Docker image target .NET 10,
+>   and `migrate-mongo init`/`create` scaffold for the SDK you're on (net11.0 under the .NET 11 SDK). The tool package
+>   is a `net10.0` pointer to the RID-specific Native AOT
 >   packages (+ an `any` framework-dependent fallback with `RollForward=LatestMajor`), which .NET 10+ SDKs install.
 >   `linux-musl-*` must be listed explicitly, otherwise the RID graph would pick the glibc `linux-*` build on Alpine.
 >   Standalone AOT binaries are also on GitHub Releases.
