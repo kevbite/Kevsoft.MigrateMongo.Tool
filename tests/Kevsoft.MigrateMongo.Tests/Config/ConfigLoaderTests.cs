@@ -345,6 +345,15 @@ public sealed class ConfigLoaderTests
     }
 
     [Fact]
+    public void Search_index_wait_timeout_must_not_be_negative()
+    {
+        var config = new ResolvedConfig { MongoUrl = "mongodb://x", DatabaseName = "db", SearchIndexesWaitTimeoutSeconds = -1 };
+
+        Should.Throw<ConfigException>(() => ConfigLoader.EnsureConnectable(config))
+            .Message.ShouldBe("'searchIndexes.waitTimeout' must not be negative.");
+    }
+
+    [Fact]
     public void Results_max_bytes_must_be_positive()
     {
         Should.Throw<ConfigException>(() => ConfigLoader.EnsureConnectable(new ResolvedConfig { MongoUrl = "mongodb://x", DatabaseName = "db", ResultsMaxBytes = 0 }))

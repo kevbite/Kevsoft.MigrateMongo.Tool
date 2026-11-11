@@ -34,6 +34,7 @@ internal static class SearchIndexPlanner
         foreach (var duplicate in duplicates)
         {
             plan.Problems.Add($"{name}: more than one declared search index is named {duplicate}.");
+            plan.Invalid = true;
         }
 
         var existing = existingIndexes.Select(ServerIndex.From).ToList();
@@ -48,6 +49,20 @@ internal static class SearchIndexPlanner
         var changes = new List<SearchPlannedChange>();
         foreach (var declared in declaration.SearchIndexes)
         {
+            if (IsIgnored(declared.Name))
+            {
+                // A declared index whose name is ignored is contradictory: don't change it, as the regular planner doesn't.
+                plan.Problems.Add(
+                    $"{name}: the declared search index {declared.Name} matches an ignored name, so it isn't changed. " +
+                    $"Declare it as it is, or stop ignoring {declared.Name}.");
+                if (byName.ContainsKey(declared.Name))
+                {
+                    matched.Add(declared.Name);
+                }
+
+                continue;
+            }
+
             if (!byName.TryGetValue(declared.Name, out var server))
             {
                 changes.Add(Create(name, declared));
@@ -62,6 +77,11 @@ internal static class SearchIndexPlanner
             else if (!SameDefinition(server.Definition, declared.Definition))
             {
                 changes.Add(Update(name, declared, server));
+            }
+            else if (string.Equals(server.Status, "FAILED", StringComparison.Ordinal))
+            {
+                // The definition is right but its last build failed; recreate it rather than report the collection in sync.
+                changes.Add(Rebuild(name, declared, server));
             }
         }
 
@@ -97,6 +117,7 @@ internal static class SearchIndexPlanner
         Info = Info(IndexActions.CreateSearch, declared.Name, declared.Type),
         Commands = [CreateCommand(collection, declared)],
         WaitForName = declared.Name,
+        WaitForDefinition = declared.Definition,
     };
 
     private static SearchPlannedChange Update(string collection, SearchIndexDeclaration declared, ServerIndex server) => new()
@@ -112,6 +133,7 @@ internal static class SearchIndexPlanner
             },
         ],
         WaitForName = server.Name,
+        WaitForDefinition = declared.Definition,
     };
 
     private static SearchPlannedChange Recreate(string collection, SearchIndexDeclaration declared, ServerIndex server) => new()
@@ -119,16 +141,45 @@ internal static class SearchIndexPlanner
         Info = Info(IndexActions.UpdateSearch, server.Name, $"type {server.Type} → {declared.Type} (recreated)"),
         Commands =
         [
-            new BsonDocument { { "dropSearchIndex", collection }, { "name", server.Name } },
+            DropCommand(collection, server.Name),
             CreateCommand(collection, declared),
         ],
+        DroppedIndex = DroppedDoc(server),
+        WaitForDropName = server.Name,
         WaitForName = declared.Name,
+        WaitForDefinition = declared.Definition,
+    };
+
+    private static SearchPlannedChange Rebuild(string collection, SearchIndexDeclaration declared, ServerIndex server) => new()
+    {
+        Info = Info(IndexActions.UpdateSearch, server.Name, $"previous build failed ({server.Status}); recreated"),
+        Commands =
+        [
+            DropCommand(collection, server.Name),
+            CreateCommand(collection, declared),
+        ],
+        DroppedIndex = DroppedDoc(server),
+        WaitForDropName = server.Name,
+        WaitForName = declared.Name,
+        WaitForDefinition = declared.Definition,
     };
 
     private static SearchPlannedChange Drop(string collection, ServerIndex server) => new()
     {
         Info = Info(IndexActions.DropSearch, server.Name, "not declared"),
-        Commands = [new BsonDocument { { "dropSearchIndex", collection }, { "name", server.Name } }],
+        Commands = [DropCommand(collection, server.Name)],
+        DroppedIndex = DroppedDoc(server),
+    };
+
+    private static BsonDocument DropCommand(string collection, string name) =>
+        new() { { "dropSearchIndex", collection }, { "name", name } };
+
+    /// <summary>The full definition of an index about to be dropped, recorded in history so it shows exactly what was removed.</summary>
+    private static BsonDocument DroppedDoc(ServerIndex server) => new()
+    {
+        { "name", server.Name },
+        { "type", server.Type },
+        { "definition", server.Definition ?? new BsonDocument() },
     };
 
     private static BsonDocument CreateCommand(string collection, SearchIndexDeclaration declared) => new()
@@ -152,10 +203,16 @@ internal static class SearchIndexPlanner
         var status = declaration.SearchIndexes.Any(d => string.Equals(d.Name, server.Name, StringComparison.Ordinal))
             ? "declared"
             : ignored ? "ignored" : "undeclared";
+        var options = new BsonDocument("type", server.Type);
+        if (server.Status is { } build)
+        {
+            options.Add("status", build);
+        }
+
         return new IndexInfo
         {
             Name = server.Name,
-            Options = MigrationOutputMapper.ToJson(new BsonDocument("type", server.Type)),
+            Options = MigrationOutputMapper.ToJson(options),
             Status = status,
         };
     }
@@ -168,24 +225,61 @@ internal static class SearchIndexPlanner
         Detail = string.IsNullOrEmpty(detail) ? null : detail,
     };
 
-    private static bool SameDefinition(BsonDocument? server, BsonDocument declared) =>
-        server is not null && Satisfies(declared, server);
+    internal static bool SameDefinition(BsonDocument? server, BsonDocument declared) =>
+        server is not null && Matches(declared, server);
 
     /// <summary>
-    /// Whether the server's <c>latestDefinition</c> already matches everything the declaration asks for. The server fills a
-    /// definition with defaults it didn't ask for (an empty <c>fields</c> for a dynamic mapping, per-field <c>store</c>,
-    /// <c>norms</c> and <c>indexOptions</c> for a static one), so a declared value is in line when the server has the same
-    /// field set to the same value; the extra defaults the server adds aren't a change. Object key order doesn't matter;
+    /// Known keys the server fills a definition with that the declaration didn't ask for: the per-field analyzer options on a
+    /// static mapping and the top-level analyzers it defaults to. Present on the server but not declared, they aren't a change.
+    /// </summary>
+    private static readonly HashSet<string> ServerDefaultKeys = new(StringComparer.Ordinal)
+    {
+        "store", "norms", "indexOptions", "analyzer", "searchAnalyzer",
+    };
+
+    /// <summary>
+    /// Whether the server's <c>latestDefinition</c> is the declaration once the server's own defaults are allowed for. Every
+    /// declared key must be present and equal; the server may only add keys it's known to default (see
+    /// <see cref="ServerDefaultKeys"/>) or an empty <c>fields</c> map on a dynamic mapping. Any other key the server has but
+    /// the declaration doesn't — e.g. a mapping field the declaration removed — is a change. Object key order doesn't matter;
     /// arrays are compared in order.
     /// </summary>
-    private static bool Satisfies(BsonValue declared, BsonValue server) => declared switch
+    private static bool Matches(BsonValue declared, BsonValue server)
     {
-        BsonDocument document => server is BsonDocument serverDocument &&
-            document.All(element => serverDocument.TryGetValue(element.Name, out var value) && Satisfies(element.Value, value)),
-        BsonArray array => server is BsonArray serverArray && array.Count == serverArray.Count &&
-            array.Zip(serverArray, Satisfies).All(matched => matched),
-        _ => declared.Equals(server),
-    };
+        switch (declared)
+        {
+            case BsonDocument declaredDocument when server is BsonDocument serverDocument:
+                foreach (var element in declaredDocument)
+                {
+                    if (!serverDocument.TryGetValue(element.Name, out var value) || !Matches(element.Value, value))
+                    {
+                        return false;
+                    }
+                }
+
+                foreach (var element in serverDocument)
+                {
+                    if (declaredDocument.Contains(element.Name) || ServerDefaultKeys.Contains(element.Name))
+                    {
+                        continue;
+                    }
+
+                    // A dynamic mapping the server filled with an empty fields map isn't a declared field.
+                    if (element.Name == "fields" && element.Value is BsonDocument fields && fields.ElementCount == 0)
+                    {
+                        continue;
+                    }
+
+                    return false;
+                }
+
+                return true;
+            case BsonArray declaredArray when server is BsonArray serverArray:
+                return declaredArray.Count == serverArray.Count && declaredArray.Zip(serverArray, Matches).All(matched => matched);
+            default:
+                return declared.Equals(server);
+        }
+    }
 
     /// <summary>
     /// A definition with every object's keys in a fixed order, so a declaration that sets the same fields in a different
@@ -224,14 +318,16 @@ internal static class SearchIndexPlanner
             RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     /// <summary>One search index as <c>$listSearchIndexes</c> returned it.</summary>
-    private sealed record ServerIndex(string Name, string Type, BsonDocument? Definition)
+    private sealed record ServerIndex(string Name, string Type, BsonDocument? Definition, string? Status, bool Queryable)
     {
         public static ServerIndex From(BsonDocument document)
         {
             var name = document.GetValue("name", "").AsString;
             var type = document.GetValue("type", BsonNull.Value) is BsonString t ? t.AsString : "search";
             var definition = document.GetValue("latestDefinition", BsonNull.Value) as BsonDocument;
-            return new ServerIndex(name, type, definition);
+            var status = document.GetValue("status", BsonNull.Value) is BsonString s ? s.AsString : null;
+            var queryable = document.GetValue("queryable", false).ToBoolean();
+            return new ServerIndex(name, type, definition, status, queryable);
         }
     }
 }
@@ -240,6 +336,9 @@ internal static class SearchIndexPlanner
 internal sealed class SearchIndexPlan
 {
     public string Declaration { get; init; } = "";
+
+    /// <summary>True when the declaration itself is wrong (e.g. two search indexes share a name), so it can't be applied.</summary>
+    public bool Invalid { get; set; }
 
     public List<SearchPlannedChange> Changes { get; } = [];
 
@@ -257,4 +356,13 @@ internal sealed class SearchPlannedChange
 
     /// <summary>For a create or update: the index to wait for, when waiting is on.</summary>
     public string? WaitForName { get; init; }
+
+    /// <summary>For a create or update: the definition to wait for the server to report as the latest, when waiting is on.</summary>
+    public BsonDocument? WaitForDefinition { get; init; }
+
+    /// <summary>For a drop-then-create (a type change or a failed rebuild): wait for this dropped index to disappear before creating.</summary>
+    public string? WaitForDropName { get; init; }
+
+    /// <summary>The full definition of the index this change drops, recorded in history before the drop.</summary>
+    public BsonDocument? DroppedIndex { get; init; }
 }

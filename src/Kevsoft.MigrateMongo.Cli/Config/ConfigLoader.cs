@@ -266,6 +266,11 @@ public static class ConfigLoader
         {
             throw new ConfigException("'indexes.supersededWindow' must not be negative.");
         }
+
+        if (config.SearchIndexesWaitTimeoutSeconds < 0)
+        {
+            throw new ConfigException("'searchIndexes.waitTimeout' must not be negative.");
+        }
     }
 
     /// <summary>Replaces <c>${NAME}</c> and <c>${NAME:-default}</c> with environment variable values.</summary>

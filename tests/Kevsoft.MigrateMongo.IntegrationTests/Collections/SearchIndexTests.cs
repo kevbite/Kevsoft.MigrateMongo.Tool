@@ -153,6 +153,70 @@ public sealed class SearchIndexTests(IntegrationEnvironment environment)
         await mongo.ShouldBeInSyncAsync(collection, WaitForReady);
     }
 
+    [Fact]
+    public async Task A_search_only_definition_on_a_fresh_database_creates_the_collection_then_the_index()
+    {
+        await using var mongo = new CollectionHarness(environment);
+
+        // No SeedAsync: the collection doesn't exist yet. A search-only definition has nothing else to create it, so the
+        // applier has to create it before createSearchIndexes, which would otherwise fail with NamespaceNotFound.
+        var collection = CollectionHarness.Define<BsonDocument>(c => c.SearchIndexes.Add("by_text", Dynamic));
+        CollectionHarness.Changes(await mongo.PlanAsync(collection)).ShouldBe(["create-search by_text"]);
+
+        var up = await mongo.UpAsync(collection, WaitForReady);
+        up.ExitCode.ShouldBe(ExitCodes.Success, up.Message);
+        up.Reconciled.ShouldBe([CollectionHarness.Things]);
+
+        var index = (await SearchIndexesAsync(mongo)).ShouldHaveSingleItem();
+        index["name"].AsString.ShouldBe("by_text");
+        index["queryable"].AsBoolean.ShouldBeTrue();
+        await mongo.ShouldBeInSyncAsync(collection, WaitForReady);
+    }
+
+    [Fact]
+    public async Task Dropping_a_search_index_records_its_full_definition_in_history()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await SeedAsync(mongo);
+        await mongo.UpAsync(CollectionHarness.Define<BsonDocument>(c =>
+        {
+            c.SearchIndexes.Add("keep_me", Dynamic);
+            c.SearchIndexes.Add("remove_me", Static);
+        }), WaitForReady);
+
+        // Only keep_me is declared now; remove_me is pruned. Its definition must be recorded, not just its name, so history
+        // shows exactly what was removed.
+        var declared = CollectionHarness.Define<BsonDocument>(c => c.SearchIndexes.Add("keep_me", Dynamic));
+        (await mongo.UpAsync(declared, DropUndeclared)).Reconciled.ShouldBe([CollectionHarness.Things]);
+
+        var dropped = mongo.State()["operations"].AsBsonArray
+            .Select(o => o.AsBsonDocument)
+            .Single(o => o.Contains("droppedIndex"))["droppedIndex"].AsBsonDocument;
+        dropped["name"].AsString.ShouldBe("remove_me");
+        dropped["type"].AsString.ShouldBe("search");
+        dropped["definition"]["mappings"]["fields"]["title"]["type"].AsString.ShouldBe("string");
+    }
+
+    [Fact]
+    public async Task Removing_a_field_from_a_static_mapping_is_an_update_and_settles_in_sync()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await SeedAsync(mongo);
+        const string twoFields = """{ "mappings": { "dynamic": false, "fields": { "title": { "type": "string" }, "body": { "type": "string" } } } }""";
+        await mongo.UpAsync(CollectionHarness.Define<BsonDocument>(c => c.SearchIndexes.Add("by_text", twoFields)), WaitForReady);
+
+        // Drop the body field. Comparing only declared keys against the server would miss this; the server still has body.
+        var fewer = CollectionHarness.Define<BsonDocument>(c => c.SearchIndexes.Add("by_text", Static));
+        CollectionHarness.Changes(await mongo.PlanAsync(fewer)).ShouldBe(["update-search by_text"]);
+
+        (await mongo.UpAsync(fewer, WaitForReady)).Reconciled.ShouldBe([CollectionHarness.Things]);
+        var server = (await SearchIndexesAsync(mongo)).ShouldHaveSingleItem();
+        server["latestDefinition"]["mappings"]["fields"].AsBsonDocument.Names.ShouldBe(["title"]);
+
+        // And once the removed field is gone, the server's own defaults on what's left aren't seen as a further change.
+        await mongo.ShouldBeInSyncAsync(fewer, WaitForReady);
+    }
+
     private static void WaitForReady(EngineOptions options)
     {
         options.SearchIndexesWaitForReady = true;

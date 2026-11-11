@@ -75,7 +75,7 @@ public sealed class MongoMigrationExecutor(
     /// declaration hash is the index hash alone unless search indexes are declared, so collections with none keep the exact
     /// hash they recorded before search support existed.
     /// </summary>
-    private static CollectionPlan Merge(IndexPlan index, SearchIndexPlan? search)
+    internal static CollectionPlan Merge(IndexPlan index, SearchIndexPlan? search)
     {
         var changes = index.Changes.Select(c => c.Info).ToList();
         var problems = new List<string>(index.Problems);
@@ -89,10 +89,10 @@ public sealed class MongoMigrationExecutor(
 
         return new CollectionPlan
         {
-            Declaration = search is null || index.Invalid ? index.Declaration : CombineDeclaration(index.Declaration, search.Declaration),
+            Declaration = search is null || index.Invalid || search.Invalid ? index.Declaration : CombineDeclaration(index.Declaration, search.Declaration),
             Changes = changes,
             Problems = problems,
-            Invalid = index.Invalid,
+            Invalid = index.Invalid || (search?.Invalid ?? false),
             Indexes = indexes,
             Hidden = new Dictionary<string, DateTime>(index.Hidden, StringComparer.Ordinal),
         };

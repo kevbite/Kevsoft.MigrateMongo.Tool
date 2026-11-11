@@ -201,6 +201,57 @@ public sealed class SearchIndexPlannerTests
     }
 
     [Fact]
+    public void Declaring_the_same_name_twice_marks_the_plan_invalid()
+    {
+        var plan = Plan(
+            [Declared("products", "{ }"), Declared("products", """{ "mappings": { "dynamic": true } }""")],
+            []);
+
+        plan.Invalid.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Declaring_a_change_to_an_index_whose_name_is_ignored_is_a_problem_not_an_update()
+    {
+        var declaration = new CollectionDeclaration
+        {
+            Name = "catalog",
+            Indexes = [],
+            SearchIndexes = [Declared("adhoc_text", """{ "mappings": { "dynamic": false } }""")],
+            SearchIgnored = ["adhoc_*"],
+        };
+
+        var plan = SearchIndexPlanner.Plan(
+            declaration,
+            [Server("adhoc_text", "search", """{ "mappings": { "dynamic": true } }""")],
+            Policy());
+
+        plan.Changes.ShouldBeEmpty();
+        plan.Problems.ShouldHaveSingleItem().ShouldContain("adhoc_text");
+    }
+
+    [Fact]
+    public void Removing_a_field_from_a_static_mapping_is_an_update()
+    {
+        var plan = Plan(
+            [Declared("products", """{ "mappings": { "dynamic": false, "fields": { "title": { "type": "string" } } } }""")],
+            [Server("products", "search", """{ "mappings": { "dynamic": false, "fields": { "title": { "type": "string" }, "description": { "type": "string" } } } }""")]);
+
+        var change = plan.Changes.ShouldHaveSingleItem();
+        change.Info.Action.ShouldBe("update-search");
+    }
+
+    [Fact]
+    public void A_declared_index_whose_build_failed_is_not_in_sync()
+    {
+        var plan = Plan(
+            [Declared("products", """{ "mappings": { "dynamic": true } }""")],
+            [Server("products", "search", """{ "mappings": { "dynamic": true } }""", status: "FAILED", queryable: false)]);
+
+        plan.Changes.ShouldNotBeEmpty();
+    }
+
+    [Fact]
     public void The_declaration_hash_ignores_order_but_not_the_definition()
     {
         var a = Declared("a", """{ "mappings": { "dynamic": true } }""");
@@ -232,13 +283,16 @@ public sealed class SearchIndexPlannerTests
     private static SearchIndexDeclaration DeclaredVector(string name, string definition) =>
         new() { Name = name, Type = "vectorSearch", Definition = BsonDocument.Parse(definition) };
 
-    private static BsonDocument Server(string name, string type, string definition) => new()
+    private static BsonDocument Server(string name, string type, string definition) =>
+        Server(name, type, definition, status: "READY", queryable: true);
+
+    private static BsonDocument Server(string name, string type, string definition, string status, bool queryable) => new()
     {
         { "id", ObjectId.GenerateNewId().ToString() },
         { "name", name },
         { "type", type },
-        { "status", "READY" },
-        { "queryable", true },
+        { "status", status },
+        { "queryable", queryable },
         { "latestDefinition", BsonDocument.Parse(definition) },
     };
 }
