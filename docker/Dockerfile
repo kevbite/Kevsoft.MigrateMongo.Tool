@@ -14,7 +14,7 @@ ENTRYPOINT ["migrate-mongo"]
 FROM mcr.microsoft.com/dotnet/sdk:11.0-resolute AS tool
 # The 11 SDK can build any supported target, but ships only the 11 runtime. Add the 10 runtime (the floor) so the
 # image also runs net10.0 output. Both images are resolute (Ubuntu 26.04) so the copied runtime matches the SDK's glibc.
-COPY --from=mcr.microsoft.com/dotnet/runtime:10.0-resolute /usr/share/dotnet/shared/Microsoft.NETCore.App /usr/share/dotnet/shared/Microsoft.NETCore.App
+COPY --from=mcr.microsoft.com/dotnet/aspnet:10.0-resolute /usr/share/dotnet/shared /usr/share/dotnet/shared
 ARG TARGETARCH
 COPY --chmod=755 bin/${TARGETARCH}/migrate-mongo /usr/local/bin/migrate-mongo
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
