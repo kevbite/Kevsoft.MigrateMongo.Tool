@@ -227,7 +227,30 @@ public sealed class SearchIndexPlannerTests
             Policy());
 
         plan.Changes.ShouldBeEmpty();
-        plan.Problems.ShouldHaveSingleItem().ShouldContain("adhoc_text");
+        plan.Problems.ShouldBe([
+            "catalog: the declared search index adhoc_text differs from the server's, which is ignored, so it isn't changed. " +
+            "Declare it as it is, or stop ignoring adhoc_text.",
+        ]);
+    }
+
+    [Fact]
+    public void Declaring_an_ignored_index_as_it_is_on_the_server_is_not_a_problem()
+    {
+        var declaration = new CollectionDeclaration
+        {
+            Name = "catalog",
+            Indexes = [],
+            SearchIndexes = [Declared("adhoc_text", """{ "mappings": { "dynamic": true } }""")],
+            SearchIgnored = ["adhoc_*"],
+        };
+
+        var plan = SearchIndexPlanner.Plan(
+            declaration,
+            [Server("adhoc_text", "search", """{ "mappings": { "dynamic": true } }""")],
+            Policy(searchPrune: "drop"));
+
+        plan.Changes.ShouldBeEmpty();
+        plan.Problems.ShouldBeEmpty();
     }
 
     [Fact]

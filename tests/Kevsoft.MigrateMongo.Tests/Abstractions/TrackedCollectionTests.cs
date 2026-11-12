@@ -107,4 +107,23 @@ public sealed class TrackedCollectionTests
         operation.Error.ShouldBe("MongoException: collMod failed");
         operation.Statement.ShouldBe(new BsonDocument("command", new BsonDocument("collMod", "orders")));
     }
+
+    [Fact]
+    public async Task A_record_statement_changed_after_the_command_does_not_change_history()
+    {
+        var results = new MigrationResults();
+        var database = DriverFake.Of<IMongoDatabase>(method => method.Name switch
+        {
+            nameof(IMongoDatabase.RunCommandAsync) => DriverFake.Faulted(method.ReturnType, new MongoException("failed")),
+            _ => throw new NotSupportedException(method.Name),
+        });
+        var statement = new BsonDocument { { "command", new BsonDocument("dropSearchIndex", "orders") }, { "droppedIndex", new BsonDocument("name", "search") } };
+
+        await Should.ThrowAsync<MongoException>(() => Context(results).Track(database).RunCommandAsync(new BsonDocument("dropSearchIndex", "orders"), recordStatement: statement));
+        statement["droppedIndex"]["name"] = "changed";
+        statement.Add("extra", 1);
+
+        results.Operations.ShouldHaveSingleItem().Statement.ShouldBe(BsonDocument.Parse(
+            """{ "command": { "dropSearchIndex": "orders" }, "droppedIndex": { "name": "search" } }"""));
+    }
 }

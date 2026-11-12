@@ -45,7 +45,10 @@ public sealed class TrackedDatabase
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var statement = _captureStatement ? (recordStatement ?? new BsonDocument("command", command.DeepClone())) : null;
+        // Snapshot what's recorded, so a caller that reuses or changes the documents afterwards doesn't rewrite history.
+        var statement = _captureStatement
+            ? (recordStatement?.DeepClone() ?? new BsonDocument("command", command.DeepClone())).AsBsonDocument
+            : null;
         var at = _results.Time.GetUtcNow().UtcDateTime;
         var started = Stopwatch.GetTimestamp();
         BsonDocument result;

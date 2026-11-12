@@ -49,20 +49,6 @@ internal static class SearchIndexPlanner
         var changes = new List<SearchPlannedChange>();
         foreach (var declared in declaration.SearchIndexes)
         {
-            if (IsIgnored(declared.Name))
-            {
-                // A declared index whose name is ignored is contradictory: don't change it, as the regular planner doesn't.
-                plan.Problems.Add(
-                    $"{name}: the declared search index {declared.Name} matches an ignored name, so it isn't changed. " +
-                    $"Declare it as it is, or stop ignoring {declared.Name}.");
-                if (byName.ContainsKey(declared.Name))
-                {
-                    matched.Add(declared.Name);
-                }
-
-                continue;
-            }
-
             if (!byName.TryGetValue(declared.Name, out var server))
             {
                 changes.Add(Create(name, declared));
@@ -70,6 +56,20 @@ internal static class SearchIndexPlanner
             }
 
             matched.Add(server.Name);
+            if (IsIgnored(server.Name))
+            {
+                // An ignored index is never changed, as the regular planner doesn't; it's only a problem if it would be.
+                if (!string.Equals(server.Type, declared.Type, StringComparison.Ordinal) ||
+                    !SameDefinition(server.Definition, declared.Definition))
+                {
+                    plan.Problems.Add(
+                        $"{name}: the declared search index {declared.Name} differs from the server's, which is ignored, so it isn't changed. " +
+                        $"Declare it as it is, or stop ignoring {declared.Name}.");
+                }
+
+                continue;
+            }
+
             if (!string.Equals(server.Type, declared.Type, StringComparison.Ordinal))
             {
                 changes.Add(Recreate(name, declared, server));
