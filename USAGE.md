@@ -636,10 +636,13 @@ Only the fields a definition sets are compared: the server fills a definition wi
 dynamic mapping, per-field `store`, `norms` and `indexOptions` for a static one), and those aren't treated as a change,
 so an unchanged definition stays in sync. `collection.SearchIndexes.Prune = SearchIndexPrune.Drop` overrides
 `searchIndexes.prune` for one collection, and `Ignore("pattern")` leaves matching names alone (`*` matches anything).
+A declared search index never changes an ignored one: if the server's has the same name but a different type or
+definition, the collection is blocked until one of them changes. One that's exactly the same is fine, and one that isn't
+on the server yet is created.
 
 Search indexes are only managed when a definition declares at least one: a collection that declares none never has its
 search indexes listed or pruned, so you can adopt them gradually. A search index needs its collection to exist, so a
-definition that declares one on a collection that doesn't exist yet creates it (through its regular indexes) first.
+definition that declares one on a collection that doesn't exist yet creates the collection first.
 
 Building a search index is asynchronous: by default `up` issues the change and returns without waiting. Set
 `searchIndexes.waitForReady: true` to wait for each created or updated index to become queryable (up to
