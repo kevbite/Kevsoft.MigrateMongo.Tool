@@ -83,6 +83,11 @@ internal static class SearchIndexPlanner
                 // The definition is right but its last build failed; recreate it rather than report the collection in sync.
                 changes.Add(Rebuild(name, declared, server));
             }
+            else if (policy.SearchWaitForReady && server.Status is "PENDING" or "BUILDING")
+            {
+                // Nothing to change, but it isn't queryable yet, e.g. a previous run timed out waiting for it.
+                plan.Pending.Add(server.Name);
+            }
         }
 
         var prune = declaration.SearchPrune switch
@@ -225,62 +230,134 @@ internal static class SearchIndexPlanner
         Detail = string.IsNullOrEmpty(detail) ? null : detail,
     };
 
+    /// <summary>
+    /// Whether the server's <c>latestDefinition</c> is the declaration. Both are compared once the values the server fills
+    /// in by default are taken out of each (see <see cref="Normalize"/>), so a default the server added or one the
+    /// declaration spelled out isn't a change, but any other difference is, e.g. a removed field or analyzer. Object key
+    /// order doesn't matter.
+    /// </summary>
     internal static bool SameDefinition(BsonDocument? server, BsonDocument declared) =>
-        server is not null && Matches(declared, server);
+        server is not null && Same(Normalize(server), Normalize(declared));
 
     /// <summary>
-    /// Known keys the server fills a definition with that the declaration didn't ask for: the per-field analyzer options on a
-    /// static mapping and the top-level analyzers it defaults to. Present on the server but not declared, they aren't a change.
+    /// The options the server fills in on a field mapping of each type when they aren't set, with their default values. Only
+    /// these values at these positions are defaults: e.g. a string field's <c>analyzer</c> isn't filled in, so removing one
+    /// is a change.
     /// </summary>
-    private static readonly HashSet<string> ServerDefaultKeys = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, BsonDocument> FieldDefaults = new(StringComparer.Ordinal)
     {
-        "store", "norms", "indexOptions", "analyzer", "searchAnalyzer",
+        ["string"] = new() { { "indexOptions", "offsets" }, { "store", true }, { "norms", "include" } },
+        ["number"] = new() { { "representation", "double" }, { "indexDoubles", true }, { "indexIntegers", true } },
+        ["numberFacet"] = new() { { "representation", "double" }, { "indexDoubles", true }, { "indexIntegers", true } },
+        ["autocomplete"] = new() { { "minGrams", 2 }, { "maxGrams", 15 }, { "foldDiacritics", true }, { "tokenization", "edgeGram" } },
+        ["geo"] = new() { { "indexShapes", false } },
+        ["token"] = new() { { "normalizer", "none" } },
+        ["document"] = new() { { "dynamic", false } },
+        ["embeddedDocuments"] = new() { { "dynamic", false } },
     };
 
     /// <summary>
-    /// Whether the server's <c>latestDefinition</c> is the declaration once the server's own defaults are allowed for. Every
-    /// declared key must be present and equal; the server may only add keys it's known to default (see
-    /// <see cref="ServerDefaultKeys"/>) or an empty <c>fields</c> map on a dynamic mapping. Any other key the server has but
-    /// the declaration doesn't — e.g. a mapping field the declaration removed — is a change. Object key order doesn't matter;
-    /// arrays are compared in order.
+    /// A copy of a search or vector search definition without the values the server fills in by default: the default
+    /// options on each field mapping (<see cref="FieldDefaults"/>), <c>dynamic: false</c> and an empty <c>fields</c> on a
+    /// mapping, <c>storedSource: false</c>, and a vector field's <c>quantization: "none"</c>. A field indexed as several
+    /// types is sorted, since the server returns them in its own order.
     /// </summary>
-    private static bool Matches(BsonValue declared, BsonValue server)
+    private static BsonDocument Normalize(BsonDocument definition)
     {
-        switch (declared)
+        var normalized = definition.DeepClone().AsBsonDocument;
+        RemoveDefault(normalized, "storedSource", false);
+        if (normalized.GetValue("mappings", BsonNull.Value) is BsonDocument mappings)
         {
-            case BsonDocument declaredDocument when server is BsonDocument serverDocument:
-                foreach (var element in declaredDocument)
+            NormalizeMapping(mappings);
+        }
+        else if (normalized.GetValue("fields", BsonNull.Value) is BsonArray vectorFields)
+        {
+            foreach (var field in vectorFields.OfType<BsonDocument>())
+            {
+                RemoveDefault(field, "quantization", "none");
+            }
+        }
+
+        if (normalized.GetValue("typeSets", BsonNull.Value) is BsonArray typeSets)
+        {
+            foreach (var typeSet in typeSets.OfType<BsonDocument>())
+            {
+                if (typeSet.GetValue("types", BsonNull.Value) is BsonArray types)
                 {
-                    if (!serverDocument.TryGetValue(element.Name, out var value) || !Matches(element.Value, value))
-                    {
-                        return false;
-                    }
+                    typeSet["types"] = NormalizeFields(types);
                 }
+            }
+        }
 
-                foreach (var element in serverDocument)
-                {
-                    if (declaredDocument.Contains(element.Name) || ServerDefaultKeys.Contains(element.Name))
-                    {
-                        continue;
-                    }
+        return normalized;
+    }
 
-                    // A dynamic mapping the server filled with an empty fields map isn't a declared field.
-                    if (element.Name == "fields" && element.Value is BsonDocument fields && fields.ElementCount == 0)
-                    {
-                        continue;
-                    }
+    /// <summary>The top-level <c>mappings</c>, or a <c>document</c> or <c>embeddedDocuments</c> field's.</summary>
+    private static void NormalizeMapping(BsonDocument mapping)
+    {
+        RemoveDefault(mapping, "dynamic", false);
+        if (mapping.GetValue("fields", BsonNull.Value) is not BsonDocument fields)
+        {
+            return;
+        }
 
-                    return false;
-                }
+        // Each key here is a document field's name, never an option, so none is ever dropped as a default.
+        foreach (var element in fields.ToList())
+        {
+            fields[element.Name] = element.Value switch
+            {
+                BsonDocument field => NormalizeField(field),
+                BsonArray types => NormalizeFields(types),
+                var other => other,
+            };
+        }
 
-                return true;
-            case BsonArray declaredArray when server is BsonArray serverArray:
-                return declaredArray.Count == serverArray.Count && declaredArray.Zip(serverArray, Matches).All(matched => matched);
-            default:
-                return declared.Equals(server);
+        if (fields.ElementCount == 0)
+        {
+            mapping.Remove("fields");
         }
     }
 
+    private static BsonDocument NormalizeField(BsonDocument field)
+    {
+        var type = field.GetValue("type", BsonNull.Value) is BsonString t ? t.AsString : "";
+        if (FieldDefaults.TryGetValue(type, out var defaults))
+        {
+            foreach (var option in defaults)
+            {
+                RemoveDefault(field, option.Name, option.Value);
+            }
+        }
+
+        if (type is "document" or "embeddedDocuments")
+        {
+            NormalizeMapping(field);
+        }
+
+        return field;
+    }
+
+    private static BsonArray NormalizeFields(BsonArray types) => new(types
+        .Select(t => t is BsonDocument field ? NormalizeField(field) : t)
+        .OrderBy(t => t is BsonDocument field ? Canonicalize(field).AsBsonDocument.ToJson(Canonical) : t.ToString(), StringComparer.Ordinal));
+
+    private static void RemoveDefault(BsonDocument document, string name, BsonValue defaultValue)
+    {
+        if (document.TryGetValue(name, out var value) && Same(value, defaultValue))
+        {
+            document.Remove(name);
+        }
+    }
+
+    /// <summary>Equal values, whatever the order of an object's keys; numbers are compared by value (<c>2</c> is <c>2L</c>).</summary>
+    private static bool Same(BsonValue a, BsonValue b) => (a, b) switch
+    {
+        (BsonDocument x, BsonDocument y) => x.ElementCount == y.ElementCount &&
+                                            x.All(e => y.TryGetValue(e.Name, out var other) && Same(e.Value, other)),
+        (BsonArray x, BsonArray y) => x.Count == y.Count && x.Zip(y, Same).All(same => same),
+        _ when a.IsNumeric && b.IsNumeric => a.CompareTo(b) == 0,
+        _ => a.Equals(b),
+    };
     /// <summary>
     /// A definition with every object's keys in a fixed order, so a declaration that sets the same fields in a different
     /// order than the server returns them isn't seen as a change. Array order is kept.
@@ -341,6 +418,11 @@ internal sealed class SearchIndexPlan
     public bool Invalid { get; set; }
 
     public List<SearchPlannedChange> Changes { get; } = [];
+
+    /// <summary>
+    /// Declared indexes already in line but still building, which applying waits for. Only planned when waiting is on.
+    /// </summary>
+    public List<string> Pending { get; } = [];
 
     public List<string> Problems { get; } = [];
 

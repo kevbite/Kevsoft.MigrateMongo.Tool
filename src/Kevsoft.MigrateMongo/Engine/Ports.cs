@@ -230,7 +230,10 @@ public sealed class CollectionPolicy
     /// <summary><c>report</c> or <c>drop</c>: what happens to search indexes the definition doesn't declare, unless it sets its own.</summary>
     public string SearchPrune { get; init; } = "report";
 
-    /// <summary>Wait for created or updated search indexes to become queryable before the plan is counted as applied.</summary>
+    /// <summary>
+    /// Wait for created, updated or still-building declared search indexes to become queryable, and dropped ones to be gone,
+    /// before the plan is counted as applied.
+    /// </summary>
     public bool SearchWaitForReady { get; init; }
 
     /// <summary>When waiting for search indexes, how long before giving up.</summary>
@@ -273,6 +276,12 @@ public sealed class CollectionPlan
 
     /// <summary>The undeclared indexes this tool will have hidden once the plan is applied, and when each was hidden.</summary>
     public Dictionary<string, DateTime> Hidden { get; init; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Indexes that need nothing changed but that applying still waits for, e.g. a search index that's still building when
+    /// <see cref="CollectionPolicy.SearchWaitForReady"/> is on. Applying isn't skipped while there are any.
+    /// </summary>
+    public List<string> Pending { get; init; } = [];
 
     public bool HasChanges => Changes.Any(c => c.Action != IndexActions.Keep);
 }
@@ -341,7 +350,10 @@ public sealed class EngineOptions
     /// <summary><c>report</c> or <c>drop</c>: what happens to Atlas search indexes a collection definition doesn't declare.</summary>
     public string SearchIndexesPrune { get; set; } = "report";
 
-    /// <summary>Wait for created or updated search indexes to become queryable before a run is counted as applied.</summary>
+    /// <summary>
+    /// Wait for created, updated or still-building declared search indexes to become queryable, and dropped ones to be gone,
+    /// before a run is counted as applied.
+    /// </summary>
     public bool SearchIndexesWaitForReady { get; set; }
 
     /// <summary>When waiting for search indexes, how long before giving up.</summary>

@@ -265,6 +265,118 @@ public sealed class SearchIndexPlannerTests
     }
 
     [Fact]
+    public void Removing_a_mapped_field_named_like_a_server_option_is_an_update()
+    {
+        var plan = Plan(
+            [Declared("products", """{ "mappings": { "dynamic": false, "fields": { "title": { "type": "string" } } } }""")],
+            [Server("products", "search", """
+                { "mappings": { "dynamic": false, "fields": {
+                    "title": { "type": "string", "indexOptions": "offsets", "store": true, "norms": "include" },
+                    "store": { "type": "string", "indexOptions": "offsets", "store": true, "norms": "include" } } } }
+                """)]);
+
+        plan.Changes.ShouldHaveSingleItem().Info.Action.ShouldBe("update-search");
+    }
+
+    [Fact]
+    public void Removing_the_index_analyzer_is_an_update()
+    {
+        var plan = Plan(
+            [Declared("products", """{ "mappings": { "dynamic": true } }""")],
+            [Server("products", "search", """{ "analyzer": "lucene.keyword", "mappings": { "dynamic": true, "fields": {} } }""")]);
+
+        plan.Changes.ShouldHaveSingleItem().Info.Action.ShouldBe("update-search");
+    }
+
+    [Fact]
+    public void Removing_a_fields_analyzer_is_an_update()
+    {
+        var plan = Plan(
+            [Declared("products", """{ "mappings": { "dynamic": false, "fields": { "title": { "type": "string" } } } }""")],
+            [Server("products", "search", """
+                { "mappings": { "dynamic": false, "fields": {
+                    "title": { "type": "string", "analyzer": "lucene.keyword", "indexOptions": "offsets", "store": true, "norms": "include" } } } }
+                """)]);
+
+        plan.Changes.ShouldHaveSingleItem().Info.Action.ShouldBe("update-search");
+    }
+
+    [Fact]
+    public void Changing_an_option_from_its_default_is_an_update()
+    {
+        var plan = Plan(
+            [Declared("products", """{ "mappings": { "dynamic": false, "fields": { "title": { "type": "string", "store": false } } } }""")],
+            [Server("products", "search", """
+                { "mappings": { "dynamic": false, "fields": {
+                    "title": { "type": "string", "indexOptions": "offsets", "store": true, "norms": "include" } } } }
+                """)]);
+
+        plan.Changes.ShouldHaveSingleItem().Info.Action.ShouldBe("update-search");
+    }
+
+    [Fact]
+    public void The_options_the_server_fills_in_for_each_field_type_are_not_a_change()
+    {
+        var plan = Plan(
+            [Declared("products", """
+                { "mappings": { "fields": {
+                    "title": [ { "type": "string" }, { "type": "autocomplete" }, { "type": "token" } ],
+                    "price": { "type": "number" },
+                    "rating": { "type": "numberFacet" },
+                    "location": { "type": "geo" },
+                    "meta": { "type": "document" },
+                    "tags": { "type": "embeddedDocuments", "fields": { "name": { "type": "string" } } },
+                    "owner": { "type": "document", "dynamic": true } } } }
+                """)],
+            [Server("products", "search", """
+                { "mappings": { "dynamic": false, "fields": {
+                    "title": [
+                        { "type": "autocomplete", "minGrams": 2, "maxGrams": 15, "foldDiacritics": true, "tokenization": "edgeGram" },
+                        { "type": "string", "indexOptions": "offsets", "store": true, "norms": "include" },
+                        { "type": "token" } ],
+                    "price": { "type": "number", "representation": "double", "indexDoubles": true, "indexIntegers": true },
+                    "rating": { "type": "numberFacet", "representation": "double", "indexDoubles": true, "indexIntegers": true },
+                    "location": { "type": "geo", "indexShapes": false },
+                    "meta": { "type": "document", "dynamic": false, "fields": {} },
+                    "tags": { "type": "embeddedDocuments", "dynamic": false, "fields": {
+                        "name": { "type": "string", "indexOptions": "offsets", "store": true, "norms": "include" } } },
+                    "owner": { "type": "document", "dynamic": true, "fields": {} } } } }
+                """)]);
+
+        plan.Changes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Declaring_a_default_the_server_leaves_out_is_not_a_change()
+    {
+        var plan = Plan(
+            [
+                Declared("text", """{ "mappings": { "dynamic": true }, "storedSource": false }"""),
+                DeclaredVector("vectors", """{ "fields": [ { "type": "vector", "path": "embedding", "numDimensions": 3, "similarity": "cosine", "quantization": "none" } ] }"""),
+            ],
+            [
+                Server("text", "search", """{ "mappings": { "dynamic": true, "fields": {} } }"""),
+                Server("vectors", "vectorSearch", """{ "fields": [ { "type": "vector", "path": "embedding", "numDimensions": 3, "similarity": "cosine" } ] }"""),
+            ]);
+
+        plan.Changes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void An_index_in_line_but_still_building_is_waited_for_only_when_waiting_is_on()
+    {
+        SearchIndexDeclaration[] declared = [Declared("products", """{ "mappings": { "dynamic": true } }""")];
+        BsonDocument[] building = [Server("products", "search", """{ "mappings": { "dynamic": true, "fields": {} } }""", status: "BUILDING", queryable: false)];
+
+        var waiting = Plan(declared, building, Policy(waitForReady: true));
+        var notWaiting = Plan(declared, building, Policy());
+
+        waiting.Changes.ShouldBeEmpty();
+        waiting.Pending.ShouldBe(["products"]);
+        notWaiting.Pending.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void A_declared_index_whose_build_failed_is_not_in_sync()
     {
         var plan = Plan(
@@ -294,9 +406,10 @@ public sealed class SearchIndexPlannerTests
     private static string Hash(SearchIndexDeclaration[] declared) =>
         SearchIndexPlanner.Plan(new CollectionDeclaration { Name = "catalog", Indexes = [], SearchIndexes = declared }, [], Policy()).Declaration;
 
-    private static CollectionPolicy Policy(string searchPrune = "report") => new()
+    private static CollectionPolicy Policy(string searchPrune = "report", bool waitForReady = false) => new()
     {
         SearchPrune = searchPrune,
+        SearchWaitForReady = waitForReady,
         Now = new DateTime(2026, 10, 29, 12, 0, 0, DateTimeKind.Utc),
     };
 

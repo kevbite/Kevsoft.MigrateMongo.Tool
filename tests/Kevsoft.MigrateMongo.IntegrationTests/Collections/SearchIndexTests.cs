@@ -217,6 +217,44 @@ public sealed class SearchIndexTests(IntegrationEnvironment environment)
         await mongo.ShouldBeInSyncAsync(fewer, WaitForReady);
     }
 
+    [Fact]
+    public async Task The_options_the_server_fills_in_for_each_field_type_settle_in_sync()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await SeedAsync(mongo);
+        const string everyType = """
+            { "mappings": { "fields": {
+                "title": [ { "type": "string" }, { "type": "autocomplete" }, { "type": "token" } ],
+                "price": { "type": "number" },
+                "location": { "type": "geo" },
+                "meta": { "type": "document" },
+                "tags": { "type": "embeddedDocuments", "fields": { "name": { "type": "string" } } } } },
+              "storedSource": false }
+            """;
+        var collection = CollectionHarness.Define<BsonDocument>(c => c.SearchIndexes.Add("by_text", everyType));
+
+        (await mongo.UpAsync(collection, WaitForReady)).Reconciled.ShouldBe([CollectionHarness.Things]);
+
+        await mongo.ShouldBeInSyncAsync(collection, WaitForReady);
+    }
+
+    [Fact]
+    public async Task A_run_that_waits_waits_for_an_index_an_earlier_run_left_building()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await SeedAsync(mongo);
+        var collection = CollectionHarness.Define<BsonDocument>(c => c.SearchIndexes.Add("by_text", Dynamic));
+
+        // E.g. an earlier run that didn't wait, or that timed out waiting: the index is declared and in line, but building.
+        (await mongo.UpAsync(collection)).Reconciled.ShouldBe([CollectionHarness.Things]);
+
+        var up = await mongo.UpAsync(collection, WaitForReady);
+
+        up.ExitCode.ShouldBe(ExitCodes.Success, up.Message);
+        up.Reconciled.ShouldBeEmpty();
+        (await SearchIndexesAsync(mongo)).ShouldHaveSingleItem()["queryable"].AsBoolean.ShouldBeTrue();
+    }
+
     private static void WaitForReady(EngineOptions options)
     {
         options.SearchIndexesWaitForReady = true;

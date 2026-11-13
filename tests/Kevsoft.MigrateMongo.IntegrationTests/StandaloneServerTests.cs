@@ -43,6 +43,18 @@ public sealed class StandaloneServerTests(IntegrationEnvironment environment, St
         workspace.Find("roles").ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Declaring_a_search_index_is_blocked_because_the_server_has_no_search()
+    {
+        await using var mongo = new Collections.CollectionHarness(environment);
+        var collection = Collections.CollectionHarness.Define<MongoDB.Bson.BsonDocument>(c => c.SearchIndexes.Add("by_text", """{ "mappings": { "dynamic": true } }"""));
+
+        var plan = await mongo.RunAsync("plan", [collection], client: server.Client);
+
+        plan.Collections.ShouldNotBeNull().ShouldHaveSingleItem().Problems.ShouldNotBeNull().ShouldHaveSingleItem()
+            .ShouldStartWith("things: this deployment doesn't support Atlas search indexes (");
+    }
+
     public sealed class Server : IAsyncLifetime
     {
         private IContainer? _container;

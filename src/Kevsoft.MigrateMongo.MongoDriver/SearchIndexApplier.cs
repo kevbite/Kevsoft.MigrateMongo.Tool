@@ -8,7 +8,8 @@ namespace Kevsoft.MigrateMongo.MongoDriver;
 /// (and a dropped index's full definition with it). Search indexes need the collection to exist, so it's created first when
 /// any index is created. A type change (or a failed-build rebuild) drops then creates, waiting for the old index to disappear
 /// in between so the name is free. When waiting is on, it polls <c>$listSearchIndexes</c> until each created or updated index
-/// has reached <c>READY</c> with the requested definition.
+/// (and each already declared one still building) has reached <c>READY</c> with the requested definition, and until each
+/// dropped index has gone.
 /// </summary>
 internal static class SearchIndexApplier
 {
@@ -20,7 +21,7 @@ internal static class SearchIndexApplier
         TimeSpan waitTimeout,
         CancellationToken cancellationToken)
     {
-        if (plan.Changes.All(c => c.Commands.Count == 0))
+        if (plan.Changes.All(c => c.Commands.Count == 0) && (!waitForReady || plan.Pending.Count == 0))
         {
             return;
         }
@@ -44,16 +45,25 @@ internal static class SearchIndexApplier
                     : null;
                 await database.RunCommandAsync(command, recordStatement: statement, cancellationToken: cancellationToken);
 
-                // A drop that a create follows (a type change or a failed rebuild) has to finish before the name is free.
-                if (Drops(command) && change.WaitForDropName is { } dropName)
+                // A drop that a create follows (a type change or a failed rebuild) has to finish before the name is free; when
+                // waiting is on, so does any other drop, so the run doesn't return with the index still listed.
+                if (Drops(command) && (change.WaitForDropName is not null || waitForReady))
                 {
-                    await WaitForGoneAsync(collection, collectionName, dropName, waitTimeout, cancellationToken);
+                    await WaitForGoneAsync(collection, collectionName, command["name"].AsString, waitTimeout, cancellationToken);
                 }
             }
 
             if (waitForReady && change.WaitForName is { } name)
             {
                 await WaitForReadyAsync(collection, collectionName, name, change.WaitForDefinition, waitTimeout, cancellationToken);
+            }
+        }
+
+        if (waitForReady)
+        {
+            foreach (var name in plan.Pending)
+            {
+                await WaitForReadyAsync(collection, collectionName, name, null, waitTimeout, cancellationToken);
             }
         }
     }
@@ -85,7 +95,7 @@ internal static class SearchIndexApplier
         }
     }
 
-    /// <summary>Polls until the named index is no longer listed, so a create can reuse its name.</summary>
+    /// <summary>Polls until the named index is no longer listed.</summary>
     private static async Task WaitForGoneAsync(
         IMongoCollection<BsonDocument> collection,
         string collectionName,
@@ -99,7 +109,7 @@ internal static class SearchIndexApplier
             if (DateTime.UtcNow >= deadline)
             {
                 throw new TimeoutException(
-                    $"Search index {collectionName}.{name} wasn't dropped within {waitTimeout.TotalSeconds:0} seconds, so it couldn't be recreated.");
+                    $"Search index {collectionName}.{name} wasn't dropped within {waitTimeout.TotalSeconds:0} seconds.");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);

@@ -200,7 +200,7 @@ public sealed partial class MigrationEngine
             return (false, null);
         }
 
-        if (!plan.HasChanges && state?.Declaration == plan.Declaration && SameHidden(state.Hidden, plan.Hidden))
+        if (!plan.HasChanges && plan.Pending.Count == 0 && state?.Declaration == plan.Declaration && SameHidden(state.Hidden, plan.Hidden))
         {
             EmitCollection(EventTypes.CollectionCompleted, collection, null, null, changes: []);
             return (false, null);

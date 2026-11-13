@@ -211,8 +211,8 @@ environments:
 | `indexes.dropHiddenAfter` | `604800` | With `prune: hide`, seconds an undeclared index stays hidden before it's dropped (7 days). |
 | `indexes.supersededWindow` | `3600` | Seconds after a collection definition is replaced during which a run bringing back the previous one is skipped as an older build. `0` turns this off. |
 | `searchIndexes.prune` | `report` | What happens to an [Atlas Search index](#search-indexes) a collection doesn't declare: `report` or `drop`. |
-| `searchIndexes.waitForReady` | `false` | Wait for each created or updated search index to finish building (become queryable) before the run returns. |
-| `searchIndexes.waitTimeout` | `300` | With `waitForReady`, seconds to wait for a search index to become queryable before failing (5 minutes). |
+| `searchIndexes.waitForReady` | `false` | Wait for each created, updated or still-building declared search index to become queryable, and each dropped one to be gone, before the run returns. |
+| `searchIndexes.waitTimeout` | `300` | With `waitForReady`, seconds to wait for each search index before failing (5 minutes). |
 | `tunnel` | | See [Tunnelling through a bastion](#tunnelling-through-a-bastion). |
 | `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings; an empty one changes nothing. |
 
@@ -632,9 +632,11 @@ or an object). A search index is identified by its name, unique per collection.
 | `type` changed (search ↔ vectorSearch) | Drops it and creates it again: `updateSearchIndex` can't change the type. |
 | On the server, not declared | Depends on `searchIndexes.prune`: `report` (default) leaves it and lists it as `keep`, `drop` removes it. |
 
-Only the fields a definition sets are compared: the server fills a definition with defaults (an empty `fields` for a
-dynamic mapping, per-field `store`, `norms` and `indexOptions` for a static one), and those aren't treated as a change,
-so an unchanged definition stays in sync. `collection.SearchIndexes.Prune = SearchIndexPrune.Drop` overrides
+The server fills a definition in with defaults: `dynamic: false` and an empty `fields` on a mapping, each field's
+default options for its type (e.g. a `string` field's `store`, `norms` and `indexOptions`, a `number` field's
+`representation`), and it leaves out ones such as `storedSource: false`. Only those default values are allowed for, so an
+unchanged definition stays in sync whether or not it spells them out, but any other difference is a change, e.g. a field
+or an `analyzer` removed. The types a field is indexed as can be listed in any order. `collection.SearchIndexes.Prune = SearchIndexPrune.Drop` overrides
 `searchIndexes.prune` for one collection, and `Ignore("pattern")` leaves matching names alone (`*` matches anything).
 A declared search index never changes an ignored one: if the server's has the same name but a different type or
 definition, the collection is blocked until one of them changes. One that's exactly the same is fine, and one that isn't
@@ -645,9 +647,10 @@ search indexes listed or pruned, so you can adopt them gradually. A search index
 definition that declares one on a collection that doesn't exist yet creates the collection first.
 
 Building a search index is asynchronous: by default `up` issues the change and returns without waiting. Set
-`searchIndexes.waitForReady: true` to wait for each created or updated index to become queryable (up to
-`searchIndexes.waitTimeout` seconds) before the run returns, e.g. in a test or a deploy step that seeds data straight
-after.
+`searchIndexes.waitForReady: true` to wait for each created or updated index to become queryable, and each dropped one to
+be gone (up to `searchIndexes.waitTimeout` seconds), before the run returns, e.g. in a test or a deploy step that seeds
+data straight after. It also waits for a declared index that's already in line but still building, e.g. after an earlier
+run that didn't wait or timed out.
 
 ### When they run
 

@@ -90,6 +90,22 @@ public sealed class CollectionEngineTests
     }
 
     [Fact]
+    public async Task A_collection_in_line_but_still_building_is_applied_so_it_can_be_waited_for_without_being_recorded_as_changed()
+    {
+        await Engine([], "users").UpAsync(null, CancellationToken.None);
+        var history = _store.History.Count;
+        _executor.Calls.Clear();
+        _executor.CollectionPlans = (_, _) => new CollectionPlan { Declaration = _store.CollectionStates["users"].Declaration, Pending = ["by_text"] };
+
+        var result = await Engine([], "users").UpAsync(null, CancellationToken.None);
+
+        result.ExitCode.ShouldBe(0, result.Message);
+        _executor.Calls.ShouldBe(["Apply:users"]);
+        result.Reconciled.ShouldBeEmpty();
+        _store.History.Count.ShouldBe(history);
+    }
+
+    [Fact]
     public async Task Only_migrations_skips_collection_definitions()
     {
         _executor.CollectionPlans = (_, _) => Collections.Plan("sha256:a", CreateStatus);

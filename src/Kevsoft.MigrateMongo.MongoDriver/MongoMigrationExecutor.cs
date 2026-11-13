@@ -1,6 +1,6 @@
-using Kevsoft.MigrateMongo.Engine;
 using System.Security.Cryptography;
 using System.Text;
+using Kevsoft.MigrateMongo.Engine;
 using Kevsoft.MigrateMongo.Protocol;
 using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
@@ -19,6 +19,12 @@ public sealed class MongoMigrationExecutor(
 
     /// <summary>MongoDB 5.1, which added making a non-TTL index a TTL one with <c>collMod</c>.</summary>
     private const int TtlConversionWireVersion = 14;
+
+    /// <summary>
+    /// What <c>$listSearchIndexes</c> fails with on a deployment without search: <c>SearchNotEnabled</c> (8.0+), "only allowed
+    /// on MongoDB Atlas" (7.0), an unrecognised stage (before 6.0.7), or the command not existing or not being supported.
+    /// </summary>
+    private static readonly HashSet<int> SearchUnsupportedCodes = [31082, 6047401, 40324, 59, 115];
 
     private int? _maxWireVersion;
 
@@ -95,6 +101,7 @@ public sealed class MongoMigrationExecutor(
             Invalid = index.Invalid || (search?.Invalid ?? false),
             Indexes = indexes,
             Hidden = new Dictionary<string, DateTime>(index.Hidden, StringComparer.Ordinal),
+            Pending = search?.Pending.ToList() ?? [],
         };
     }
 
@@ -141,9 +148,9 @@ public sealed class MongoMigrationExecutor(
             // NamespaceNotFound: the collection doesn't exist yet, so every declared search index is created.
             existing = [];
         }
-        catch (MongoException e)
+        catch (MongoCommandException e) when (SearchUnsupportedCodes.Contains(e.Code))
         {
-            // $listSearchIndexes isn't recognised off Atlas; declaring search indexes there can't be applied.
+            // Only these errors mean the deployment has no search; any other (auth, network) is reported as it is.
             var plan = new SearchIndexPlan();
             plan.Problems.Add(
                 $"{declaration.Name}: this deployment doesn't support Atlas search indexes ({e.Message}). " +
