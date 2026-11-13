@@ -302,6 +302,33 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
         });
     }
 
+    /// <summary>What's undeclared in the database (default: nothing); dropped entries are dropped when applied.</summary>
+    public List<IndexChangeInfo> Undeclared { get; set; } = [];
+
+    public List<UndeclaredPolicy> UndeclaredPolicies { get; } = [];
+
+    public Task<CollectionPlan> PlanUndeclaredAsync(UndeclaredPolicy policy, CancellationToken cancellationToken)
+    {
+        UndeclaredPolicies.Add(policy);
+        return Task.FromResult(new CollectionPlan { Changes = [.. Undeclared] });
+    }
+
+    public Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken)
+    {
+        Calls.Add("ApplyUndeclared");
+        UndeclaredPolicies.Add(policy);
+        return Task.FromResult(new UndeclaredApplyResult
+        {
+            Plan = new CollectionPlan { Changes = [.. Undeclared] },
+            Drops = Undeclared.Where(c => c.Action != IndexActions.Keep).Select(c => new UndeclaredDrop
+            {
+                Name = c.Index,
+                Change = c,
+                Output = new MigrationOutputInfo { Operations = [new OperationRecord { Kind = "runCommand", Collection = c.Index }] },
+            }).ToList(),
+        });
+    }
+
     private sealed class EmptyServices : IServiceProvider
     {
         public object? GetService(Type serviceType) => null;

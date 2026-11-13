@@ -22,6 +22,8 @@ public sealed class MigrationGenerator : IIncrementalGenerator
     private const string MigrationInterface = "Kevsoft.MigrateMongo.IMigration";
     private const string CollectionAttributeName = "Kevsoft.MigrateMongo.ManagedCollectionAttribute";
     private const string CollectionInterface = "Kevsoft.MigrateMongo.ICollectionDefinition<TDocument>";
+    private const string ViewAttributeName = "Kevsoft.MigrateMongo.ManagedViewAttribute";
+    private const string ViewInterface = "Kevsoft.MigrateMongo.IViewDefinition<TDocument>";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -37,10 +39,19 @@ public sealed class MigrationGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataName(
                 CollectionAttributeName,
                 static (node, _) => node.IsKind(SyntaxKind.ClassDeclaration) || node.IsKind(SyntaxKind.RecordDeclaration),
-                static (ctx, ct) => TransformCollection(ctx, ct))
+                static (ctx, ct) => TransformCollection(ctx, CollectionInterface, view: false, ct))
             .Collect();
 
-        context.RegisterSourceOutput(migrations.Combine(collections), static (spc, items) => Emit(spc, items.Left, items.Right));
+        var views = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ViewAttributeName,
+                static (node, _) => node.IsKind(SyntaxKind.ClassDeclaration) || node.IsKind(SyntaxKind.RecordDeclaration),
+                static (ctx, ct) => TransformCollection(ctx, ViewInterface, view: true, ct))
+            .Collect();
+
+        context.RegisterSourceOutput(
+            migrations.Combine(collections.Combine(views)),
+            static (spc, items) => Emit(spc, items.Left, items.Right.Left.AddRange(items.Right.Right)));
     }
 
     private static MigrationModel Transform(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
@@ -86,15 +97,16 @@ public sealed class MigrationGenerator : IIncrementalGenerator
             Location: location);
     }
 
-    private static CollectionModel TransformCollection(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
+    private static CollectionModel TransformCollection(GeneratorAttributeSyntaxContext ctx, string definitionInterface, bool view, System.Threading.CancellationToken ct)
     {
         var symbol = (INamedTypeSymbol)ctx.TargetSymbol;
         var syntax = (TypeDeclarationSyntax)ctx.TargetNode;
         var attribute = ctx.Attributes[0];
         var name = attribute.ConstructorArguments.Length > 0 ? attribute.ConstructorArguments[0].Value as string : null;
+        var on = view && attribute.ConstructorArguments.Length > 1 ? attribute.ConstructorArguments[1].Value as string : null;
 
         var definitions = symbol.AllInterfaces
-            .Where(i => i.OriginalDefinition.ToDisplayString() == CollectionInterface)
+            .Where(i => i.OriginalDefinition.ToDisplayString() == definitionInterface)
             .ToList();
         var ctor = Constructor(symbol);
         var parameters = ctor is null
@@ -113,7 +125,8 @@ public sealed class MigrationGenerator : IIncrementalGenerator
             IsAbstract: symbol.IsAbstract,
             IsAccessible: IsAccessible(symbol),
             HasConstructor: ctor is not null,
-            Location: LocationInfo.From(syntax.Identifier.GetLocation()));
+            Location: LocationInfo.From(syntax.Identifier.GetLocation()),
+            ViewOn: view ? on ?? string.Empty : null);
     }
 
     /// <summary>The public or internal constructor with the most parameters (parameterless if that's all there is).</summary>
@@ -222,13 +235,20 @@ public sealed class MigrationGenerator : IIncrementalGenerator
             var location = item.Location.ToLocation();
             if (item.DefinitionCount != 1)
             {
-                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.MustImplementCollectionDefinition, location, item.DisplayName));
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    item.IsView ? Diagnostics.MustImplementViewDefinition : Diagnostics.MustImplementCollectionDefinition, location, item.DisplayName));
                 ok = false;
             }
 
             if (!IsValidCollectionName(item.Name))
             {
                 spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidCollectionName, location, item.Name, item.DisplayName));
+                ok = false;
+            }
+
+            if (item.ViewOn is { } on && !IsValidCollectionName(on))
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidCollectionName, location, on, item.DisplayName));
                 ok = false;
             }
 
@@ -256,7 +276,27 @@ public sealed class MigrationGenerator : IIncrementalGenerator
             }
         }
 
-        return valid.GroupBy(c => c.Name).Where(g => g.Count() == 1).Select(g => g.First()).ToList();
+        var unique = valid.GroupBy(c => c.Name).Where(g => g.Count() == 1).Select(g => g.First()).ToList();
+        var views = unique.Where(c => c.IsView).ToDictionary(c => c.Name, StringComparer.Ordinal);
+        foreach (var view in views.Values)
+        {
+            // Follow the chain of views it reads from; one that comes back to the start is in a cycle.
+            var chain = new List<string> { view.Name };
+            var current = view.ViewOn!;
+            while (views.TryGetValue(current, out var next) && !chain.Contains(current))
+            {
+                chain.Add(current);
+                current = next.ViewOn!;
+            }
+
+            if (current == view.Name)
+            {
+                chain.Add(view.Name);
+                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.ViewCycle, view.Location.ToLocation(), view.Name, string.Join(" → ", chain)));
+            }
+        }
+
+        return unique;
     }
 
     private static bool IsValidId(string id) => id.Length == 14 && id.All(c => c is >= '0' and <= '9');
@@ -297,6 +337,18 @@ public sealed class MigrationGenerator : IIncrementalGenerator
         sb.AppendLine("        {");
         foreach (var c in collections)
         {
+            if (c.ViewOn is { } on)
+            {
+                sb.Append("            global::Kevsoft.MigrateMongo.CollectionDescriptor.CreateView<")
+                    .Append(c.TypeName).Append(", ").Append(c.DocumentType).Append(">(")
+                    .Append(Literal(c.Name)).Append(", ")
+                    .Append(Literal(on)).Append(", ")
+                    .Append(Literal(c.DisplayName)).Append(", ");
+                AppendFactory(sb, c.TypeName, c.DisplayName, "view definition", c.Parameters);
+                sb.AppendLine("),");
+                continue;
+            }
+
             sb.Append("            global::Kevsoft.MigrateMongo.CollectionDescriptor.Create<")
                 .Append(c.TypeName).Append(", ").Append(c.DocumentType).Append(">(")
                 .Append(Literal(c.Name)).Append(", ")

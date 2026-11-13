@@ -138,6 +138,15 @@ public sealed class ConfigLoaderTests
     [InlineData("searchIndexes:\n  prune: hide", "prune")]
     [InlineData("searchIndexes:\n  wait: true", "searchIndexes.wait")]
     [InlineData("searchIndexes: drop", "searchIndexes")]
+    [InlineData("collections:\n  onUnchangeable: ignore", "onUnchangeable")]
+    [InlineData("collections:\n  onConvertToCapped: yes", "onConvertToCapped")]
+    [InlineData("collections:\n  capped: true", "collections.capped")]
+    [InlineData("collections:\n  prune: delete", "prune")]
+    [InlineData("collections:\n  ignore:\n    pattern: x", "'ignore' must be a list")]
+    [InlineData("validators:\n  prune: drop", "prune")]
+    [InlineData("validators:\n  onInvalidDocuments: ignore", "onInvalidDocuments")]
+    [InlineData("validators:\n  countInvalidDocuments: sometimes", "countInvalidDocuments")]
+    [InlineData("validators:\n  level: strict", "validators.level")]
     public void Invalid_settings_are_reported(string yaml, string expected)
     {
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message.ShouldContain(expected);
@@ -301,6 +310,53 @@ public sealed class ConfigLoaderTests
 
         var prod = ConfigLoader.Load(yaml, "prod", Env);
         (prod.IndexesPrune, prod.IndexesOnRebuild, prod.IndexesDropHiddenAfterSeconds, prod.IndexesSupersededWindowSeconds).ShouldBe(("hide", "fail", 86400, 600));
+    }
+
+    [Fact]
+    public void Collection_and_validator_settings_default_to_fail_fail_report_warn_count_and_can_be_changed_per_environment()
+    {
+        var yaml = Yaml + """
+
+            collections:
+              onConvertToCapped: allow
+              onUnchangeable: skip
+            validators:
+              prune: remove
+              onInvalidDocuments: fail
+            """;
+        yaml = yaml.Replace("lockWaitTimeout: 5", "lockWaitTimeout: 5\n    validators:\n      countInvalidDocuments: false", StringComparison.Ordinal);
+
+        var defaults = ConfigLoader.Load(Yaml, null, Env);
+        (defaults.CollectionsOnConvertToCapped, defaults.CollectionsOnUnchangeable, defaults.ValidatorsPrune, defaults.ValidatorsOnInvalidDocuments, defaults.ValidatorsCountInvalidDocuments)
+            .ShouldBe(("fail", "fail", "report", "warn", true));
+
+        var local = ConfigLoader.Load(yaml, null, Env);
+        (local.CollectionsOnConvertToCapped, local.CollectionsOnUnchangeable, local.ValidatorsPrune, local.ValidatorsOnInvalidDocuments, local.ValidatorsCountInvalidDocuments)
+            .ShouldBe(("allow", "skip", "remove", "fail", true));
+
+        var prod = ConfigLoader.Load(yaml, "prod", Env);
+        (prod.CollectionsOnConvertToCapped, prod.CollectionsOnUnchangeable, prod.ValidatorsPrune, prod.ValidatorsOnInvalidDocuments, prod.ValidatorsCountInvalidDocuments)
+            .ShouldBe(("allow", "skip", "remove", "fail", false));
+    }
+
+    [Fact]
+    public void Undeclared_collections_are_left_alone_by_default_and_prune_and_ignore_can_be_set()
+    {
+        var defaults = ConfigLoader.Load(Yaml, null, Env);
+        (defaults.CollectionsPrune, defaults.CollectionsIgnore.Count).ShouldBe(("off", 0));
+
+        var config = ConfigLoader.Load(Yaml + """
+
+            collections:
+              prune: drop
+              ignore:
+                - "audit_*"
+                - scratch
+            """, null, Env);
+        config.CollectionsPrune.ShouldBe("drop");
+        config.CollectionsIgnore.ShouldBe(["audit_*", "scratch"]);
+
+        ConfigLoader.Load(Yaml + "\ncollections:\n  prune: report\n  ignore: tmp_*\n", null, Env).CollectionsIgnore.ShouldBe(["tmp_*"]);
     }
 
     [Fact]

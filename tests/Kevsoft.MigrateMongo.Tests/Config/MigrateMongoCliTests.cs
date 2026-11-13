@@ -207,6 +207,24 @@ public sealed class MigrateMongoCliTests
         arguments.AllowSuperseded.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData("up")]
+    [InlineData("plan")]
+    public async Task Up_and_plan_take_the_collection_option_overrides(string command)
+    {
+        var none = (await Parse(true, command)).Invocation!.Arguments;
+        (none.AllowConvertToCapped, none.SkipUnchangeable, none.AllowInvalidDocuments).ShouldBe((null, null, null));
+
+        var (exitCode, invocation) = await Parse(true, command,
+            "--allow-convert-to-capped", "logs", "--skip-unchangeable", "metrics", "--skip-unchangeable", "events", "--allow-invalid-documents", "users");
+
+        exitCode.ShouldBe(0);
+        var arguments = invocation!.Arguments;
+        arguments.AllowConvertToCapped.ShouldBe(["logs"]);
+        arguments.SkipUnchangeable.ShouldBe(["metrics", "events"]);
+        arguments.AllowInvalidDocuments.ShouldBe(["users"]);
+    }
+
     [Fact]
     public async Task Only_accepts_migrations_or_collections()
     {

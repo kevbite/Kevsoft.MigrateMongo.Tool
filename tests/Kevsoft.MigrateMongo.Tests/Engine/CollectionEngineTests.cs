@@ -466,4 +466,110 @@ public sealed class CollectionEngineTests
         result.ExitCode.ShouldBe(ExitCodes.Failure);
         result.Message.ShouldBe("--only must be 'migrations' or 'collections', not 'indexes'.");
     }
+
+    private MigrationEngine EngineFor(IEnumerable<CollectionDescriptor> collections, string prune = "off") =>
+        new(_store, _executor, [], new EngineOptions
+        {
+            LockWaitTimeout = TimeSpan.Zero,
+            Provenance = new Provenance { Host = "test-host", User = "tester", Library = "1.0.0", Driver = "3.5.0", Runtime = "10.0.0" },
+            CollectionsPrune = prune,
+            CollectionsIgnore = ["audit_*"],
+        }, _sink, collections: collections);
+
+    private static CollectionDescriptor View(string name, string on) =>
+        new(name, "csharp", $"Test.{name}", (_, _) => new CollectionDeclaration { Name = name, Indexes = [] }, on);
+
+    [Fact]
+    public async Task Views_are_applied_after_collections_and_after_the_views_they_read_from()
+    {
+        _executor.CollectionPlans = (c, _) => Collections.Plan("sha256:" + c.Name, Collections.Change(c.IsView ? "create-view" : "create-collection", c.IsView ? "view" : "collection"));
+
+        var result = await EngineFor([View("a_recent", "b_active"), View("b_active", "orders"), Collections.Create("orders"), View("c_all", "orders")])
+            .ExecuteAsync("up", new CommandArguments(), CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Success, result.Message);
+        _executor.Calls.ShouldBe(["Apply:orders", "Apply:b_active", "Apply:a_recent", "Apply:c_all"]);
+        result.Reconciled.ShouldBe(["orders", "b_active", "a_recent", "c_all"]);
+    }
+
+    [Fact]
+    public async Task Views_that_read_from_each_other_in_a_cycle_are_invalid()
+    {
+        var result = await EngineFor([Collections.Create("orders"), View("a", "b"), View("b", "a"), View("c", "a")])
+            .ExecuteAsync("up", new CommandArguments(), CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.ValidationFailed);
+        result.Issues.ShouldNotBeNull().Where(i => i.Kind == "invalidCollection").Select(i => i.Message).ShouldBe([
+            "a: views read from each other in a cycle (a → b → a), so none of them can be created.",
+            "b: views read from each other in a cycle (b → a → b), so none of them can be created.",
+            "c: it reads from a, which depends on a cycle of views, so it can't be created.",
+        ]);
+        _executor.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_view_and_a_collection_with_the_same_name_are_rejected()
+    {
+        Should.Throw<InvalidOperationException>(() => EngineFor([Collections.Create("orders"), View("orders", "customers")]))
+            .Message.ShouldBe("Collection 'orders' is defined more than once (Test.Orders, Test.orders).");
+    }
+
+    [Fact]
+    public async Task Undeclared_collections_are_not_looked_at_when_prune_is_off()
+    {
+        _executor.Undeclared = [Collections.Change("drop-view", "old_view")];
+
+        var result = await EngineFor([Collections.Create("orders")]).ExecuteAsync("plan", new CommandArguments(), CancellationToken.None);
+
+        result.Collections.ShouldNotBeNull().Select(c => c.Name).ShouldBe(["orders"]);
+        _executor.UndeclaredPolicies.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Plan_lists_undeclared_collections_in_their_own_entry_with_warnings_for_those_kept()
+    {
+        _executor.Undeclared = [Collections.Change("keep", "leftover", "not declared (3 documents)")];
+
+        var result = await EngineFor([Collections.Create("orders"), View("active", "customers")], "report").ExecuteAsync("plan", new CommandArguments(), CancellationToken.None);
+
+        var undeclared = result.Collections.ShouldNotBeNull().Last();
+        (undeclared.Name, undeclared.Kind, undeclared.State).ShouldBe(("(undeclared)", "undeclared", "inSync"));
+        undeclared.Changes.Select(c => (c.Action, c.Index)).ShouldBe([("keep", "leftover")]);
+        result.Issues.ShouldNotBeNull().Where(i => i.Kind == "undeclaredCollection").Select(i => i.Message).ShouldBe(["leftover isn't declared: not declared (3 documents)."]);
+
+        var policy = _executor.UndeclaredPolicies.ShouldHaveSingleItem();
+        (policy.Prune, policy.Ignore.Single()).ShouldBe(("report", "audit_*"));
+        policy.Declared.Order(StringComparer.Ordinal).ShouldBe(["active", "customers", "orders"]);
+    }
+
+    [Fact]
+    public async Task Up_drops_undeclared_collections_and_records_each_drop()
+    {
+        _executor.Undeclared = [Collections.Change("drop-collection", "empty"), Collections.Change("drop-view", "old_view")];
+
+        var result = await EngineFor([Collections.Create("orders")], "drop").ExecuteAsync("up", new CommandArguments(), CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Success, result.Message);
+        _executor.Calls.ShouldBe(["Apply:orders", "ApplyUndeclared"]);
+        result.Reconciled.ShouldBe(["empty", "old_view"]);
+        _store.History.Where(h => h.Kind == "collection").Select(h => (h.MigrationId, h.Event, h.Name)).ShouldBe([
+            ("orders", "reconciled", "Orders"),
+            ("empty", "dropped", "(undeclared)"),
+            ("old_view", "dropped", "(undeclared)"),
+        ]);
+        _sink.Events.Where(e => e.Collection == "(undeclared)").Select(e => (e.Type, e.Changes?.Count)).ShouldBe([
+            ("collectionStarted", null),
+            ("collectionCompleted", 2),
+        ]);
+    }
+
+    [Fact]
+    public async Task Undeclared_collections_are_left_alone_when_only_migrations_run()
+    {
+        _executor.Undeclared = [Collections.Change("drop-view", "old_view")];
+
+        await EngineFor([Collections.Create("orders")], "drop").ExecuteAsync("up", new CommandArguments { Only = "migrations" }, CancellationToken.None);
+
+        _executor.Calls.ShouldNotContain("ApplyUndeclared");
+    }
 }

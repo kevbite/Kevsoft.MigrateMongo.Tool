@@ -158,10 +158,10 @@ public sealed class SearchIndexTests(IntegrationEnvironment environment)
     {
         await using var mongo = new CollectionHarness(environment);
 
-        // No SeedAsync: the collection doesn't exist yet. A search-only definition has nothing else to create it, so the
-        // applier has to create it before createSearchIndexes, which would otherwise fail with NamespaceNotFound.
+        // No SeedAsync: the collection doesn't exist yet, so it's created explicitly before createSearchIndexes, which would
+        // otherwise fail with NamespaceNotFound.
         var collection = CollectionHarness.Define<BsonDocument>(c => c.SearchIndexes.Add("by_text", Dynamic));
-        CollectionHarness.Changes(await mongo.PlanAsync(collection)).ShouldBe(["create-search by_text"]);
+        CollectionHarness.Changes(await mongo.PlanAsync(collection)).ShouldBe(["create-collection collection", "create-search by_text"]);
 
         var up = await mongo.UpAsync(collection, WaitForReady);
         up.ExitCode.ShouldBe(ExitCodes.Success, up.Message);

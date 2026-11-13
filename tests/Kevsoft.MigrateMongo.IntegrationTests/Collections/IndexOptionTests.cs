@@ -399,7 +399,7 @@ public sealed class IndexOptionTests(IntegrationEnvironment environment)
         var created = mongo.Indexes();
         created.Keys.ShouldBe(["_id_", expectedName], ignoreOrder: true);
         assert(created[expectedName]);
-        mongo.Operations().ShouldBe(["createIndex"]);
+        mongo.Operations().ShouldBe(["runCommand", "createIndex"], "the collection is created explicitly, then its index");
     }
 
     private enum AccountStatus

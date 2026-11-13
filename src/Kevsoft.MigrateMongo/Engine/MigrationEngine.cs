@@ -18,6 +18,7 @@ public sealed partial class MigrationEngine
     private readonly Dictionary<string, MigrationDescriptor> _byId;
     private readonly List<CollectionDescriptor> _collections;
     private readonly Dictionary<string, CollectionDescriptor> _collectionsByName;
+    private readonly Dictionary<string, string> _cyclicViews;
     private readonly EngineOptions _options;
     private readonly IMigrationEventSink _events;
     private readonly TimeProvider _time;
@@ -48,14 +49,15 @@ public sealed partial class MigrationEngine
 
         _byId = _migrations.ToDictionary(m => m.Id, StringComparer.Ordinal);
 
-        _collections = (collections ?? []).OrderBy(c => c.Name, StringComparer.Ordinal).ToList();
-        var duplicateCollection = _collections.GroupBy(c => c.Name).FirstOrDefault(g => g.Count() > 1);
+        var declared = (collections ?? []).ToList();
+        var duplicateCollection = declared.GroupBy(c => c.Name).OrderBy(g => g.Key, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicateCollection is not null)
         {
             throw new InvalidOperationException(
                 $"Collection '{duplicateCollection.Key}' is defined more than once ({string.Join(", ", duplicateCollection.Select(d => d.Origin))}).");
         }
 
+        _collections = OrderCollections(declared, out _cyclicViews);
         _collectionsByName = _collections.ToDictionary(c => c.Name, StringComparer.Ordinal);
     }
 
@@ -363,7 +365,27 @@ public sealed partial class MigrationEngine
                         return lost;
                     }
 
-                    var (changed, error) = await ReconcileAsync(collection, arguments, outputOptions, batch, ct);
+                    if (collection.Collection == UndeclaredCollections)
+                    {
+                        var (dropped, dropError) = await PruneUndeclaredAsync(collection, outputOptions, batch, issues, ct);
+                        reconciled.AddRange(dropped);
+                        if (dropError is not null)
+                        {
+                            return new CommandResult
+                            {
+                                ExitCode = ExitCodes.Failure,
+                                Batch = applied.Count > 0 ? batch : null,
+                                Applied = applied,
+                                Reconciled = reconciled,
+                                Issues = issues,
+                                Message = $"Dropping undeclared collections failed: {dropError}",
+                            };
+                        }
+
+                        continue;
+                    }
+
+                    var (changed, error) = await ReconcileAsync(collection, arguments, outputOptions, batch, issues, ct);
                     if (error is not null)
                     {
                         return new CommandResult

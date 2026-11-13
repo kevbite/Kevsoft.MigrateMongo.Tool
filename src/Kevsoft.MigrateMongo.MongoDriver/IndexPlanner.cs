@@ -28,7 +28,9 @@ internal static class IndexPlanner
     /// Plans the changes. <paramref name="canAddTtl"/> is whether <c>collMod</c> can make an index a TTL one (MongoDB 5.1+).
     /// <paramref name="filledCollations"/> has the declared collations as the server fills them in, by
     /// <see cref="CollationKey"/>; one that's missing is compared only by the fields it sets. <paramref name="defaultCollation"/>
-    /// is the collection's default collation, which the server gives an index declared without one.
+    /// is the collection's default collation, which the server gives an index declared without one. <paramref name="defaultIndex"/>
+    /// is an index the server created with the collection (a time series collection's metaField and timeField one), which is
+    /// left alone like <c>_id_</c> unless it's declared.
     /// </summary>
     public static IndexPlan Plan(
         CollectionDeclaration declaration,
@@ -37,7 +39,8 @@ internal static class IndexPlanner
         bool canConvertToUnique,
         bool canAddTtl,
         IReadOnlyDictionary<string, BsonDocument>? filledCollations = null,
-        BsonDocument? defaultCollation = null)
+        BsonDocument? defaultCollation = null,
+        string? defaultIndex = null)
     {
         var name = declaration.Name;
         List<IndexSpec> declared;
@@ -58,7 +61,8 @@ internal static class IndexPlanner
 
         var plan = new IndexPlan { Declaration = Hash(declaration, declared) };
         var existing = existingIndexes.Select(FromServer).ToList();
-        var candidates = existing.Where(e => e.Name != IdIndex).ToList();
+        // A clustered collection's clustered index (which may have its own name) can't be hidden or dropped, like _id_.
+        var candidates = existing.Where(e => e.Name != IdIndex && !IsClustered(e)).ToList();
         var ignored = declaration.Ignored.Select(Glob).ToList();
         bool IsIgnored(string index) => ignored.Any(r => r.IsMatch(index));
 
@@ -183,7 +187,7 @@ internal static class IndexPlanner
         var hides = new List<PlannedChange>();
         var drops = new List<PlannedChange>();
         var keeps = new List<PlannedChange>();
-        foreach (var server in candidates.Where(c => !claimed.Contains(c) && !IsIgnored(c.Name)))
+        foreach (var server in candidates.Where(c => !claimed.Contains(c) && !IsIgnored(c.Name) && c.Name != defaultIndex))
         {
             switch (prune)
             {
@@ -225,7 +229,7 @@ internal static class IndexPlanner
         // Guard against a whole collection's indexes being replaced because the declared keys name different fields, e.g.
         // typed keys rendered without the app's class maps. Changing the keys of an index on the same fields doesn't trip it.
         // (A text index matches whatever its fields, so this looks at fields rather than matches.)
-        var considered = candidates.Where(c => !IsIgnored(c.Name)).ToList();
+        var considered = candidates.Where(c => !IsIgnored(c.Name) && c.Name != defaultIndex).ToList();
         var declaredFields = declared.Where(d => !IsIdIndex(d)).SelectMany(Fields).ToHashSet(StringComparer.Ordinal);
         if (considered.Count > 0 && declaredFields.Count > 0 && !policy.AllowUnmatched && !declaredFields.Overlaps(considered.SelectMany(Fields)))
         {
@@ -240,7 +244,7 @@ internal static class IndexPlanner
         plan.Changes.AddRange(hides);
         plan.Changes.AddRange(drops);
         plan.Changes.AddRange(keeps);
-        plan.Indexes.AddRange(existing.Select(e => Listing(e, matched, clashes, IsIgnored(e.Name), plan.Hidden)));
+        plan.Indexes.AddRange(existing.Select(e => Listing(e, matched, clashes, IsIgnored(e.Name), plan.Hidden, e.Name == defaultIndex)));
         return plan;
     }
 
@@ -344,7 +348,8 @@ internal static class IndexPlanner
         Dictionary<IndexSpec, IndexSpec> matched,
         Dictionary<IndexSpec, IndexSpec> clashes,
         bool ignored,
-        Dictionary<string, DateTime> hidden)
+        Dictionary<string, DateTime> hidden,
+        bool isDefault)
     {
         var declaredAs = matched.FirstOrDefault(p => p.Value == server).Key;
         var options = new BsonDocument(server.Attributes);
@@ -363,7 +368,7 @@ internal static class IndexPlanner
             Name = server.Name,
             Keys = MigrationOutputMapper.ToJson(server.Keys),
             Options = options.ElementCount > 0 ? MigrationOutputMapper.ToJson(options) : null,
-            Status = server.Name == IdIndex ? "default"
+            Status = declaredAs is null && (server.Name == IdIndex || IsClustered(server) || isDefault) ? "default"
                 : declaredAs is not null || clashes.ContainsValue(server) ? "declared"
                 : ignored ? "ignored"
                 : "undeclared",
@@ -399,6 +404,8 @@ internal static class IndexPlanner
     private static IEnumerable<string> Fields(IndexSpec index) =>
         index.Keys.Names.Where(n => n is not ("_fts" or "_ftsx"))
             .Concat(index.IsText && index.Attributes.GetValue("weights", null) is BsonDocument weights ? weights.Names : []);
+
+    private static bool IsClustered(IndexSpec server) => server.Source.GetValue("clustered", false).ToBoolean();
 
     private static bool IsIdIndex(IndexSpec index) =>
         index.Key.ElementCount == 1 && index.Key.Contains("_id") && index.Key["_id"] is BsonInt64 { Value: 1 } &&
