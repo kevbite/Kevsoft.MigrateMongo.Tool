@@ -311,6 +311,50 @@ public sealed class ConsoleRendererTests
     }
 
     [Fact]
+    public void Plan_shows_views_with_their_source_and_undeclared_collections()
+    {
+        var text = Render(r => r.RenderResult(new CommandResult
+        {
+            ExitCode = ExitCodes.Success,
+            Collections =
+            [
+                new CollectionInfo
+                {
+                    Name = "active",
+                    Kind = "view",
+                    ViewOn = "customers",
+                    State = CollectionStates.Changes,
+                    Changes = [new IndexChangeInfo { Action = "modify-view", Index = "pipeline", Detail = """$match: { status: "active" } → { status: "open" }""" }],
+                },
+                new CollectionInfo { Name = "recent", Kind = "view", ViewOn = "active", State = CollectionStates.InSync, Changes = [] },
+                new CollectionInfo
+                {
+                    Name = "(undeclared)",
+                    Kind = "undeclared",
+                    State = CollectionStates.Changes,
+                    Changes =
+                    [
+                        new IndexChangeInfo { Action = "drop-collection", Index = "empty", Detail = "not declared (empty)" },
+                        new IndexChangeInfo { Action = "drop-view", Index = "old_view", Detail = "view on orders, not declared" },
+                    ],
+                },
+            ],
+            Message = "Would change 2 collection(s).",
+        }));
+
+        text.ShouldBe("""
+              ⟳ active   (view on customers)
+                  ~ modify-view pipeline   $match: { status: "active" } → { status: "open" }
+              ⟳ recent   (view on active)   in sync
+              ⟳ (undeclared)
+                  - drop-collection empty      not declared (empty)
+                  - drop-view       old_view   view on orders, not declared
+            Would change 2 collection(s).
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void Plan_shows_collection_option_and_validator_changes_with_their_warnings()
     {
         var text = Render(r => r.RenderResult(new CommandResult

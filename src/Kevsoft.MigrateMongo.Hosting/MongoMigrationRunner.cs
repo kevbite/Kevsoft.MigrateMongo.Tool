@@ -155,6 +155,8 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             SearchIndexesWaitTimeout = options.SearchIndexWaitTimeout,
             CollectionsOnConvertToCapped = options.ConvertToCapped.ToString().ToLowerInvariant(),
             CollectionsOnUnchangeable = options.OnUnchangeable.ToString().ToLowerInvariant(),
+            CollectionsPrune = options.CollectionPrune.ToString().ToLowerInvariant(),
+            CollectionsIgnore = [.. options.CollectionIgnore],
             ValidatorsPrune = options.ValidatorPrune.ToString().ToLowerInvariant(),
             ValidatorsOnInvalidDocuments = options.OnInvalidDocuments.ToString().ToLowerInvariant(),
             ValidatorsCountInvalidDocuments = options.CountInvalidDocuments,

@@ -109,7 +109,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
                 ["Collection", "State", "Reconciled", "Changes"],
                 statuses.Select(c => new[]
                 {
-                    c.Name,
+                    c.ViewOn is { } on ? $"{c.Name} (view on {on})" : c.Name,
                     StateText(c.State),
                     c.ReconciledAt?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "",
                     ChangeCounts(c.Changes),
@@ -141,11 +141,11 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
             {
                 if (item.Changes.Count == 0)
                 {
-                    WriteLine(Paint($"  ⟳ {item.Name}   {StateText(item.State)}", item.State == CollectionStates.InSync ? Dim : Yellow));
+                    WriteLine(Paint($"  ⟳ {CollectionLabel(item)}   {StateText(item.State)}", item.State == CollectionStates.InSync ? Dim : Yellow));
                     continue;
                 }
 
-                WriteLine($"  ⟳ {item.Name}" + (item.State == CollectionStates.Superseded ? Paint("   superseded (skipped)", Yellow) : ""));
+                WriteLine($"  ⟳ {CollectionLabel(item)}" + (item.State == CollectionStates.Superseded ? Paint("   superseded (skipped)", Yellow) : ""));
                 WriteChanges(item.Changes, "      ");
             }
         }
@@ -315,7 +315,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
 
     private void RenderShowCollection(CollectionInfo collection)
     {
-        WriteLine(Paint($"{collection.Name} (collection)", Cyan));
+        WriteLine(Paint(collection.ViewOn is { } viewOn ? $"{collection.Name} (view on {viewOn})" : $"{collection.Name} (collection)", Cyan));
         var rows = new List<(string Label, string Value)> { ("State", StateText(collection.State)) };
         if (collection.ReconciledAt is { } reconciledAt)
         {
@@ -400,6 +400,10 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         }
     }
 
+    /// <summary>e.g. <c>active_customers   (view on customers)</c>, or just the name for a collection.</summary>
+    private static string CollectionLabel(CollectionInfo collection) =>
+        collection.ViewOn is { } on ? $"{collection.Name}   (view on {on})" : collection.Name;
+
     /// <summary>One line per change, e.g. <c>+ create   status_1   { status: 1 }</c>.</summary>
     private void WriteChanges(List<IndexChangeInfo> changes, string indent)
     {
@@ -409,10 +413,10 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         {
             var (symbol, colour) = change.Action switch
             {
-                IndexActions.Create or IndexActions.CreateSearch or IndexActions.CreateCollection => ("+", Green),
-                IndexActions.Modify or IndexActions.UpdateSearch or IndexActions.ModifyCollection or IndexActions.SetValidator => ("~", Yellow),
-                IndexActions.Rebuild or IndexActions.ConvertToCapped => ("↻", Yellow),
-                IndexActions.Hide or IndexActions.Drop or IndexActions.DropSearch or IndexActions.RemoveValidator => ("-", Red),
+                IndexActions.Create or IndexActions.CreateSearch or IndexActions.CreateCollection or IndexActions.CreateView => ("+", Green),
+                IndexActions.Modify or IndexActions.UpdateSearch or IndexActions.ModifyCollection or IndexActions.SetValidator or IndexActions.ModifyView => ("~", Yellow),
+                IndexActions.Rebuild or IndexActions.ConvertToCapped or IndexActions.RecreateView => ("↻", Yellow),
+                IndexActions.Hide or IndexActions.Drop or IndexActions.DropSearch or IndexActions.RemoveValidator or IndexActions.DropCollection or IndexActions.DropView => ("-", Red),
                 IndexActions.Skip => ("⊘", Yellow),
                 _ => ("!", Dim),
             };

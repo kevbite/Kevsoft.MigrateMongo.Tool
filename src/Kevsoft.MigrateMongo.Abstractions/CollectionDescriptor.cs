@@ -4,15 +4,16 @@ using MongoDB.Driver;
 namespace Kevsoft.MigrateMongo;
 
 /// <summary>
-/// A collection definition discovered by an <see cref="IMigrationSource"/>.
+/// A collection or view definition discovered by an <see cref="IMigrationSource"/>.
 /// </summary>
 public sealed class CollectionDescriptor(
     string name,
     string source,
     string origin,
-    Func<IServiceProvider, IMongoDatabase, CollectionDeclaration> declare)
+    Func<IServiceProvider, IMongoDatabase, CollectionDeclaration> declare,
+    string? viewOn = null)
 {
-    /// <summary>The collection's name.</summary>
+    /// <summary>The collection's (or view's) name.</summary>
     public string Name { get; } = name;
 
     /// <summary>Kind of source, e.g. <c>csharp</c>.</summary>
@@ -20,6 +21,12 @@ public sealed class CollectionDescriptor(
 
     /// <summary>Where the definition came from, e.g. a type name.</summary>
     public string Origin { get; } = origin;
+
+    /// <summary>For a view (<c>[ManagedView]</c>), the collection or view it reads from; null for a collection.</summary>
+    public string? ViewOn { get; } = viewOn;
+
+    /// <summary>Whether this is a view definition.</summary>
+    public bool IsView => ViewOn is not null;
 
     /// <summary>
     /// Creates the definition and renders what it declares. Throws if a declaration can't be rendered, e.g. a typed key
@@ -39,6 +46,33 @@ public sealed class CollectionDescriptor(
             return CollectionRendering.Render(builder, database.GetCollection<TDocument>(name));
         });
     }
+
+    /// <summary>Used by the source generator for <c>[ManagedView]</c> classes.</summary>
+    public static CollectionDescriptor CreateView<TDefinition, TDocument>(string name, string on, string origin, Func<IServiceProvider, TDefinition> factory)
+        where TDefinition : IViewDefinition<TDocument>
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(on);
+        return new CollectionDescriptor(name, "csharp", origin, (services, database) =>
+        {
+            var builder = new ViewBuilder<TDocument>(name, on);
+            factory(services).Define(builder);
+            return CollectionRendering.RenderView(builder, database.GetCollection<TDocument>(on));
+        }, on);
+    }
+}
+
+/// <summary>A declared view, rendered.</summary>
+public sealed class ViewDeclaration
+{
+    /// <summary>The collection or view it reads from.</summary>
+    public required string ViewOn { get; init; }
+
+    /// <summary>The pipeline's stages, as <c>create</c> takes them.</summary>
+    public required IReadOnlyList<BsonDocument> Pipeline { get; init; }
+
+    /// <summary>The declared default collation, or null when none is declared.</summary>
+    public BsonDocument? Collation { get; init; }
 }
 
 /// <summary>A collection definition rendered to BSON, as the server would see it.</summary>
@@ -79,6 +113,9 @@ public sealed class CollectionDeclaration
 
     /// <summary>Whether the collection may be converted to capped. It can only make the config stricter.</summary>
     public ConvertToCapped? OnConvertToCapped { get; init; }
+
+    /// <summary>For a view definition, the view; null for a collection.</summary>
+    public ViewDeclaration? View { get; init; }
 
     /// <summary>Whether the definition declares any collection option or validator, so they're compared with the server's.</summary>
     public bool DeclaresOptions =>
@@ -165,6 +202,49 @@ internal static class CollectionRendering
             OnConvertToCapped = builder.Options.OnConvertToCapped,
         };
     }
+
+    public static CollectionDeclaration RenderView<TDocument>(ViewBuilder<TDocument> builder, IMongoCollection<TDocument> source)
+    {
+        IReadOnlyList<BsonDocument> pipeline;
+        try
+        {
+            pipeline = builder.RenderPipeline?.Invoke(new RenderArgs<TDocument>(source.DocumentSerializer, source.Settings.SerializerRegistry)) ?? [];
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            throw new InvalidOperationException($"The pipeline of view '{builder.Name}' couldn't be rendered: {e.Message}", e);
+        }
+
+        if (pipeline.Select(OutputStage).FirstOrDefault(s => s is not null) is { } stage)
+        {
+            throw new InvalidOperationException(
+                $"The pipeline of view '{builder.Name}' has a {stage} stage, which MongoDB doesn't allow in a view.");
+        }
+
+        return new CollectionDeclaration
+        {
+            Name = builder.Name,
+            Indexes = [],
+            View = new ViewDeclaration
+            {
+                ViewOn = builder.On,
+                Pipeline = pipeline,
+                Collation = builder.DeclaredCollation?.ToBsonDocument(),
+            },
+        };
+    }
+
+    /// <summary>The name of a <c>$out</c> or <c>$merge</c> stage, at the top level or nested (e.g. in <c>$facet</c>), or null.</summary>
+    private static string? OutputStage(BsonDocument stage) =>
+        stage.Select(e => e.Name is "$out" or "$merge" ? e.Name : Nested(e.Value).Select(OutputStage).FirstOrDefault(s => s is not null))
+            .FirstOrDefault(s => s is not null);
+
+    private static IEnumerable<BsonDocument> Nested(BsonValue value) => value switch
+    {
+        BsonDocument document => [document],
+        BsonArray array => array.SelectMany(Nested),
+        _ => [],
+    };
 
     private static BsonDocument CollectionOptions<TDocument>(string name, CollectionOptionsBuilder<TDocument> options, RenderArgs<TDocument> args)
     {

@@ -227,6 +227,15 @@ public sealed class CollectionInfo
 
     public string? Origin { get; set; }
 
+    /// <summary>
+    /// <c>view</c> for a view definition, <c>undeclared</c> for the entry listing collections and views that aren't declared
+    /// (<c>collections.prune</c>); null for a collection.
+    /// </summary>
+    public string? Kind { get; set; }
+
+    /// <summary>For a view, the collection or view it reads from.</summary>
+    public string? ViewOn { get; set; }
+
     /// <summary><c>inSync</c>, <c>changes</c>, <c>blocked</c> or <c>superseded</c>.</summary>
     public string State { get; set; } = "";
 
@@ -307,6 +316,21 @@ public static class IndexActions
 
     /// <summary>A change MongoDB can't make on an existing collection, skipped per <c>onUnchangeable: skip</c>. Not a change.</summary>
     public const string Skip = "skip";
+
+    /// <summary>The view doesn't exist, so it's created with <c>create</c>, <c>viewOn</c> and <c>pipeline</c>.</summary>
+    public const string CreateView = "create-view";
+
+    /// <summary>The view's pipeline or source changed, so it's changed in place with <c>collMod</c>.</summary>
+    public const string ModifyView = "modify-view";
+
+    /// <summary>The view's collation changed, which MongoDB can't change in place, so it's dropped and created again.</summary>
+    public const string RecreateView = "recreate-view";
+
+    /// <summary>An empty collection that isn't declared, dropped per <c>collections.prune: drop</c>.</summary>
+    public const string DropCollection = "drop-collection";
+
+    /// <summary>A view that isn't declared, dropped per <c>collections.prune: drop</c>.</summary>
+    public const string DropView = "drop-view";
 }
 
 /// <summary>One change to a collection's indexes.</summary>

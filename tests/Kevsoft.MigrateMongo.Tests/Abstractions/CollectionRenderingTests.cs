@@ -160,6 +160,58 @@ public sealed class CollectionRenderingTests
         error.Message.ShouldBe(message);
     }
 
+    [Fact]
+    public void A_typed_view_pipeline_renders_with_the_source_documents_serialization()
+    {
+        var declaration = DeclareView<Order>(v => v
+            .Pipeline(p => p.Match(o => o.Status == "open").Project(o => new { o.Reference }))
+            .Collation(new Collation("en", strength: CollationStrength.Secondary)));
+
+        declaration.Name.ShouldBe("open_orders");
+        declaration.Indexes.ShouldBeEmpty();
+        var view = declaration.View.ShouldNotBeNull();
+        view.ViewOn.ShouldBe("orders");
+        view.Pipeline.ShouldBe([
+            BsonDocument.Parse("""{ "$match": { "status": "open" } }"""),
+            BsonDocument.Parse("""{ "$project": { "Reference": "$ref", "_id": 0 } }"""),
+        ]);
+        view.Collation.ShouldBe(BsonDocument.Parse("""{ "locale": "en", "strength": 2 }"""));
+    }
+
+    [Fact]
+    public void A_view_pipeline_can_be_json()
+    {
+        var view = DeclareView<BsonDocument>(v => v.Pipeline("""[{ "$match": { "status": "open" } }, { "$limit": 5 }]""")).View.ShouldNotBeNull();
+
+        view.Pipeline.ShouldBe([BsonDocument.Parse("""{ "$match": { "status": "open" } }"""), BsonDocument.Parse("""{ "$limit": 5 }""")]);
+        view.Collation.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("""[{ "$match": {} }, { "$out": "copy" }]""", "$out")]
+    [InlineData("""[{ "$merge": { "into": "copy" } }]""", "$merge")]
+    [InlineData("""[{ "$facet": { "a": [{ "$match": {} }, { "$out": "copy" }] } }]""", "$out")]
+    public void A_view_pipeline_that_writes_output_is_invalid(string pipeline, string stage)
+    {
+        var error = Should.Throw<InvalidOperationException>(() => DeclareView<BsonDocument>(v => v.Pipeline(pipeline)));
+
+        error.Message.ShouldBe($"The pipeline of view 'open_orders' has a {stage} stage, which MongoDB doesn't allow in a view.");
+    }
+
+    [Fact]
+    public void A_json_view_pipeline_must_be_an_array_of_documents()
+    {
+        Should.Throw<FormatException>(() => DeclareView<BsonDocument>(v => v.Pipeline("""{ "$match": {} }""")));
+    }
+
+    private static CollectionDeclaration DeclareView<T>(Action<ViewBuilder<T>> define) =>
+        CollectionDescriptor.CreateView<ViewDefinition<T>, T>("open_orders", "orders", "Test.OpenOrders", _ => new ViewDefinition<T>(define)).Declare(new EmptyServices(), Database);
+
+    private sealed class ViewDefinition<T>(Action<ViewBuilder<T>> define) : IViewDefinition<T>
+    {
+        public void Define(ViewBuilder<T> view) => define(view);
+    }
+
     private static CollectionDeclaration Declare<T>(Action<CollectionBuilder<T>> define) =>        CollectionDescriptor.Create<Definition<T>, T>("orders", "Test.Orders", _ => new Definition<T>(define)).Declare(new EmptyServices(), Database);
 
     private sealed class Definition<T>(Action<CollectionBuilder<T>> define) : ICollectionDefinition<T>

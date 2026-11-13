@@ -141,6 +141,8 @@ public sealed class ConfigLoaderTests
     [InlineData("collections:\n  onUnchangeable: ignore", "onUnchangeable")]
     [InlineData("collections:\n  onConvertToCapped: yes", "onConvertToCapped")]
     [InlineData("collections:\n  capped: true", "collections.capped")]
+    [InlineData("collections:\n  prune: delete", "prune")]
+    [InlineData("collections:\n  ignore:\n    pattern: x", "'ignore' must be a list")]
     [InlineData("validators:\n  prune: drop", "prune")]
     [InlineData("validators:\n  onInvalidDocuments: ignore", "onInvalidDocuments")]
     [InlineData("validators:\n  countInvalidDocuments: sometimes", "countInvalidDocuments")]
@@ -335,6 +337,26 @@ public sealed class ConfigLoaderTests
         var prod = ConfigLoader.Load(yaml, "prod", Env);
         (prod.CollectionsOnConvertToCapped, prod.CollectionsOnUnchangeable, prod.ValidatorsPrune, prod.ValidatorsOnInvalidDocuments, prod.ValidatorsCountInvalidDocuments)
             .ShouldBe(("allow", "skip", "remove", "fail", false));
+    }
+
+    [Fact]
+    public void Undeclared_collections_are_left_alone_by_default_and_prune_and_ignore_can_be_set()
+    {
+        var defaults = ConfigLoader.Load(Yaml, null, Env);
+        (defaults.CollectionsPrune, defaults.CollectionsIgnore.Count).ShouldBe(("off", 0));
+
+        var config = ConfigLoader.Load(Yaml + """
+
+            collections:
+              prune: drop
+              ignore:
+                - "audit_*"
+                - scratch
+            """, null, Env);
+        config.CollectionsPrune.ShouldBe("drop");
+        config.CollectionsIgnore.ShouldBe(["audit_*", "scratch"]);
+
+        ConfigLoader.Load(Yaml + "\ncollections:\n  prune: report\n  ignore: tmp_*\n", null, Env).CollectionsIgnore.ShouldBe(["tmp_*"]);
     }
 
     [Fact]

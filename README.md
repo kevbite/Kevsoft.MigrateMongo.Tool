@@ -13,8 +13,9 @@ line, your build server or your application.
   operation's filter, update and counts. `migrate-mongo show <id>` lists it all, alongside who ran it and when.
   Statements are stored as sent, so [leave them out](USAGE.md#recording-results) for commands or filters that hold
   passwords or personal data.
-- **Indexes kept in line with the code.** A `[ManagedCollection]` class declares a collection's indexes; every `up`
-  creates what's missing, changes what it can in place, and reports, hides or drops what isn't declared.
+- **Collections kept in line with the code.** A `[ManagedCollection]` class declares a collection's options (capped,
+  time series, clustered, collation), `$jsonSchema` validator, indexes and search indexes, and `[ManagedView]` declares
+  views; every `up` creates what's missing, changes what it can in place, and reports, hides or drops what isn't declared.
 - **Built for CI.** Meaningful exit codes, `--json` output, per-environment config with `${ENV_VAR}` secrets, dry
   runs, SSH tunnels through a bastion, AWS IAM authentication, and self-contained bundles for agents without .NET.
 - **Mistakes caught at compile time.** A source generator finds migrations without reflection and reports duplicate
@@ -163,7 +164,7 @@ Index builds and blocked index changes delay or stop startup; see
 - [Writing migrations](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#writing-migrations):
   transactions, recording results, dependency injection and custom templates
 - [Managing collections](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#managing-collections):
-  declaring indexes, rebuilds, pruning and rolling deploys
+  declaring options, validators, indexes and views, rebuilds, pruning and rolling deploys
 - [Commands](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#commands) and
   [exit codes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#exit-codes)
 - [When something goes wrong](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#when-something-goes-wrong)

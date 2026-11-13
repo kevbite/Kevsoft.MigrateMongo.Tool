@@ -26,7 +26,7 @@ public static class ConfigLoader
 
     private static readonly HashSet<string> SearchIndexesKeys = ["prune", "waitForReady", "waitTimeout"];
 
-    private static readonly HashSet<string> CollectionsKeys = ["onConvertToCapped", "onUnchangeable"];
+    private static readonly HashSet<string> CollectionsKeys = ["onConvertToCapped", "onUnchangeable", "prune", "ignore"];
 
     private static readonly HashSet<string> ValidatorsKeys = ["prune", "onInvalidDocuments", "countInvalidDocuments"];
 
@@ -182,6 +182,8 @@ public static class ConfigLoader
             case Dictionary<string, object?> collections:
                 config.CollectionsOnConvertToCapped = OneOf(collections, "onConvertToCapped", ["fail", "allow"], getEnvironmentVariable) ?? config.CollectionsOnConvertToCapped;
                 config.CollectionsOnUnchangeable = OneOf(collections, "onUnchangeable", ["fail", "skip"], getEnvironmentVariable) ?? config.CollectionsOnUnchangeable;
+                config.CollectionsPrune = OneOf(collections, "prune", ["off", "report", "drop"], getEnvironmentVariable) ?? config.CollectionsPrune;
+                config.CollectionsIgnore = OptionalList(collections, "ignore", getEnvironmentVariable) ?? config.CollectionsIgnore;
                 break;
             default:
                 throw new ConfigException("Config setting 'collections' must be a mapping.");
@@ -506,6 +508,25 @@ public static class ConfigLoader
         return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result)
             ? result
             : throw new ConfigException($"Config setting '{key}' must be a whole number but was '{value}'.");
+    }
+
+    /// <summary>A list of values (a single value counts as a list of one); an empty <c>key:</c> is an empty list.</summary>
+    private static List<string>? OptionalList(Dictionary<string, object?> map, string key, Func<string, string?> env)
+    {
+        if (!map.TryGetValue(key, out var value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            null or "" => [],
+            string single => [Interpolate(single, env)],
+            List<object?> items => items.Select(i => i is string s
+                ? Interpolate(s, env)
+                : throw new ConfigException($"Config setting '{key}' must be a list of values.")).ToList(),
+            _ => throw new ConfigException($"Config setting '{key}' must be a list of values."),
+        };
     }
 
     private static bool? OptionalBool(Dictionary<string, object?> map, string key, Func<string, string?> env)

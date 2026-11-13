@@ -77,4 +77,20 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor MustImplementViewDefinition = new(
+        "MM0010",
+        "View definition must implement IViewDefinition<TDocument>",
+        "'{0}' is marked with [ManagedView] but does not implement Kevsoft.MigrateMongo.IViewDefinition<TDocument> exactly once",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ViewCycle = new(
+        "MM0011",
+        "Views read from each other in a cycle",
+        "View '{0}' is part of a cycle of views: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

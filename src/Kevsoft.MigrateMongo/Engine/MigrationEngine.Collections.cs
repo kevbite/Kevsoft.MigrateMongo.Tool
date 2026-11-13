@@ -12,7 +12,7 @@ public sealed partial class MigrationEngine
     /// </summary>
     private bool CollectionsRunAfter(string? to, int pendingCount, int runningCount, CommandArguments arguments, List<ValidationIssue> issues)
     {
-        if (_collections.Count == 0)
+        if (!HasCollectionWork)
         {
             return false;
         }
@@ -48,7 +48,7 @@ public sealed partial class MigrationEngine
         List<ValidationIssue> issues,
         CancellationToken cancellationToken)
     {
-        if (_collections.Count == 0)
+        if (!HasCollectionWork)
         {
             return null;
         }
@@ -64,7 +64,7 @@ public sealed partial class MigrationEngine
         foreach (var collection in _collections)
         {
             states.TryGetValue(collection.Name, out var state);
-            var plan = await _executor.PlanCollectionAsync(collection, PolicyFor(collection, state, arguments), cancellationToken);
+            var plan = await PlanAsync(collection, PolicyFor(collection, state, arguments), cancellationToken);
             var info = ToInfo(collection, plan, state, arguments);
             result.Add(new CollectionPreview(collection, state, plan, info));
 
@@ -83,7 +83,101 @@ public sealed partial class MigrationEngine
             }
         }
 
+        if (PruneUndeclared)
+        {
+            var plan = await _executor.PlanUndeclaredAsync(UndeclaredPolicy(), cancellationToken);
+            if (plan.Changes.Count > 0)
+            {
+                result.Add(new CollectionPreview(UndeclaredCollections, null, plan, UndeclaredInfo(plan)));
+                issues.AddRange(UndeclaredWarnings(plan));
+            }
+        }
+
         return result;
+    }
+
+    /// <summary>Whether <c>up</c> has collection work: definitions, or undeclared collections to report or drop.</summary>
+    private bool HasCollectionWork => _collections.Count > 0 || PruneUndeclared;
+
+    private bool PruneUndeclared => _options.CollectionsPrune is "report" or "drop";
+
+    /// <summary>The entry that lists the collections and views no definition declares.</summary>
+    private static readonly CollectionDescriptor UndeclaredCollections = new(
+        UndeclaredEntryName,
+        "config",
+        "collections.prune",
+        (_, _) => throw new InvalidOperationException("Undeclared collections have no definition."));
+
+    private const string UndeclaredEntryName = "(undeclared)";
+
+    private UndeclaredPolicy UndeclaredPolicy() => new()
+    {
+        Prune = _options.CollectionsPrune,
+        Ignore = _options.CollectionsIgnore,
+        // A source a declared view reads from is kept even when nothing declares it.
+        Declared = _collections.Select(c => c.Name).Concat(_collections.Select(c => c.ViewOn).OfType<string>()).ToHashSet(StringComparer.Ordinal),
+    };
+
+    private static CollectionInfo UndeclaredInfo(CollectionPlan plan) => new()
+    {
+        Name = UndeclaredEntryName,
+        Kind = "undeclared",
+        Source = UndeclaredCollections.Source,
+        Origin = UndeclaredCollections.Origin,
+        State = plan.HasChanges ? CollectionStates.Changes : CollectionStates.InSync,
+        Changes = plan.Changes,
+    };
+
+    /// <summary>A warning for each undeclared collection or view that's left alone.</summary>
+    private static IEnumerable<ValidationIssue> UndeclaredWarnings(CollectionPlan plan) =>
+        plan.Changes
+            .Where(c => c.Action == IndexActions.Keep)
+            .Select(c => Issue("warning", "undeclaredCollection", c.Index, c.Warning ?? $"{c.Index} isn't declared: {c.Detail}."));
+
+    /// <summary>
+    /// Plans a definition, or for a view that's part of a cycle of views (which can't be created in any order), returns an
+    /// invalid plan without asking the database.
+    /// </summary>
+    private Task<CollectionPlan> PlanAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken) =>
+        _cyclicViews.TryGetValue(collection.Name, out var problem)
+            ? Task.FromResult(new CollectionPlan { Invalid = true, Problems = [problem] })
+            : _executor.PlanCollectionAsync(collection, policy, cancellationToken);
+
+    /// <summary>
+    /// Collections in name order, then views, each after the view it reads from (ties in name order). Views that read from
+    /// each other in a cycle, or from a view in one, go last and are returned in <paramref name="cyclic"/> with the problem.
+    /// </summary>
+    private static List<CollectionDescriptor> OrderCollections(List<CollectionDescriptor> declared, out Dictionary<string, string> cyclic)
+    {
+        var ordered = declared.Where(c => !c.IsView).OrderBy(c => c.Name, StringComparer.Ordinal).ToList();
+        var views = declared.Where(c => c.IsView).ToDictionary(c => c.Name, StringComparer.Ordinal);
+        var remaining = views.Values.OrderBy(c => c.Name, StringComparer.Ordinal).ToList();
+        var placed = new HashSet<string>(StringComparer.Ordinal);
+        while (remaining.FirstOrDefault(v => !views.ContainsKey(v.ViewOn!) || placed.Contains(v.ViewOn!)) is { } ready)
+        {
+            ordered.Add(ready);
+            placed.Add(ready.Name);
+            remaining.Remove(ready);
+        }
+
+        cyclic = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var view in remaining)
+        {
+            var chain = new List<string> { view.Name };
+            var current = view.ViewOn!;
+            while (!chain.Contains(current))
+            {
+                chain.Add(current);
+                current = views[current].ViewOn!;
+            }
+
+            cyclic[view.Name] = current == view.Name
+                ? $"{view.Name}: views read from each other in a cycle ({string.Join(" → ", chain.Append(view.Name))}), so none of them can be created."
+                : $"{view.Name}: it reads from {view.ViewOn}, which depends on a cycle of views, so it can't be created.";
+            ordered.Add(view);
+        }
+
+        return ordered;
     }
 
     /// <summary>Warnings on a plan's changes, e.g. a skipped option or existing documents that fail a new validator.</summary>
@@ -127,7 +221,7 @@ public sealed partial class MigrationEngine
     {
         foreach (var collection in _collections)
         {
-            var plan = await _executor.PlanCollectionAsync(collection, PolicyFor(collection, null, new CommandArguments()), cancellationToken);
+            var plan = await PlanAsync(collection, PolicyFor(collection, null, new CommandArguments()), cancellationToken);
             if (plan.Invalid)
             {
                 issues.AddRange(plan.Problems.Select(p => Issue("error", "invalidCollection", collection.Name, p)));
@@ -180,6 +274,8 @@ public sealed partial class MigrationEngine
     private CollectionInfo ToInfo(CollectionDescriptor collection, CollectionPlan plan, StoredCollectionState? state, CommandArguments arguments) => new()
     {
         Name = collection.Name,
+        Kind = collection.IsView ? "view" : null,
+        ViewOn = collection.ViewOn,
         Source = collection.Source,
         Origin = collection.Origin,
         State = IsSuperseded(plan, state, arguments) ? CollectionStates.Superseded
@@ -284,6 +380,51 @@ public sealed partial class MigrationEngine
     private static bool SameHidden(Dictionary<string, DateTime> stored, Dictionary<string, DateTime> planned) =>
         stored.Count == planned.Count && stored.All(p => planned.TryGetValue(p.Key, out var at) && at == p.Value);
 
+    /// <summary>
+    /// Drops the undeclared views, and collections that are still empty, per <c>collections.prune: drop</c>, recording each
+    /// drop in the history under the name it had. What's left alone is reported as a warning.
+    /// </summary>
+    /// <returns>The names dropped, and the first error if a drop failed.</returns>
+    private async Task<(List<string> Dropped, string? Error)> PruneUndeclaredAsync(
+        CollectionPreview preview,
+        OutputOptions outputOptions,
+        int batch,
+        List<ValidationIssue> issues,
+        CancellationToken cancellationToken)
+    {
+        var run = new MigrationRunInfo(RunId, batch, MigrationDirection.Up, Transactional: false, _options.Environment);
+        if (preview.Plan.HasChanges)
+        {
+            EmitCollection(EventTypes.CollectionStarted, UndeclaredCollections, null, null);
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var applied = await _executor.ApplyUndeclaredAsync(UndeclaredPolicy(), run, outputOptions, cancellationToken);
+        var dropped = new List<string>();
+        string? error = null;
+        foreach (var drop in applied.Drops)
+        {
+            var record = History(drop.Name, UndeclaredEntryName, drop.Error is null ? HistoryEvents.Dropped : HistoryEvents.Failed, "up", null, null,
+                drop.DurationMs, drop.Error, Committed(drop.Output, true));
+            record.Kind = HistoryEvents.CollectionKind;
+            await _store.AppendHistoryAsync(record, null, CancellationToken.None);
+            if (drop.Error is null)
+            {
+                dropped.Add(drop.Name);
+            }
+            else
+            {
+                error ??= $"{drop.Name}: {drop.Error}";
+            }
+        }
+
+        issues.AddRange(UndeclaredWarnings(applied.Plan));
+        var changes = applied.Plan.Changes.Where(c => c.Action != IndexActions.Keep).ToList();
+        EmitCollection(error is null ? EventTypes.CollectionCompleted : EventTypes.CollectionFailed, UndeclaredCollections, stopwatch.ElapsedMilliseconds, error,
+            changes: changes);
+        return (dropped, error);
+    }
+
     private async Task<CommandResult> ShowCollectionAsync(string name, int historyLimit, bool noStatements, CancellationToken cancellationToken)
     {
         var states = await GetCollectionStatesAsync(cancellationToken);
@@ -291,7 +432,7 @@ public sealed partial class MigrationEngine
         CollectionInfo info;
         if (_collectionsByName.TryGetValue(name, out var collection))
         {
-            var plan = await _executor.PlanCollectionAsync(collection, PolicyFor(collection, state, new CommandArguments()), cancellationToken);
+            var plan = await PlanAsync(collection, PolicyFor(collection, state, new CommandArguments()), cancellationToken);
             info = ToInfo(collection, plan, state, new CommandArguments());
             info.Indexes = plan.Indexes;
             info.Options = plan.Options;

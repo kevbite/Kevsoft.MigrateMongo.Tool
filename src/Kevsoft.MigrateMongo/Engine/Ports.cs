@@ -23,6 +23,9 @@ public static class HistoryEvents
     /// <summary>A collection's indexes were brought in line with its definition.</summary>
     public const string Reconciled = "reconciled";
 
+    /// <summary>A collection or view that isn't declared was dropped (<c>collections.prune: drop</c>).</summary>
+    public const string Dropped = "dropped";
+
     /// <summary>The <see cref="HistoryRecord.Kind"/> of a collection definition's entries.</summary>
     public const string CollectionKind = "collection";
 }
@@ -219,6 +222,58 @@ public interface IMigrationExecutor
     /// recorded before it failed.
     /// </summary>
     Task<CollectionApplyResult> ApplyCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists the collections and views in the database that aren't declared and what <see cref="UndeclaredPolicy.Prune"/>
+    /// would do with each, without changing anything.
+    /// </summary>
+    Task<CollectionPlan> PlanUndeclaredAsync(UndeclaredPolicy policy, CancellationToken cancellationToken) =>
+        Task.FromResult(new CollectionPlan());
+
+    /// <summary>
+    /// Plans again and drops what the plan drops: views, and collections that are still empty. Each drop is recorded with
+    /// the definition it removed. A drop that fails is returned with its error; the rest still run.
+    /// </summary>
+    Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken) =>
+        Task.FromResult(new UndeclaredApplyResult { Plan = new CollectionPlan() });
+}
+
+/// <summary>What happens to collections and views in the database that no definition declares.</summary>
+public sealed class UndeclaredPolicy
+{
+    /// <summary><c>off</c>, <c>report</c> or <c>drop</c>.</summary>
+    public string Prune { get; init; } = "off";
+
+    /// <summary>Name patterns (<c>*</c> matches anything) that are never reported or dropped.</summary>
+    public IReadOnlyList<string> Ignore { get; init; } = [];
+
+    /// <summary>The declared collections and views, and the sources declared views read from.</summary>
+    public IReadOnlySet<string> Declared { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+}
+
+/// <summary>What <see cref="IMigrationExecutor.ApplyUndeclaredAsync"/> did.</summary>
+public sealed class UndeclaredApplyResult
+{
+    /// <summary>The plan as it was applied: <c>drop-collection</c> and <c>drop-view</c> for what was dropped, <c>keep</c> for the rest.</summary>
+    public required CollectionPlan Plan { get; init; }
+
+    /// <summary>Each collection or view dropped, or that failed to drop.</summary>
+    public List<UndeclaredDrop> Drops { get; init; } = [];
+}
+
+/// <summary>One undeclared collection or view that was dropped (or failed to be).</summary>
+public sealed class UndeclaredDrop
+{
+    public required string Name { get; init; }
+
+    public required IndexChangeInfo Change { get; init; }
+
+    public long DurationMs { get; init; }
+
+    /// <summary>The <c>drop</c>, with the <c>listCollections</c> entry and indexes it removed.</summary>
+    public MigrationOutputInfo? Output { get; init; }
+
+    public string? Error { get; init; }
 }
 
 /// <summary>The settings a collection plan is worked out with.</summary>
@@ -412,6 +467,12 @@ public sealed class EngineOptions
 
     /// <summary>Count existing documents that fail a new or changed validator before it's applied.</summary>
     public bool ValidatorsCountInvalidDocuments { get; set; } = true;
+
+    /// <summary><c>off</c>, <c>report</c> or <c>drop</c>: what happens to collections and views no definition declares (<c>collections.prune</c>).</summary>
+    public string CollectionsPrune { get; set; } = "off";
+
+    /// <summary>Name patterns (<c>*</c> matches anything) <see cref="CollectionsPrune"/> leaves alone (<c>collections.ignore</c>).</summary>
+    public List<string> CollectionsIgnore { get; set; } = [];
 
     public Provenance Provenance { get; set; } = new();
 }

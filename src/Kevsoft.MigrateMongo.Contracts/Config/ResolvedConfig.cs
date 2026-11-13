@@ -70,6 +70,12 @@ public sealed class ResolvedConfig
     /// <summary>What happens to an option MongoDB can't change on an existing collection: <c>fail</c> or <c>skip</c> (<c>collections.onUnchangeable</c>).</summary>
     public string CollectionsOnUnchangeable { get; set; } = "fail";
 
+    /// <summary>What happens to collections and views no definition declares: <c>off</c>, <c>report</c> or <c>drop</c> (<c>collections.prune</c>).</summary>
+    public string CollectionsPrune { get; set; } = "off";
+
+    /// <summary>Name patterns (<c>*</c> matches anything) <c>collections.prune</c> leaves alone (<c>collections.ignore</c>).</summary>
+    public List<string> CollectionsIgnore { get; set; } = [];
+
     /// <summary>What happens to a validator on the server that isn't declared: <c>report</c> or <c>remove</c> (<c>validators.prune</c>).</summary>
     public string ValidatorsPrune { get; set; } = "report";
 

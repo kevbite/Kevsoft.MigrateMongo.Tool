@@ -12,7 +12,8 @@ public sealed class MongoMigrationExecutor(
     IMongoClient client,
     IMongoDatabase database,
     IServiceProvider services,
-    ILoggerFactory loggerFactory) : IMigrationExecutor
+    ILoggerFactory loggerFactory,
+    string? stateCollection = null) : IMigrationExecutor
 {
     /// <summary>MongoDB 6.0, which added converting an index to unique with <c>collMod</c>.</summary>
     private const int UniqueConversionWireVersion = 17;
@@ -27,6 +28,101 @@ public sealed class MongoMigrationExecutor(
     private static readonly HashSet<int> SearchUnsupportedCodes = [31082, 6047401, 40324, 59, 115];
 
     private int? _maxWireVersion;
+
+    /// <summary>A collection name that doesn't exist, to explain a view's collation against.</summary>
+    private const string CollationProbe = "__migrate_mongo_collation_probe";
+
+    public async Task<CollectionPlan> PlanUndeclaredAsync(UndeclaredPolicy policy, CancellationToken cancellationToken)
+    {
+        var (_, changes) = await PlanUndeclaredChangesAsync(policy, cancellationToken);
+        return new CollectionPlan { Changes = changes };
+    }
+
+    public async Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken)
+    {
+        var (entries, changes) = await PlanUndeclaredChangesAsync(policy, cancellationToken);
+        var result = new UndeclaredApplyResult { Plan = new CollectionPlan { Changes = [] } };
+        foreach (var change in changes)
+        {
+            if (change.Action is not (IndexActions.DropCollection or IndexActions.DropView))
+            {
+                result.Plan.Changes.Add(change);
+                continue;
+            }
+
+            var name = change.Index;
+            var entry = entries.Single(e => e["name"].AsString == name);
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var results = new MigrationResults(options.CaptureStatements);
+            var context = new MigrationContext(CollectionsDatabase, null, loggerFactory.CreateLogger($"Collection.{name}"), services, run, results);
+            try
+            {
+                var statement = new BsonDocument { { "command", new BsonDocument("drop", name) }, { "droppedCollection", entry } };
+                if (change.Action == IndexActions.DropCollection)
+                {
+                    // The plan counted roughly; a document written since keeps the collection.
+                    var collection = CollectionsDatabase.GetCollection<BsonDocument>(name);
+                    var count = await collection.CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, new CountOptions { Limit = 1 }, cancellationToken);
+                    if (count > 0)
+                    {
+                        result.Plan.Changes.Add(new IndexChangeInfo
+                        {
+                            Action = IndexActions.Keep,
+                            Index = name,
+                            Detail = "not declared",
+                            Warning = $"{name} isn't declared but isn't empty, so it isn't dropped.",
+                        });
+                        continue;
+                    }
+
+                    using var cursor = await collection.Indexes.ListAsync(cancellationToken);
+                    statement["indexes"] = new BsonArray(await cursor.ToListAsync(cancellationToken));
+                }
+
+                await context.Track(context.Database).RunCommandAsync(new BsonDocument("drop", name), recordStatement: statement, cancellationToken: cancellationToken);
+                result.Plan.Changes.Add(change);
+                result.Drops.Add(new UndeclaredDrop
+                {
+                    Name = name,
+                    Change = change,
+                    DurationMs = stopwatch.ElapsedMilliseconds,
+                    Output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out _),
+                });
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                result.Drops.Add(new UndeclaredDrop
+                {
+                    Name = name,
+                    Change = change,
+                    DurationMs = stopwatch.ElapsedMilliseconds,
+                    Output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out _),
+                    Error = e.Message,
+                });
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<(List<BsonDocument> Entries, List<IndexChangeInfo> Changes)> PlanUndeclaredChangesAsync(UndeclaredPolicy policy, CancellationToken cancellationToken)
+    {
+        if (policy.Prune is not ("report" or "drop"))
+        {
+            return ([], []);
+        }
+
+        using var cursor = await CollectionsDatabase.ListCollectionsAsync(cancellationToken: cancellationToken);
+        var entries = UndeclaredPlanner.Undeclared(await cursor.ToListAsync(cancellationToken), policy, stateCollection);
+        var counts = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var entry in entries.Where(e => !UndeclaredPlanner.IsView(e)))
+        {
+            var name = entry["name"].AsString;
+            counts[name] = await CollectionsDatabase.GetCollection<BsonDocument>(name).EstimatedDocumentCountAsync(cancellationToken: cancellationToken);
+        }
+
+        return (entries, UndeclaredPlanner.Plan(entries, policy.Prune, counts));
+    }
 
     // Index changes are planned from the primary's view and written with majority, whatever the connection string says;
     // migrations keep the user's settings.
@@ -127,7 +223,12 @@ public sealed class MongoMigrationExecutor(
 
         var invalid = index.Invalid || (search?.Invalid ?? false);
         var declaration = search is null || invalid ? index.Declaration : CombineDeclaration(index.Declaration, search.Declaration);
-        if (!invalid && options is { Declaration.Length: > 0 })
+        if (!invalid && options is { ViewDefinition: true })
+        {
+            // A view definition: its hash is the view's alone.
+            declaration = options.Declaration;
+        }
+        else if (!invalid && options is { Declaration.Length: > 0 })
         {
             declaration = CombineDeclaration(declaration, options.Declaration);
         }
@@ -164,6 +265,18 @@ public sealed class MongoMigrationExecutor(
         }
 
         var existing = await ListCollectionAsync(declaration.Name, cancellationToken);
+        if (declaration.View is { } view)
+        {
+            BsonDocument? filled = null;
+            if (existing is not null && view.Collation is { } collation && collation.GetValue("locale", "simple") != "simple")
+            {
+                // A view won't explain a query with a collation other than its own, so a name that doesn't exist is used.
+                filled = await ExplainCollationAsync(CollationProbe, collation, cancellationToken);
+            }
+
+            return (ViewPlanner.Plan(declaration.Name, view, existing, filled), new IndexPlan(), null);
+        }
+
         var options = await PlanOptionsAsync(declaration, existing, policy, cancellationToken);
         if (options.IsView)
         {

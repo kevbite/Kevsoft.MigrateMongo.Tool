@@ -430,7 +430,7 @@ internal static class CollectionOptionsPlanner
     /// Whether the declared default collation is the server's. The server fills in every field, so a declared one the server
     /// explained is compared in full; one it couldn't explain only by the fields it sets. <c>version</c> is left out.
     /// </summary>
-    private static bool SameCollation(BsonDocument? declared, BsonDocument? server, bool compareAll)
+    internal static bool SameCollation(BsonDocument? declared, BsonDocument? server, bool compareAll)
     {
         if (declared is null || server is null)
         {
@@ -680,6 +680,9 @@ internal sealed class CollectionOptionsPlan
 
     /// <summary>The name is a view, so nothing else is planned.</summary>
     public bool IsView { get; set; }
+
+    /// <summary>The plan is for a <c>[ManagedView]</c> definition.</summary>
+    public bool ViewDefinition { get; init; }
 
     public List<CollectionOptionsChange> Changes { get; } = [];
 

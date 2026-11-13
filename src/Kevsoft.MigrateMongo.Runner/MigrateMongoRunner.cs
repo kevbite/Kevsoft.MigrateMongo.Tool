@@ -329,6 +329,8 @@ public static class MigrateMongoRunner
         SearchIndexesWaitTimeout = TimeSpan.FromSeconds(config.SearchIndexesWaitTimeoutSeconds),
         CollectionsOnConvertToCapped = config.CollectionsOnConvertToCapped,
         CollectionsOnUnchangeable = config.CollectionsOnUnchangeable,
+        CollectionsPrune = config.CollectionsPrune,
+        CollectionsIgnore = [.. config.CollectionsIgnore],
         ValidatorsPrune = config.ValidatorsPrune,
         ValidatorsOnInvalidDocuments = config.ValidatorsOnInvalidDocuments,
         ValidatorsCountInvalidDocuments = config.ValidatorsCountInvalidDocuments,

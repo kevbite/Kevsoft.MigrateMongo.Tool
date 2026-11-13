@@ -8,6 +8,19 @@ public enum ChecksumMismatchBehavior
     Ignore,
 }
 
+/// <summary>What happens to collections and views in the database that no definition declares (<c>collections.prune</c>).</summary>
+public enum CollectionPrune
+{
+    /// <summary>They aren't looked at.</summary>
+    Off,
+
+    /// <summary>Each is listed, with a warning, and left alone.</summary>
+    Report,
+
+    /// <summary>Views are dropped, and collections that are empty; collections with documents are reported. What's dropped is recorded first.</summary>
+    Drop,
+}
+
 /// <summary>
 /// Settings for running migrations in-app. They mirror the <c>migrate-mongo.yaml</c> settings, so keep them the same as the
 /// config the CLI uses for the same database.
@@ -86,6 +99,12 @@ public sealed class MongoMigrationOptions
 
     /// <summary>What happens to a declared option MongoDB can't change on an existing collection (<c>collections.onUnchangeable</c>).</summary>
     public UnchangeableOption OnUnchangeable { get; set; } = UnchangeableOption.Fail;
+
+    /// <summary>What happens to collections and views no definition declares (<c>collections.prune</c>).</summary>
+    public CollectionPrune CollectionPrune { get; set; } = CollectionPrune.Off;
+
+    /// <summary>Name patterns (<c>*</c> matches anything) <see cref="CollectionPrune"/> leaves alone (<c>collections.ignore</c>).</summary>
+    public IList<string> CollectionIgnore { get; set; } = new List<string>();
 
     /// <summary>What happens to a validator on the server that a collection definition doesn't declare (<c>validators.prune</c>).</summary>
     public ValidatorPrune ValidatorPrune { get; set; } = ValidatorPrune.Report;
