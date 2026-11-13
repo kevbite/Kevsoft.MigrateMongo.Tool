@@ -266,6 +266,15 @@ public static class IndexActions
     public const string Hide = "hide";
     public const string Drop = "drop";
 
+    /// <summary>A search index that's declared but not on the server.</summary>
+    public const string CreateSearch = "create-search";
+
+    /// <summary>A search index whose definition changed; updated online with <c>updateSearchIndex</c>.</summary>
+    public const string UpdateSearch = "update-search";
+
+    /// <summary>A search index that's on the server but not declared, dropped per <c>searchIndexes.prune</c>.</summary>
+    public const string DropSearch = "drop-search";
+
     /// <summary>Not declared, and left alone.</summary>
     public const string Keep = "keep";
 }

@@ -34,11 +34,21 @@ public sealed class TrackedDatabase
 
     public string? Label { get; }
 
-    /// <summary>Runs a command (e.g. <c>collMod</c>) and records it.</summary>
-    public async Task<BsonDocument> RunCommandAsync(BsonDocument command, ReadPreference? readPreference = null, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Runs a command (e.g. <c>collMod</c>) and records it. <paramref name="recordStatement"/> records a richer statement
+    /// than the command alone, e.g. the full definition of a search index a drop command only names.
+    /// </summary>
+    public async Task<BsonDocument> RunCommandAsync(
+        BsonDocument command,
+        ReadPreference? readPreference = null,
+        BsonDocument? recordStatement = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var statement = _captureStatement ? new BsonDocument("command", command.DeepClone()) : null;
+        // Snapshot what's recorded, so a caller that reuses or changes the documents afterwards doesn't rewrite history.
+        var statement = _captureStatement
+            ? (recordStatement?.DeepClone() ?? new BsonDocument("command", command.DeepClone())).AsBsonDocument
+            : null;
         var at = _results.Time.GetUtcNow().UtcDateTime;
         var started = Stopwatch.GetTimestamp();
         BsonDocument result;

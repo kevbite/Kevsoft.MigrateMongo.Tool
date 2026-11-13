@@ -69,6 +69,15 @@ public sealed class MongoMigrationOptions
     /// </summary>
     public TimeSpan SupersededDefinitionWindow { get; set; } = TimeSpan.FromHours(1);
 
+    /// <summary>What happens to Atlas search indexes a collection definition doesn't declare (<c>searchIndexes.prune</c>).</summary>
+    public SearchIndexPrune SearchIndexPrune { get; set; } = SearchIndexPrune.Report;
+
+    /// <summary>Whether a run waits for created or updated search indexes to become queryable (<c>searchIndexes.waitForReady</c>).</summary>
+    public bool WaitForSearchIndexes { get; set; }
+
+    /// <summary>When waiting for search indexes, how long before giving up (<c>searchIndexes.waitTimeout</c>).</summary>
+    public TimeSpan SearchIndexWaitTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// An SSH tunnel to connect through, like the <c>tunnel</c> config section. Needs <see cref="ConnectionString"/> and a
     /// <see cref="TunnelProvider"/>. The tunnel is open only while migrations run.
@@ -129,6 +138,11 @@ public sealed class MongoMigrationOptions
         if (SupersededDefinitionWindow < TimeSpan.Zero)
         {
             errors.Add($"{nameof(SupersededDefinitionWindow)} can't be negative.");
+        }
+
+        if (SearchIndexWaitTimeout < TimeSpan.Zero)
+        {
+            errors.Add($"{nameof(SearchIndexWaitTimeout)} can't be negative.");
         }
 
         if (errors.Count > 0)

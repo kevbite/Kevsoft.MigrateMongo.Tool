@@ -55,6 +55,15 @@ public sealed class ResolvedConfig
     /// </summary>
     public int IndexesSupersededWindowSeconds { get; set; } = 60 * 60;
 
+    /// <summary>What happens to Atlas search indexes a collection doesn't declare: <c>report</c> or <c>drop</c> (<c>searchIndexes.prune</c>).</summary>
+    public string SearchIndexesPrune { get; set; } = "report";
+
+    /// <summary>Whether a run waits for search index changes to take effect (<c>searchIndexes.waitForReady</c>).</summary>
+    public bool SearchIndexesWaitForReady { get; set; }
+
+    /// <summary>When waiting for search indexes, seconds before giving up (<c>searchIndexes.waitTimeout</c>).</summary>
+    public int SearchIndexesWaitTimeoutSeconds { get; set; } = 300;
+
     /// <summary>
     /// SSH tunnel to open before connecting. Never serialised: the tool opens the tunnel and only passes the rewritten
     /// <see cref="MongoUrl"/> to the runner, so SSH credentials never leave the tool process. A standalone runner or bundle

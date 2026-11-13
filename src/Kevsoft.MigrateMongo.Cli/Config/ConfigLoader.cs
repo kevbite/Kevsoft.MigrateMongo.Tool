@@ -16,12 +16,14 @@ public static class ConfigLoader
     private static readonly HashSet<string> KnownKeys =
     [
         "project", "mongodb", "stateCollection", "lockTtl", "lockWaitTimeout", "onChecksumMismatch",
-        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate", "results", "indexes",
+        "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate", "results", "indexes", "searchIndexes",
     ];
 
     private static readonly HashSet<string> ResultsKeys = ["captureStatements", "maxBytes"];
 
     private static readonly HashSet<string> IndexesKeys = ["prune", "onRebuild", "dropHiddenAfter", "supersededWindow"];
+
+    private static readonly HashSet<string> SearchIndexesKeys = ["prune", "waitForReady", "waitTimeout"];
 
     private static readonly HashSet<string> TunnelKeys =
     [
@@ -155,6 +157,19 @@ public static class ConfigLoader
                 throw new ConfigException("Config setting 'indexes' must be a mapping.");
         }
 
+        switch (root.GetValueOrDefault("searchIndexes"))
+        {
+            case null:
+                break;
+            case Dictionary<string, object?> searchIndexes:
+                config.SearchIndexesPrune = OneOf(searchIndexes, "prune", ["report", "drop"], getEnvironmentVariable) ?? config.SearchIndexesPrune;
+                config.SearchIndexesWaitForReady = OptionalBool(searchIndexes, "waitForReady", getEnvironmentVariable) ?? config.SearchIndexesWaitForReady;
+                config.SearchIndexesWaitTimeoutSeconds = OptionalInt(searchIndexes, "waitTimeout", getEnvironmentVariable) ?? config.SearchIndexesWaitTimeoutSeconds;
+                break;
+            default:
+                throw new ConfigException("Config setting 'searchIndexes' must be a mapping.");
+        }
+
         return config;
     }
 
@@ -250,6 +265,11 @@ public static class ConfigLoader
         if (config.IndexesSupersededWindowSeconds < 0)
         {
             throw new ConfigException("'indexes.supersededWindow' must not be negative.");
+        }
+
+        if (config.SearchIndexesWaitTimeoutSeconds < 0)
+        {
+            throw new ConfigException("'searchIndexes.waitTimeout' must not be negative.");
         }
     }
 
@@ -409,6 +429,14 @@ public static class ConfigLoader
             foreach (var key in indexes.Keys.Where(k => !IndexesKeys.Contains(k)))
             {
                 throw new ConfigException($"Unknown config setting '{prefix}indexes.{key}'.");
+            }
+        }
+
+        if (map.GetValueOrDefault("searchIndexes") is Dictionary<string, object?> searchIndexes)
+        {
+            foreach (var key in searchIndexes.Keys.Where(k => !SearchIndexesKeys.Contains(k)))
+            {
+                throw new ConfigException($"Unknown config setting '{prefix}searchIndexes.{key}'.");
             }
         }
     }

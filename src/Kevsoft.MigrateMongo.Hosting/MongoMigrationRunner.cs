@@ -150,6 +150,9 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             IndexesOnRebuild = options.IndexRebuild.ToString().ToLowerInvariant(),
             IndexesDropHiddenAfter = options.DropHiddenIndexesAfter,
             IndexesSupersededWindow = options.SupersededDefinitionWindow,
+            SearchIndexesPrune = options.SearchIndexPrune.ToString().ToLowerInvariant(),
+            SearchIndexesWaitForReady = options.WaitForSearchIndexes,
+            SearchIndexesWaitTimeout = options.SearchIndexWaitTimeout,
             Provenance = new Provenance
             {
                 Host = System.Environment.MachineName,

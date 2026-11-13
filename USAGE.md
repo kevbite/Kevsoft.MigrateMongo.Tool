@@ -173,6 +173,10 @@ indexes:
   onRebuild: allow
   dropHiddenAfter: 604800
   supersededWindow: 3600
+searchIndexes:
+  prune: report
+  waitForReady: false
+  waitTimeout: 300
 environments:
   staging:
     mongodb:
@@ -206,6 +210,9 @@ environments:
 | `indexes.onRebuild` | `allow` | `fail` refuses to drop and re-create an index (the collection is without it while it builds). |
 | `indexes.dropHiddenAfter` | `604800` | With `prune: hide`, seconds an undeclared index stays hidden before it's dropped (7 days). |
 | `indexes.supersededWindow` | `3600` | Seconds after a collection definition is replaced during which a run bringing back the previous one is skipped as an older build. `0` turns this off. |
+| `searchIndexes.prune` | `report` | What happens to an [Atlas Search index](#search-indexes) a collection doesn't declare: `report` or `drop`. |
+| `searchIndexes.waitForReady` | `false` | Wait for each created, updated or still-building declared search index to become queryable, and each dropped one to be gone, before the run returns. |
+| `searchIndexes.waitTimeout` | `300` | With `waitForReady`, seconds to wait for each search index before failing (5 minutes). |
 | `tunnel` | | See [Tunnelling through a bastion](#tunnelling-through-a-bastion). |
 | `environments` | | Named overrides, selected with `--env <name>`. Each is merged over the top-level settings; an empty one changes nothing. |
 
@@ -591,6 +598,60 @@ That's usually a data change as well (existing documents still have the old fiel
 renames the field. Migrations themselves are best written against `BsonDocument`, so a later model change doesn't alter
 what an old one does on a fresh database.
 
+### Search indexes
+
+A definition can also manage a collection's [Atlas Search](https://www.mongodb.com/docs/atlas/atlas-search/) and
+[Vector Search](https://www.mongodb.com/docs/atlas/atlas-vector-search/) indexes, alongside its regular ones. These need
+MongoDB Atlas, or a local Atlas deployment (`mongodb/mongodb-atlas-local`); a plain server doesn't run the search
+process, so `up` stops with an error if a definition declares one there.
+
+```csharp
+[ManagedCollection("products")]
+public sealed class Products : ICollectionDefinition<BsonDocument>
+{
+    public void Define(CollectionBuilder<BsonDocument> collection)
+    {
+        collection.SearchIndexes
+            .Add("by_text", """{ "mappings": { "dynamic": true } }""")
+            .AddVector("by_embedding", """
+                { "fields": [ { "type": "vector", "path": "embedding", "numDimensions": 1536, "similarity": "cosine" } ] }
+                """)
+            .Ignore("adhoc_*");
+    }
+}
+```
+
+`Add(name, definition)` declares an Atlas Search index and `AddVector(name, definition)` a Vector Search one; the
+`definition` is the index's JSON `definition` document, as the Atlas API takes it (a raw JSON string, a `BsonDocument`,
+or an object). A search index is identified by its name, unique per collection.
+
+| Change | What `up` does |
+|---|---|
+| Declared, not on the server | Creates it. |
+| Definition changed | Updates it in place with `updateSearchIndex`, so it stays queryable while it rebuilds. |
+| `type` changed (search ↔ vectorSearch) | Drops it and creates it again: `updateSearchIndex` can't change the type. |
+| On the server, not declared | Depends on `searchIndexes.prune`: `report` (default) leaves it and lists it as `keep`, `drop` removes it. |
+
+The server fills a definition in with defaults: `dynamic: false` and an empty `fields` on a mapping, each field's
+default options for its type (e.g. a `string` field's `store`, `norms` and `indexOptions`, a `number` field's
+`representation`), and it leaves out ones such as `storedSource: false`. Only those default values are allowed for, so an
+unchanged definition stays in sync whether or not it spells them out, but any other difference is a change, e.g. a field
+or an `analyzer` removed. The types a field is indexed as can be listed in any order. `collection.SearchIndexes.Prune = SearchIndexPrune.Drop` overrides
+`searchIndexes.prune` for one collection, and `Ignore("pattern")` leaves matching names alone (`*` matches anything).
+A declared search index never changes an ignored one: if the server's has the same name but a different type or
+definition, the collection is blocked until one of them changes. One that's exactly the same is fine, and one that isn't
+on the server yet is created.
+
+Search indexes are only managed when a definition declares at least one: a collection that declares none never has its
+search indexes listed or pruned, so you can adopt them gradually. A search index needs its collection to exist, so a
+definition that declares one on a collection that doesn't exist yet creates the collection first.
+
+Building a search index is asynchronous: by default `up` issues the change and returns without waiting. Set
+`searchIndexes.waitForReady: true` to wait for each created or updated index to become queryable, and each dropped one to
+be gone (up to `searchIndexes.waitTimeout` seconds), before the run returns, e.g. in a test or a deploy step that seeds
+data straight after. It also waits for a declared index that's already in line but still building, e.g. after an earlier
+run that didn't wait or timed out.
+
 ### When they run
 
 `up` applies pending migrations first, then each collection definition, under the same lock. A migration can prepare
@@ -608,8 +669,8 @@ remembers the definition it replaced, and for `indexes.supersededWindow` (an hou
 run that would bring that one back is skipped with a warning instead of undoing the newer one. After that, going back to it is treated as a
 deliberate change. `--allow-superseded` applies it straight away, e.g. when rolling back on purpose.
 
-Atlas Search indexes, validators and other collection options aren't managed yet, and a definition covers a collection
-in the configured database only.
+Validators and other collection options aren't managed yet, and a definition covers a collection in the configured
+database only.
 
 ## Commands
 

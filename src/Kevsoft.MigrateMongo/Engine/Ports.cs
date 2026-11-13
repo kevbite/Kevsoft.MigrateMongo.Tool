@@ -227,6 +227,18 @@ public sealed class CollectionPolicy
     /// <summary><c>report</c>, <c>hide</c> or <c>drop</c>, unless the definition sets its own.</summary>
     public string Prune { get; init; } = "report";
 
+    /// <summary><c>report</c> or <c>drop</c>: what happens to search indexes the definition doesn't declare, unless it sets its own.</summary>
+    public string SearchPrune { get; init; } = "report";
+
+    /// <summary>
+    /// Wait for created, updated or still-building declared search indexes to become queryable, and dropped ones to be gone,
+    /// before the plan is counted as applied.
+    /// </summary>
+    public bool SearchWaitForReady { get; init; }
+
+    /// <summary>When waiting for search indexes, how long before giving up.</summary>
+    public TimeSpan SearchWaitTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
     /// <summary><c>allow</c> or <c>fail</c>. A definition can make it stricter, not looser.</summary>
     public string OnRebuild { get; init; } = "allow";
 
@@ -264,6 +276,12 @@ public sealed class CollectionPlan
 
     /// <summary>The undeclared indexes this tool will have hidden once the plan is applied, and when each was hidden.</summary>
     public Dictionary<string, DateTime> Hidden { get; init; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Indexes that need nothing changed but that applying still waits for, e.g. a search index that's still building when
+    /// <see cref="CollectionPolicy.SearchWaitForReady"/> is on. Applying isn't skipped while there are any.
+    /// </summary>
+    public List<string> Pending { get; init; } = [];
 
     public bool HasChanges => Changes.Any(c => c.Action != IndexActions.Keep);
 }
@@ -328,6 +346,18 @@ public sealed class EngineOptions
 
     /// <summary><c>report</c>, <c>hide</c> or <c>drop</c>: what happens to indexes a collection definition doesn't declare.</summary>
     public string IndexesPrune { get; set; } = "report";
+
+    /// <summary><c>report</c> or <c>drop</c>: what happens to Atlas search indexes a collection definition doesn't declare.</summary>
+    public string SearchIndexesPrune { get; set; } = "report";
+
+    /// <summary>
+    /// Wait for created, updated or still-building declared search indexes to become queryable, and dropped ones to be gone,
+    /// before a run is counted as applied.
+    /// </summary>
+    public bool SearchIndexesWaitForReady { get; set; }
+
+    /// <summary>When waiting for search indexes, how long before giving up.</summary>
+    public TimeSpan SearchIndexesWaitTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary><c>allow</c> or <c>fail</c>: whether an index may be dropped and created again.</summary>
     public string IndexesOnRebuild { get; set; } = "allow";

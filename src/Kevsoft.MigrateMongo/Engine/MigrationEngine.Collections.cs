@@ -134,6 +134,9 @@ public sealed partial class MigrationEngine
     private CollectionPolicy PolicyFor(CollectionDescriptor collection, StoredCollectionState? state, CommandArguments arguments) => new()
     {
         Prune = _options.IndexesPrune,
+        SearchPrune = _options.SearchIndexesPrune,
+        SearchWaitForReady = _options.SearchIndexesWaitForReady,
+        SearchWaitTimeout = _options.SearchIndexesWaitTimeout,
         OnRebuild = _options.IndexesOnRebuild,
         DropHiddenAfter = _options.IndexesDropHiddenAfter,
         AllowRebuild = (arguments.AllowRebuild ?? [])
@@ -197,7 +200,7 @@ public sealed partial class MigrationEngine
             return (false, null);
         }
 
-        if (!plan.HasChanges && state?.Declaration == plan.Declaration && SameHidden(state.Hidden, plan.Hidden))
+        if (!plan.HasChanges && plan.Pending.Count == 0 && state?.Declaration == plan.Declaration && SameHidden(state.Hidden, plan.Hidden))
         {
             EmitCollection(EventTypes.CollectionCompleted, collection, null, null, changes: []);
             return (false, null);
