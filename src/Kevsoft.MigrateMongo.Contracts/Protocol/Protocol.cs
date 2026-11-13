@@ -94,6 +94,15 @@ public sealed class CommandArguments
     /// <summary>For <c>up</c> and <c>plan</c>: collections that may change even though none of their existing indexes match the declared ones.</summary>
     public List<string>? AllowUnmatched { get; set; }
 
+    /// <summary>For <c>up</c> and <c>plan</c>: collections that may be converted to capped even when <c>collections.onConvertToCapped</c> is <c>fail</c>.</summary>
+    public List<string>? AllowConvertToCapped { get; set; }
+
+    /// <summary>For <c>up</c> and <c>plan</c>: collections whose options MongoDB can't change in place are left as they are instead of failing.</summary>
+    public List<string>? SkipUnchangeable { get; set; }
+
+    /// <summary>For <c>up</c> and <c>plan</c>: collections whose validator may change even though existing documents fail it.</summary>
+    public List<string>? AllowInvalidDocuments { get; set; }
+
     /// <summary>For <c>up</c> and <c>plan</c>: apply collection definitions that a newer run has already replaced.</summary>
     public bool AllowSuperseded { get; set; }
 }
@@ -246,6 +255,9 @@ public sealed class CollectionInfo
     /// <summary>For <c>show</c>: the indexes on the server and how each relates to the definition.</summary>
     public List<IndexInfo>? Indexes { get; set; }
 
+    /// <summary>For <c>show</c>: the collection's options on the server, as <c>listCollections</c> reports them (Extended JSON).</summary>
+    public JsonElement? Options { get; set; }
+
     /// <summary>For <c>show</c>: what the last run that changed something recorded.</summary>
     public MigrationOutputInfo? Output { get; set; }
 
@@ -277,12 +289,30 @@ public static class IndexActions
 
     /// <summary>Not declared, and left alone.</summary>
     public const string Keep = "keep";
+
+    /// <summary>The collection doesn't exist, so it's created with <c>create</c> and every declared option.</summary>
+    public const string CreateCollection = "create-collection";
+
+    /// <summary>A collection option changed in place with <c>collMod</c>; <c>Index</c> names the option.</summary>
+    public const string ModifyCollection = "modify-collection";
+
+    /// <summary>The collection is converted to capped with <c>convertToCapped</c>.</summary>
+    public const string ConvertToCapped = "convert-to-capped";
+
+    /// <summary>The validator, <c>validationLevel</c> or <c>validationAction</c> is set with <c>collMod</c>.</summary>
+    public const string SetValidator = "set-validator";
+
+    /// <summary>A validator that's on the server but not declared, removed per <c>validators.prune</c>.</summary>
+    public const string RemoveValidator = "remove-validator";
+
+    /// <summary>A change MongoDB can't make on an existing collection, skipped per <c>onUnchangeable: skip</c>. Not a change.</summary>
+    public const string Skip = "skip";
 }
 
 /// <summary>One change to a collection's indexes.</summary>
 public sealed class IndexChangeInfo
 {
-    /// <summary><c>create</c>, <c>modify</c>, <c>rebuild</c>, <c>hide</c>, <c>drop</c> or <c>keep</c>.</summary>
+    /// <summary>One of the <see cref="IndexActions"/>, e.g. <c>create</c>, <c>modify</c>, <c>drop</c>, <c>create-collection</c> or <c>keep</c>.</summary>
     public string Action { get; set; } = "";
 
     /// <summary>The index's name: the server's for an existing index, otherwise the declared or default one.</summary>
@@ -298,6 +328,15 @@ public sealed class IndexChangeInfo
     public bool? Blocked { get; set; }
 
     public string? Reason { get; set; }
+
+    /// <summary>For a collection option or validator: the server's value, as Extended JSON.</summary>
+    public JsonElement? Before { get; set; }
+
+    /// <summary>For a collection option or validator: the declared value, as Extended JSON.</summary>
+    public JsonElement? After { get; set; }
+
+    /// <summary>Something to know before applying the change, e.g. how many existing documents fail a new validator.</summary>
+    public string? Warning { get; set; }
 }
 
 /// <summary>An index on the server (the <c>show</c> command).</summary>

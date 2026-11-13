@@ -79,6 +79,23 @@ public sealed class MongoMigrationOptions
     public TimeSpan SearchIndexWaitTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
+    /// Whether an existing collection declared capped may be converted with <c>convertToCapped</c>, which holds an exclusive
+    /// database lock while it copies the data (<c>collections.onConvertToCapped</c>).
+    /// </summary>
+    public ConvertToCapped ConvertToCapped { get; set; } = ConvertToCapped.Fail;
+
+    /// <summary>What happens to a declared option MongoDB can't change on an existing collection (<c>collections.onUnchangeable</c>).</summary>
+    public UnchangeableOption OnUnchangeable { get; set; } = UnchangeableOption.Fail;
+
+    /// <summary>What happens to a validator on the server that a collection definition doesn't declare (<c>validators.prune</c>).</summary>
+    public ValidatorPrune ValidatorPrune { get; set; } = ValidatorPrune.Report;
+
+    /// <summary>What happens when existing documents fail a new or changed validator (<c>validators.onInvalidDocuments</c>).</summary>
+    public InvalidDocuments OnInvalidDocuments { get; set; } = InvalidDocuments.Warn;
+
+    /// <summary>Whether existing documents are counted against a new or changed validator (<c>validators.countInvalidDocuments</c>).</summary>
+    public bool CountInvalidDocuments { get; set; } = true;
+    /// <summary>
     /// An SSH tunnel to connect through, like the <c>tunnel</c> config section. Needs <see cref="ConnectionString"/> and a
     /// <see cref="TunnelProvider"/>. The tunnel is open only while migrations run.
     /// </summary>

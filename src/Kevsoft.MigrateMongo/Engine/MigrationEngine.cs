@@ -363,7 +363,7 @@ public sealed partial class MigrationEngine
                         return lost;
                     }
 
-                    var (changed, error) = await ReconcileAsync(collection, arguments, outputOptions, batch, ct);
+                    var (changed, error) = await ReconcileAsync(collection, arguments, outputOptions, batch, issues, ct);
                     if (error is not null)
                     {
                         return new CommandResult

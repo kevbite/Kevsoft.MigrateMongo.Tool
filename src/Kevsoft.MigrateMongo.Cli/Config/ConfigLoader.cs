@@ -17,6 +17,7 @@ public static class ConfigLoader
     [
         "project", "mongodb", "stateCollection", "lockTtl", "lockWaitTimeout", "onChecksumMismatch",
         "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate", "results", "indexes", "searchIndexes",
+        "collections", "validators",
     ];
 
     private static readonly HashSet<string> ResultsKeys = ["captureStatements", "maxBytes"];
@@ -24,6 +25,10 @@ public static class ConfigLoader
     private static readonly HashSet<string> IndexesKeys = ["prune", "onRebuild", "dropHiddenAfter", "supersededWindow"];
 
     private static readonly HashSet<string> SearchIndexesKeys = ["prune", "waitForReady", "waitTimeout"];
+
+    private static readonly HashSet<string> CollectionsKeys = ["onConvertToCapped", "onUnchangeable"];
+
+    private static readonly HashSet<string> ValidatorsKeys = ["prune", "onInvalidDocuments", "countInvalidDocuments"];
 
     private static readonly HashSet<string> TunnelKeys =
     [
@@ -168,6 +173,31 @@ public static class ConfigLoader
                 break;
             default:
                 throw new ConfigException("Config setting 'searchIndexes' must be a mapping.");
+        }
+
+        switch (root.GetValueOrDefault("collections"))
+        {
+            case null:
+                break;
+            case Dictionary<string, object?> collections:
+                config.CollectionsOnConvertToCapped = OneOf(collections, "onConvertToCapped", ["fail", "allow"], getEnvironmentVariable) ?? config.CollectionsOnConvertToCapped;
+                config.CollectionsOnUnchangeable = OneOf(collections, "onUnchangeable", ["fail", "skip"], getEnvironmentVariable) ?? config.CollectionsOnUnchangeable;
+                break;
+            default:
+                throw new ConfigException("Config setting 'collections' must be a mapping.");
+        }
+
+        switch (root.GetValueOrDefault("validators"))
+        {
+            case null:
+                break;
+            case Dictionary<string, object?> validators:
+                config.ValidatorsPrune = OneOf(validators, "prune", ["report", "remove"], getEnvironmentVariable) ?? config.ValidatorsPrune;
+                config.ValidatorsOnInvalidDocuments = OneOf(validators, "onInvalidDocuments", ["warn", "fail"], getEnvironmentVariable) ?? config.ValidatorsOnInvalidDocuments;
+                config.ValidatorsCountInvalidDocuments = OptionalBool(validators, "countInvalidDocuments", getEnvironmentVariable) ?? config.ValidatorsCountInvalidDocuments;
+                break;
+            default:
+                throw new ConfigException("Config setting 'validators' must be a mapping.");
         }
 
         return config;
@@ -437,6 +467,22 @@ public static class ConfigLoader
             foreach (var key in searchIndexes.Keys.Where(k => !SearchIndexesKeys.Contains(k)))
             {
                 throw new ConfigException($"Unknown config setting '{prefix}searchIndexes.{key}'.");
+            }
+        }
+
+        if (map.GetValueOrDefault("collections") is Dictionary<string, object?> collections)
+        {
+            foreach (var key in collections.Keys.Where(k => !CollectionsKeys.Contains(k)))
+            {
+                throw new ConfigException($"Unknown config setting '{prefix}collections.{key}'.");
+            }
+        }
+
+        if (map.GetValueOrDefault("validators") is Dictionary<string, object?> validators)
+        {
+            foreach (var key in validators.Keys.Where(k => !ValidatorsKeys.Contains(k)))
+            {
+                throw new ConfigException($"Unknown config setting '{prefix}validators.{key}'.");
             }
         }
     }

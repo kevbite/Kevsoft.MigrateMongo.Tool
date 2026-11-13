@@ -74,6 +74,7 @@ public sealed partial class MigrationEngine
                 continue;
             }
 
+            issues.AddRange(Warnings(collection, plan));
             foreach (var problem in plan.Problems)
             {
                 var severity = plan.Invalid || !migrationsRunFirst ? "error" : "warning";
@@ -84,6 +85,12 @@ public sealed partial class MigrationEngine
 
         return result;
     }
+
+    /// <summary>Warnings on a plan's changes, e.g. a skipped option or existing documents that fail a new validator.</summary>
+    private static IEnumerable<ValidationIssue> Warnings(CollectionDescriptor collection, CollectionPlan plan) =>
+        plan.Changes
+            .Where(c => c.Warning is not null && c.Blocked != true)
+            .Select(c => Issue("warning", "collectionWarning", collection.Name, $"{collection.Name}: {c.Warning}"));
 
     /// <summary>A collection definition planned against the database as it was then.</summary>
     private sealed record CollectionPreview(CollectionDescriptor Collection, StoredCollectionState? State, CollectionPlan Plan, CollectionInfo Info);
@@ -144,6 +151,14 @@ public sealed partial class MigrationEngine
             .Select(a => a[(collection.Name.Length + 1)..])
             .ToHashSet(StringComparer.Ordinal),
         AllowUnmatched = arguments.AllowUnmatched?.Contains(collection.Name, StringComparer.Ordinal) == true,
+        OnConvertToCapped = _options.CollectionsOnConvertToCapped,
+        AllowConvertToCapped = arguments.AllowConvertToCapped?.Contains(collection.Name, StringComparer.Ordinal) == true,
+        OnUnchangeable = _options.CollectionsOnUnchangeable,
+        SkipUnchangeable = arguments.SkipUnchangeable?.Contains(collection.Name, StringComparer.Ordinal) == true,
+        ValidatorPrune = _options.ValidatorsPrune,
+        OnInvalidDocuments = _options.ValidatorsOnInvalidDocuments,
+        CountInvalidDocuments = _options.ValidatorsCountInvalidDocuments,
+        AllowInvalidDocuments = arguments.AllowInvalidDocuments?.Contains(collection.Name, StringComparer.Ordinal) == true,
         Hidden = state?.Hidden ?? new Dictionary<string, DateTime>(StringComparer.Ordinal),
         Now = Now,
     };
@@ -191,6 +206,7 @@ public sealed partial class MigrationEngine
         CommandArguments arguments,
         OutputOptions outputOptions,
         int batch,
+        List<ValidationIssue> issues,
         CancellationToken cancellationToken)
     {
         var (collection, state, plan, _) = preview;
@@ -202,6 +218,7 @@ public sealed partial class MigrationEngine
 
         if (!plan.HasChanges && plan.Pending.Count == 0 && state?.Declaration == plan.Declaration && SameHidden(state.Hidden, plan.Hidden))
         {
+            issues.AddRange(Warnings(collection, plan));
             EmitCollection(EventTypes.CollectionCompleted, collection, null, null, changes: []);
             return (false, null);
         }
@@ -231,6 +248,7 @@ public sealed partial class MigrationEngine
         }
 
         var result = applied.Plan;
+        issues.AddRange(Warnings(collection, result));
         var changed = result.HasChanges;
         var declarationChanged = state?.Declaration != result.Declaration;
         var saved = new StoredCollectionState
@@ -276,6 +294,7 @@ public sealed partial class MigrationEngine
             var plan = await _executor.PlanCollectionAsync(collection, PolicyFor(collection, state, new CommandArguments()), cancellationToken);
             info = ToInfo(collection, plan, state, new CommandArguments());
             info.Indexes = plan.Indexes;
+            info.Options = plan.Options;
         }
         else
         {

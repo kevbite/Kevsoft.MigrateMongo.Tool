@@ -311,6 +311,56 @@ public sealed class ConsoleRendererTests
     }
 
     [Fact]
+    public void Plan_shows_collection_option_and_validator_changes_with_their_warnings()
+    {
+        var text = Render(r => r.RenderResult(new CommandResult
+        {
+            ExitCode = ExitCodes.Success,
+            Collections =
+            [
+                new CollectionInfo
+                {
+                    Name = "events",
+                    State = CollectionStates.Changes,
+                    Changes =
+                    [
+                        new IndexChangeInfo { Action = "modify-collection", Index = "expireAfterSeconds", Detail = "86,400 → 172,800" },
+                        new IndexChangeInfo
+                        {
+                            Action = "skip", Index = "timeseries.metaField", Detail = "sensor → device", Reason = "can't be changed on an existing collection",
+                            Warning = "timeseries.metaField sensor → device can't be changed on an existing collection, so it's skipped",
+                        },
+                        new IndexChangeInfo
+                        {
+                            Action = "set-validator", Index = "validator", Detail = "$jsonSchema changed",
+                            Warning = "2 existing documents don't match the validator (e.g. 1, 2)",
+                        },
+                    ],
+                },
+                new CollectionInfo
+                {
+                    Name = "logs",
+                    State = CollectionStates.Changes,
+                    Changes = [new IndexChangeInfo { Action = "create-collection", Index = "collection", Detail = "capped: true, size: 4096" }],
+                },
+            ],
+            Message = "Would change 2 collection(s).",
+        }));
+
+        text.ShouldBe("""
+              ⟳ events
+                  ~ modify-collection expireAfterSeconds     86,400 → 172,800
+                  ⊘ skip              timeseries.metaField   sensor → device   can't be changed on an existing collection
+                  ~ set-validator     validator              $jsonSchema changed
+                                                             ⚠ 2 existing documents don't match the validator (e.g. 1, 2)
+              ⟳ logs
+                  + create-collection collection   capped: true, size: 4096
+            Would change 2 collection(s).
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void Up_shows_each_collection_as_it_changes()
     {
         var text = Render(r =>

@@ -327,6 +327,11 @@ public static class MigrateMongoRunner
         SearchIndexesPrune = config.SearchIndexesPrune,
         SearchIndexesWaitForReady = config.SearchIndexesWaitForReady,
         SearchIndexesWaitTimeout = TimeSpan.FromSeconds(config.SearchIndexesWaitTimeoutSeconds),
+        CollectionsOnConvertToCapped = config.CollectionsOnConvertToCapped,
+        CollectionsOnUnchangeable = config.CollectionsOnUnchangeable,
+        ValidatorsPrune = config.ValidatorsPrune,
+        ValidatorsOnInvalidDocuments = config.ValidatorsOnInvalidDocuments,
+        ValidatorsCountInvalidDocuments = config.ValidatorsCountInvalidDocuments,
         Provenance = new Provenance
         {
             Host = Environment.MachineName,

@@ -250,6 +250,30 @@ public sealed class CollectionPolicy
     /// <summary>Change the collection even though none of its existing indexes match the declared ones.</summary>
     public bool AllowUnmatched { get; init; }
 
+    /// <summary><c>fail</c> or <c>allow</c>: whether the collection may be converted to capped. A definition can make it stricter.</summary>
+    public string OnConvertToCapped { get; init; } = "fail";
+
+    /// <summary>Convert the collection to capped even when <see cref="OnConvertToCapped"/> is <c>fail</c>.</summary>
+    public bool AllowConvertToCapped { get; init; }
+
+    /// <summary><c>fail</c> or <c>skip</c>: what happens to an option MongoDB can't change in place, unless the definition sets its own.</summary>
+    public string OnUnchangeable { get; init; } = "fail";
+
+    /// <summary>Skip options MongoDB can't change in place, whatever the definition and config say.</summary>
+    public bool SkipUnchangeable { get; init; }
+
+    /// <summary><c>report</c> or <c>remove</c>: what happens to a validator on the server that isn't declared.</summary>
+    public string ValidatorPrune { get; init; } = "report";
+
+    /// <summary><c>warn</c> or <c>fail</c>: what happens when existing documents fail a new or changed validator.</summary>
+    public string OnInvalidDocuments { get; init; } = "warn";
+
+    /// <summary>Count existing documents that fail a new or changed validator.</summary>
+    public bool CountInvalidDocuments { get; init; } = true;
+
+    /// <summary>Change the validator even though existing documents fail it and <see cref="OnInvalidDocuments"/> is <c>fail</c>.</summary>
+    public bool AllowInvalidDocuments { get; init; }
+
     /// <summary>Undeclared indexes this tool hid earlier, and when.</summary>
     public IReadOnlyDictionary<string, DateTime> Hidden { get; init; } = new Dictionary<string, DateTime>(StringComparer.Ordinal);
 
@@ -274,6 +298,9 @@ public sealed class CollectionPlan
     /// <summary>The indexes on the server and how each relates to the definition.</summary>
     public List<IndexInfo> Indexes { get; init; } = [];
 
+    /// <summary>The collection's options on the server, as <c>listCollections</c> reports them, for <c>show</c>.</summary>
+    public System.Text.Json.JsonElement? Options { get; init; }
+
     /// <summary>The undeclared indexes this tool will have hidden once the plan is applied, and when each was hidden.</summary>
     public Dictionary<string, DateTime> Hidden { get; init; } = new(StringComparer.Ordinal);
 
@@ -283,7 +310,7 @@ public sealed class CollectionPlan
     /// </summary>
     public List<string> Pending { get; init; } = [];
 
-    public bool HasChanges => Changes.Any(c => c.Action != IndexActions.Keep);
+    public bool HasChanges => Changes.Any(c => c.Action is not (IndexActions.Keep or IndexActions.Skip));
 }
 
 public sealed class CollectionApplyResult
@@ -370,6 +397,21 @@ public sealed class EngineOptions
     /// build (e.g. during a rolling deploy). <see cref="TimeSpan.Zero"/> turns the check off.
     /// </summary>
     public TimeSpan IndexesSupersededWindow { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary><c>fail</c> or <c>allow</c>: whether an existing collection may be converted to capped.</summary>
+    public string CollectionsOnConvertToCapped { get; set; } = "fail";
+
+    /// <summary><c>fail</c> or <c>skip</c>: what happens to an option MongoDB can't change on an existing collection.</summary>
+    public string CollectionsOnUnchangeable { get; set; } = "fail";
+
+    /// <summary><c>report</c> or <c>remove</c>: what happens to a validator on the server that isn't declared.</summary>
+    public string ValidatorsPrune { get; set; } = "report";
+
+    /// <summary><c>warn</c> or <c>fail</c>: what happens when existing documents fail a new or changed validator.</summary>
+    public string ValidatorsOnInvalidDocuments { get; set; } = "warn";
+
+    /// <summary>Count existing documents that fail a new or changed validator before it's applied.</summary>
+    public bool ValidatorsCountInvalidDocuments { get; set; } = true;
 
     public Provenance Provenance { get; set; } = new();
 }

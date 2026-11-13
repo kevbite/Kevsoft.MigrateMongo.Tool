@@ -72,8 +72,95 @@ public sealed class CollectionRenderingTests
         error.Message.ShouldStartWith("Index 2 on 'orders' couldn't be rendered:");
     }
 
-    private static CollectionDeclaration Declare<T>(Action<CollectionBuilder<T>> define) =>
-        CollectionDescriptor.Create<Definition<T>, T>("orders", "Test.Orders", _ => new Definition<T>(define)).Declare(new EmptyServices(), Database);
+    [Fact]
+    public void Typed_time_series_fields_and_the_other_options_render_as_create_takes_them()
+    {
+        var declaration = Declare<Order>(c =>
+        {
+            c.Options
+                .TimeSeries(o => o.ClosedAt, o => o.CompanyId, TimeSeriesGranularity.Hours)
+                .ExpireAfter(TimeSpan.FromDays(30))
+                .Collation(new Collation("fr", strength: CollationStrength.Secondary))
+                .ChangeStreamPreAndPostImages();
+            c.Options.OnUnchangeable = UnchangeableOption.Skip;
+        });
+
+        declaration.Options.ShouldBe(BsonDocument.Parse("""
+            {
+              "timeseries": { "timeField": "closedAt", "metaField": "companyId", "granularity": "hours" },
+              "expireAfterSeconds": { "$numberLong": "2592000" },
+              "collation": { "locale": "fr", "strength": 2 },
+              "changeStreamPreAndPostImages": { "enabled": true }
+            }
+            """));
+        declaration.OnUnchangeable.ShouldBe(UnchangeableOption.Skip);
+        declaration.DeclaresOptions.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Capped_clustered_and_custom_bucketing_render_as_create_takes_them()
+    {
+        Declare<Order>(c => c.Options.Capped(1024, 100)).Options
+            .ShouldBe(BsonDocument.Parse("""{ "capped": true, "size": { "$numberLong": "1024" }, "max": { "$numberLong": "100" } }"""));
+        Declare<Order>(c => c.Options.Clustered("by_id", TimeSpan.FromHours(1))).Options
+            .ShouldBe(BsonDocument.Parse("""{ "clusteredIndex": { "key": { "_id": 1 }, "unique": true, "name": "by_id" }, "expireAfterSeconds": { "$numberLong": "3600" } }"""));
+        Declare<Order>(c => c.Options.TimeSeries("at", null, TimeSpan.FromHours(2), TimeSpan.FromHours(2))).Options
+            .ShouldBe(BsonDocument.Parse("""{ "timeseries": { "timeField": "at", "bucketMaxSpanSeconds": 7200, "bucketRoundingSeconds": 7200 } }"""));
+    }
+
+    [Fact]
+    public void A_validator_renders_its_schema_level_and_action()
+    {
+        var declaration = Declare<Order>(c => c.Validator
+            .JsonSchema("""{ "bsonType": "object", "required": ["ref"] }""")
+            .Level(ValidationLevel.Moderate)
+            .Action(ValidationAction.ErrorAndLog));
+
+        var validator = declaration.Validator.ShouldNotBeNull();
+        validator.Validator.ShouldBe(BsonDocument.Parse("""{ "$jsonSchema": { "bsonType": "object", "required": ["ref"] } }"""));
+        validator.Level.ShouldBe("moderate");
+        validator.Action.ShouldBe("errorAndLog");
+        declaration.Options.ShouldBe(new BsonDocument());
+    }
+
+    [Fact]
+    public void A_definition_without_options_declares_none()
+    {
+        var declaration = Declare<Order>(c => c.Indexes.Add(k => k.Ascending(o => o.Status)));
+
+        declaration.Options.ShouldBe(new BsonDocument());
+        declaration.Validator.ShouldBeNull();
+        declaration.DeclaresOptions.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("capped+timeseries", "'orders' can't be both capped and a time series collection.")]
+    [InlineData("capped+clustered", "'orders' can't be both capped and clustered.")]
+    [InlineData("timeseries+clustered", "'orders' can't be both a time series and a clustered collection.")]
+    public void Options_that_cannot_go_together_make_the_definition_invalid(string combination, string message)
+    {
+        var error = Should.Throw<InvalidOperationException>(() => Declare<Order>(c =>
+        {
+            if (combination.Contains("capped", StringComparison.Ordinal))
+            {
+                c.Options.Capped(4096);
+            }
+
+            if (combination.Contains("timeseries", StringComparison.Ordinal))
+            {
+                c.Options.TimeSeries("at");
+            }
+
+            if (combination.Contains("clustered", StringComparison.Ordinal))
+            {
+                c.Options.Clustered();
+            }
+        }));
+
+        error.Message.ShouldBe(message);
+    }
+
+    private static CollectionDeclaration Declare<T>(Action<CollectionBuilder<T>> define) =>        CollectionDescriptor.Create<Definition<T>, T>("orders", "Test.Orders", _ => new Definition<T>(define)).Declare(new EmptyServices(), Database);
 
     private sealed class Definition<T>(Action<CollectionBuilder<T>> define) : ICollectionDefinition<T>
     {
