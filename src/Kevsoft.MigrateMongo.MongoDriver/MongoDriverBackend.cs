@@ -46,7 +46,7 @@ public sealed class MongoDriverBackend
         MongoAuthentication.EnsureSupported(client.Settings);
         var database = client.GetDatabase(databaseName);
         var store = new MongoMigrationStore(database, stateCollection);
-        var executor = new MongoMigrationExecutor(client, database, services, loggerFactory);
+        var executor = new MongoMigrationExecutor(client, database, services, loggerFactory, stateCollection);
         return new MongoDriverBackend(client, database, store, executor);
     }
 }

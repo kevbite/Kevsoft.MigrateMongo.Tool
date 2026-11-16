@@ -17,6 +17,7 @@ public static class ConfigLoader
     [
         "project", "mongodb", "stateCollection", "lockTtl", "lockWaitTimeout", "onChecksumMismatch",
         "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate", "results", "indexes", "searchIndexes",
+        "collections", "validators",
     ];
 
     private static readonly HashSet<string> ResultsKeys = ["captureStatements", "maxBytes"];
@@ -24,6 +25,10 @@ public static class ConfigLoader
     private static readonly HashSet<string> IndexesKeys = ["prune", "onRebuild", "dropHiddenAfter", "supersededWindow"];
 
     private static readonly HashSet<string> SearchIndexesKeys = ["prune", "waitForReady", "waitTimeout"];
+
+    private static readonly HashSet<string> CollectionsKeys = ["onConvertToCapped", "onUnchangeable", "prune", "ignore"];
+
+    private static readonly HashSet<string> ValidatorsKeys = ["prune", "onInvalidDocuments", "countInvalidDocuments"];
 
     private static readonly HashSet<string> TunnelKeys =
     [
@@ -168,6 +173,33 @@ public static class ConfigLoader
                 break;
             default:
                 throw new ConfigException("Config setting 'searchIndexes' must be a mapping.");
+        }
+
+        switch (root.GetValueOrDefault("collections"))
+        {
+            case null:
+                break;
+            case Dictionary<string, object?> collections:
+                config.CollectionsOnConvertToCapped = OneOf(collections, "onConvertToCapped", ["fail", "allow"], getEnvironmentVariable) ?? config.CollectionsOnConvertToCapped;
+                config.CollectionsOnUnchangeable = OneOf(collections, "onUnchangeable", ["fail", "skip"], getEnvironmentVariable) ?? config.CollectionsOnUnchangeable;
+                config.CollectionsPrune = OneOf(collections, "prune", ["off", "report", "drop"], getEnvironmentVariable) ?? config.CollectionsPrune;
+                config.CollectionsIgnore = OptionalList(collections, "ignore", getEnvironmentVariable) ?? config.CollectionsIgnore;
+                break;
+            default:
+                throw new ConfigException("Config setting 'collections' must be a mapping.");
+        }
+
+        switch (root.GetValueOrDefault("validators"))
+        {
+            case null:
+                break;
+            case Dictionary<string, object?> validators:
+                config.ValidatorsPrune = OneOf(validators, "prune", ["report", "remove"], getEnvironmentVariable) ?? config.ValidatorsPrune;
+                config.ValidatorsOnInvalidDocuments = OneOf(validators, "onInvalidDocuments", ["warn", "fail"], getEnvironmentVariable) ?? config.ValidatorsOnInvalidDocuments;
+                config.ValidatorsCountInvalidDocuments = OptionalBool(validators, "countInvalidDocuments", getEnvironmentVariable) ?? config.ValidatorsCountInvalidDocuments;
+                break;
+            default:
+                throw new ConfigException("Config setting 'validators' must be a mapping.");
         }
 
         return config;
@@ -439,6 +471,22 @@ public static class ConfigLoader
                 throw new ConfigException($"Unknown config setting '{prefix}searchIndexes.{key}'.");
             }
         }
+
+        if (map.GetValueOrDefault("collections") is Dictionary<string, object?> collections)
+        {
+            foreach (var key in collections.Keys.Where(k => !CollectionsKeys.Contains(k)))
+            {
+                throw new ConfigException($"Unknown config setting '{prefix}collections.{key}'.");
+            }
+        }
+
+        if (map.GetValueOrDefault("validators") is Dictionary<string, object?> validators)
+        {
+            foreach (var key in validators.Keys.Where(k => !ValidatorsKeys.Contains(k)))
+            {
+                throw new ConfigException($"Unknown config setting '{prefix}validators.{key}'.");
+            }
+        }
     }
 
     private static string? OptionalString(Dictionary<string, object?> map, string key, Func<string, string?> env) =>
@@ -460,6 +508,25 @@ public static class ConfigLoader
         return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result)
             ? result
             : throw new ConfigException($"Config setting '{key}' must be a whole number but was '{value}'.");
+    }
+
+    /// <summary>A list of values (a single value counts as a list of one); an empty <c>key:</c> is an empty list.</summary>
+    private static List<string>? OptionalList(Dictionary<string, object?> map, string key, Func<string, string?> env)
+    {
+        if (!map.TryGetValue(key, out var value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            null or "" => [],
+            string single => [Interpolate(single, env)],
+            List<object?> items => items.Select(i => i is string s
+                ? Interpolate(s, env)
+                : throw new ConfigException($"Config setting '{key}' must be a list of values.")).ToList(),
+            _ => throw new ConfigException($"Config setting '{key}' must be a list of values."),
+        };
     }
 
     private static bool? OptionalBool(Dictionary<string, object?> map, string key, Func<string, string?> env)

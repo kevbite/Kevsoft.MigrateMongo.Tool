@@ -32,6 +32,24 @@ internal sealed class CollectionHarness(IntegrationEnvironment environment) : IA
     public static CollectionDescriptor Define<T>(Action<CollectionBuilder<T>> define, string name = Things) =>
         CollectionDescriptor.Create<Definition<T>, T>(name, $"Tests.{name}", _ => new Definition<T>(define));
 
+    /// <summary>A view definition named <paramref name="name"/> reading from <paramref name="on"/>.</summary>
+    public static CollectionDescriptor DefineView(string name, string on, Action<ViewBuilder<BsonDocument>> define) =>
+        CollectionDescriptor.CreateView<ViewDefinition<BsonDocument>, BsonDocument>(name, on, $"Tests.{name}", _ => new ViewDefinition<BsonDocument>(define));
+
+    /// <summary>Runs <c>up</c> with every definition and checks it succeeded.</summary>
+    public async Task<CommandResult> UpAllAsync(IEnumerable<CollectionDescriptor> collections, Action<EngineOptions>? options = null)
+    {
+        var up = await RunAsync("up", collections, options);
+        up.ExitCode.ShouldBe(ExitCodes.Success, up.Message + string.Concat(up.Issues?.Select(i => Environment.NewLine + i.Message) ?? []));
+        return up;
+    }
+
+    /// <summary>The <c>listCollections</c> entry for <paramref name="name"/>, or null.</summary>
+    public BsonDocument? ListCollection(string name) =>
+        Database.ListCollections(new ListCollectionsOptions { Filter = new BsonDocument("name", name) }).FirstOrDefault();
+
+    public List<string> CollectionNames() => Database.ListCollectionNames().ToList().Order(StringComparer.Ordinal).ToList();
+
     public Task<CommandResult> UpAsync(CollectionDescriptor collection, Action<EngineOptions>? options = null, CommandArguments? arguments = null) =>
         RunAsync("up", [collection], options, arguments);
 
@@ -69,6 +87,26 @@ internal sealed class CollectionHarness(IntegrationEnvironment environment) : IA
             if (e.CommandName == commandName && e.DatabaseNamespace.DatabaseName == DatabaseName)
             {
                 cancel.Cancel();
+            }
+        });
+        return new MongoClient(settings);
+    }
+
+    /// <summary>
+    /// A client that counts how many of each command it runs on this database, so a test can assert that a pass shares one
+    /// <c>listCollections</c> read across its definitions and pruning instead of listing namespaces per definition.
+    /// </summary>
+    public MongoClient Counting(IDictionary<string, int> counts)
+    {
+        var settings = MongoClientSettings.FromConnectionString(environment.MongoUrl);
+        settings.ClusterConfigurator = builder => builder.Subscribe<CommandStartedEvent>(e =>
+        {
+            if (e.DatabaseNamespace.DatabaseName == DatabaseName)
+            {
+                lock (counts)
+                {
+                    counts[e.CommandName] = counts.TryGetValue(e.CommandName, out var n) ? n + 1 : 1;
+                }
             }
         });
         return new MongoClient(settings);
@@ -124,6 +162,11 @@ internal sealed class CollectionHarness(IntegrationEnvironment environment) : IA
     private sealed class Definition<T>(Action<CollectionBuilder<T>> define) : ICollectionDefinition<T>
     {
         public void Define(CollectionBuilder<T> collection) => define(collection);
+    }
+
+    private sealed class ViewDefinition<T>(Action<ViewBuilder<T>> define) : IViewDefinition<T>
+    {
+        public void Define(ViewBuilder<T> view) => define(view);
     }
 
     private sealed class NoServices : IServiceProvider

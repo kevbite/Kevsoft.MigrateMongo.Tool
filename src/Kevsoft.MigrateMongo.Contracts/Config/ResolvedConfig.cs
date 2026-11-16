@@ -64,6 +64,27 @@ public sealed class ResolvedConfig
     /// <summary>When waiting for search indexes, seconds before giving up (<c>searchIndexes.waitTimeout</c>).</summary>
     public int SearchIndexesWaitTimeoutSeconds { get; set; } = 300;
 
+    /// <summary>Whether an existing collection may be converted to capped: <c>fail</c> or <c>allow</c> (<c>collections.onConvertToCapped</c>).</summary>
+    public string CollectionsOnConvertToCapped { get; set; } = "fail";
+
+    /// <summary>What happens to an option MongoDB can't change on an existing collection: <c>fail</c> or <c>skip</c> (<c>collections.onUnchangeable</c>).</summary>
+    public string CollectionsOnUnchangeable { get; set; } = "fail";
+
+    /// <summary>What happens to collections and views no definition declares: <c>off</c>, <c>report</c> or <c>drop</c> (<c>collections.prune</c>).</summary>
+    public string CollectionsPrune { get; set; } = "off";
+
+    /// <summary>Name patterns (<c>*</c> matches anything) <c>collections.prune</c> leaves alone (<c>collections.ignore</c>).</summary>
+    public List<string> CollectionsIgnore { get; set; } = [];
+
+    /// <summary>What happens to a validator on the server that isn't declared: <c>report</c> or <c>remove</c> (<c>validators.prune</c>).</summary>
+    public string ValidatorsPrune { get; set; } = "report";
+
+    /// <summary>What happens when existing documents fail a new or changed validator: <c>warn</c> or <c>fail</c> (<c>validators.onInvalidDocuments</c>).</summary>
+    public string ValidatorsOnInvalidDocuments { get; set; } = "warn";
+
+    /// <summary>Whether existing documents are counted against a new or changed validator (<c>validators.countInvalidDocuments</c>).</summary>
+    public bool ValidatorsCountInvalidDocuments { get; set; } = true;
+
     /// <summary>
     /// SSH tunnel to open before connecting. Never serialised: the tool opens the tunnel and only passes the rewritten
     /// <see cref="MongoUrl"/> to the runner, so SSH credentials never leave the tool process. A standalone runner or bundle

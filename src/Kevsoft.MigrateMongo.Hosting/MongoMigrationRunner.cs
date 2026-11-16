@@ -153,6 +153,13 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             SearchIndexesPrune = options.SearchIndexPrune.ToString().ToLowerInvariant(),
             SearchIndexesWaitForReady = options.WaitForSearchIndexes,
             SearchIndexesWaitTimeout = options.SearchIndexWaitTimeout,
+            CollectionsOnConvertToCapped = options.ConvertToCapped.ToString().ToLowerInvariant(),
+            CollectionsOnUnchangeable = options.OnUnchangeable.ToString().ToLowerInvariant(),
+            CollectionsPrune = options.CollectionPrune.ToString().ToLowerInvariant(),
+            CollectionsIgnore = [.. options.CollectionIgnore],
+            ValidatorsPrune = options.ValidatorPrune.ToString().ToLowerInvariant(),
+            ValidatorsOnInvalidDocuments = options.OnInvalidDocuments.ToString().ToLowerInvariant(),
+            ValidatorsCountInvalidDocuments = options.CountInvalidDocuments,
             Provenance = new Provenance
             {
                 Host = System.Environment.MachineName,

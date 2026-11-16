@@ -216,6 +216,11 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
 
     public List<FakeScope> Scopes { get; } = [];
 
+    /// <summary>How many times the engine asked for the cached listing to be refreshed (command boundaries and after the lock).</summary>
+    public int RefreshCount { get; private set; }
+
+    public void RefreshCollectionCache() => RefreshCount++;
+
     /// <summary>Called on each commit; return an exception to make that commit fail.</summary>
     public Func<Exception?>? CommitFailure { get; set; }
 
@@ -300,6 +305,39 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
             Applied = true,
             Output = plan.HasChanges ? new MigrationOutputInfo { Operations = [new OperationRecord { Kind = "createIndex", Collection = collection.Name }] } : null,
         });
+    }
+
+    /// <summary>What's undeclared in the database (default: nothing); dropped entries are dropped when applied.</summary>
+    public List<IndexChangeInfo> Undeclared { get; set; } = [];
+
+    public List<UndeclaredPolicy> UndeclaredPolicies { get; } = [];
+
+    public Task<CollectionPlan> PlanUndeclaredAsync(UndeclaredPolicy policy, CancellationToken cancellationToken)
+    {
+        UndeclaredPolicies.Add(policy);
+        return Task.FromResult(new CollectionPlan { Changes = [.. Undeclared] });
+    }
+
+    public async Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, Func<UndeclaredDrop, Task> onDropped, CancellationToken cancellationToken)
+    {
+        Calls.Add("ApplyUndeclared");
+        UndeclaredPolicies.Add(policy);
+        var drops = Undeclared.Where(c => c.Action != IndexActions.Keep).Select(c => new UndeclaredDrop
+        {
+            Name = c.Index,
+            Change = c,
+            Output = new MigrationOutputInfo { Operations = [new OperationRecord { Kind = "runCommand", Collection = c.Index }] },
+        }).ToList();
+        foreach (var drop in drops)
+        {
+            await onDropped(drop);
+        }
+
+        return new UndeclaredApplyResult
+        {
+            Plan = new CollectionPlan { Changes = [.. Undeclared] },
+            Drops = drops,
+        };
     }
 
     private sealed class EmptyServices : IServiceProvider

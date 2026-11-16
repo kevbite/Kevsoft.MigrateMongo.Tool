@@ -81,6 +81,23 @@ namespace Kevsoft.MigrateMongo.Hosting
         public IReadOnlyList<string> AllowUnmatched { get; set; } = [];
 
         /// <summary>
+        /// Collections that may be converted to capped although <see cref="MongoMigrationOptions.ConvertToCapped"/> refuses it
+        /// (<c>--allow-convert-to-capped</c>).
+        /// </summary>
+        public IReadOnlyList<string> AllowConvertToCapped { get; set; } = [];
+
+        /// <summary>
+        /// Collections whose options MongoDB can't change in place are left as they are, and the rest applied
+        /// (<c>--skip-unchangeable</c>).
+        /// </summary>
+        public IReadOnlyList<string> SkipUnchangeable { get; set; } = [];
+
+        /// <summary>
+        /// Collections whose validator may change although existing documents fail it and
+        /// <see cref="MongoMigrationOptions.OnInvalidDocuments"/> is <see cref="InvalidDocuments.Fail"/> (<c>--allow-invalid-documents</c>).
+        /// </summary>
+        public IReadOnlyList<string> AllowInvalidDocuments { get; set; } = [];
+        /// <summary>
         /// Apply definitions a newer run replaced less than <see cref="MongoMigrationOptions.SupersededDefinitionWindow"/> ago
         /// (<c>--allow-superseded</c>), e.g. when rolling back on purpose.
         /// </summary>

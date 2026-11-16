@@ -5,8 +5,8 @@ namespace Kevsoft.MigrateMongo.MongoDriver;
 
 /// <summary>
 /// Carries out a <see cref="SearchIndexPlan"/> through <c>context.Track(...)</c>, so every search index command is recorded
-/// (and a dropped index's full definition with it). Search indexes need the collection to exist, so it's created first when
-/// any index is created. A type change (or a failed-build rebuild) drops then creates, waiting for the old index to disappear
+/// (and a dropped index's full definition with it). The collection exists by then: every managed collection is created
+/// explicitly before its indexes. A type change (or a failed-build rebuild) drops then creates, waiting for the old index to disappear
 /// in between so the name is free. When waiting is on, it polls <c>$listSearchIndexes</c> until each created or updated index
 /// (and each already declared one still building) has reached <c>READY</c> with the requested definition, and until each
 /// dropped index has gone.
@@ -28,13 +28,6 @@ internal static class SearchIndexApplier
 
         var database = context.Track(context.Database);
         var collection = context.Database.GetCollection<BsonDocument>(collectionName);
-
-        // Creating a search index needs the collection to exist; a search-only definition on a fresh database has nothing
-        // else to create it. A drop never creates it, so only ensure it when something is created.
-        if (plan.Changes.Any(CreatesIndex))
-        {
-            await EnsureCollectionAsync(context.Database, database, collectionName, cancellationToken);
-        }
 
         foreach (var change in plan.Changes)
         {
@@ -68,32 +61,7 @@ internal static class SearchIndexApplier
         }
     }
 
-    private static bool CreatesIndex(SearchPlannedChange change) => change.Commands.Any(c => c.Contains("createSearchIndexes"));
-
     private static bool Drops(BsonDocument command) => command.Contains("dropSearchIndex");
-
-    private static async Task EnsureCollectionAsync(
-        IMongoDatabase database,
-        TrackedDatabase tracked,
-        string collectionName,
-        CancellationToken cancellationToken)
-    {
-        using var cursor = await database.ListCollectionNamesAsync(
-            new ListCollectionNamesOptions { Filter = new BsonDocument("name", collectionName) }, cancellationToken);
-        if (await cursor.AnyAsync(cancellationToken))
-        {
-            return;
-        }
-
-        try
-        {
-            await tracked.RunCommandAsync(new BsonDocument("create", collectionName), cancellationToken: cancellationToken);
-        }
-        catch (MongoCommandException e) when (e.Code == 48)
-        {
-            // NamespaceExists: created between the check and here, which is fine.
-        }
-    }
 
     /// <summary>Polls until the named index is no longer listed.</summary>
     private static async Task WaitForGoneAsync(

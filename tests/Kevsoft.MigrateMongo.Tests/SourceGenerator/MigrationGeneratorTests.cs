@@ -267,6 +267,66 @@ public sealed class MigrationGeneratorTests
 
     private const string DefineBody = "public void Define(CollectionBuilder<BsonDocument> collection) { }";
 
+    private const string ViewBody = "public void Define(ViewBuilder<BsonDocument> view) { }";
+
+    [Fact]
+    public void View_definitions_are_registered_with_the_collection_they_read_from()
+    {
+        var (diagnostics, assembly) = Run($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            namespace App;
+            [ManagedCollection("orders")] public sealed class Orders : ICollectionDefinition<BsonDocument> { {{DefineBody}} }
+
+            [ManagedView("open_orders", on: "orders")]
+            public sealed class OpenOrders : IViewDefinition<BsonDocument>
+            {
+                public void Define(ViewBuilder<BsonDocument> view) => view.Pipeline("[{ \"$match\": { \"status\": \"open\" } }]");
+            }
+            """);
+
+        diagnostics.ShouldBeEmpty();
+        var collections = MigrationRegistry.ForAssembly(assembly!)!.GetCollections();
+        collections.Select(c => (c.Name, c.Origin, c.ViewOn)).ShouldBe([("open_orders", "App.OpenOrders", "orders"), ("orders", "App.Orders", (string?)null)]);
+
+        var database = new MongoDB.Driver.MongoClient("mongodb://localhost:27017").GetDatabase("generated");
+        var view = collections.First().Declare(new Services([]), database).View.ShouldNotBeNull();
+        (view.ViewOn, view.Pipeline.ShouldHaveSingleItem()).ShouldBe(("orders", MongoDB.Bson.BsonDocument.Parse("""{ "$match": { "status": "open" } }""")));
+    }
+
+    [Theory]
+    [InlineData("[ManagedView(\"v\", \"orders\")] public sealed class A : ICollectionDefinition<BsonDocument> { " + DefineBody + " }", "MM0010")]
+    [InlineData("[ManagedView(\"v\", \"\")] public sealed class A : IViewDefinition<BsonDocument> { " + ViewBody + " }", "MM0007")]
+    [InlineData("[ManagedView(\"orders\", \"x\")] public sealed class A : IViewDefinition<BsonDocument> { " + ViewBody + " }\n" +
+                "[ManagedCollection(\"orders\")] public sealed class B : ICollectionDefinition<BsonDocument> { " + DefineBody + " }", "MM0009,MM0009")]
+    [InlineData("[ManagedView(\"a\", \"b\")] public sealed class A : IViewDefinition<BsonDocument> { " + ViewBody + " }\n" +
+                "[ManagedView(\"b\", \"a\")] public sealed class B : IViewDefinition<BsonDocument> { " + ViewBody + " }", "MM0011,MM0011")]
+    public void Invalid_view_definitions_are_reported(string declaration, string expectedIds)
+    {
+        var (diagnostics, _) = Run(Usings + "using MongoDB.Bson;\nnamespace App;\n" + declaration);
+
+        diagnostics.Select(d => d.Id).ShouldBe(expectedIds.Split(','));
+    }
+
+    [Fact]
+    public void A_cycle_of_views_names_the_chain()
+    {
+        var (diagnostics, _) = Run($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            namespace App;
+            [ManagedView("a", "b")] public sealed class A : IViewDefinition<BsonDocument> { {{ViewBody}} }
+            [ManagedView("b", "c")] public sealed class B : IViewDefinition<BsonDocument> { {{ViewBody}} }
+            [ManagedView("c", "a")] public sealed class C : IViewDefinition<BsonDocument> { {{ViewBody}} }
+            """);
+
+        diagnostics.Select(d => d.GetMessage(System.Globalization.CultureInfo.InvariantCulture)).ShouldBe([
+            "View 'a' is part of a cycle of views: a → b → c → a",
+            "View 'b' is part of a cycle of views: b → c → a → b",
+            "View 'c' is part of a cycle of views: c → a → b → c",
+        ]);
+    }
+
     [Fact]
     public void Checksum_ignores_whitespace_and_comments_but_not_code()
     {

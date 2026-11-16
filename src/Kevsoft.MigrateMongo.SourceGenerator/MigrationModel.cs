@@ -45,7 +45,11 @@ internal sealed record CollectionModel(
     bool IsAbstract,
     bool IsAccessible,
     bool HasConstructor,
-    LocationInfo Location);
+    LocationInfo Location,
+    string? ViewOn = null)
+{
+    public bool IsView => ViewOn is not null;
+}
 
 /// <summary>Value-equality wrapper so the incremental pipeline can cache models.</summary>
 internal readonly struct EquatableArray<T>(ImmutableArray<T> items) : IEquatable<EquatableArray<T>>, IEnumerable<T>

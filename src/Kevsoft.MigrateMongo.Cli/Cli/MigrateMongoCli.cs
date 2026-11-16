@@ -244,6 +244,24 @@ public static class MigrateMongoCli
             AllowMultipleArgumentsPerToken = false,
         };
 
+        private readonly Option<string[]> _allowConvertToCapped = new("--allow-convert-to-capped")
+        {
+            Description = "Let this collection be converted to capped even when collections.onConvertToCapped is fail. Repeat for more.",
+            AllowMultipleArgumentsPerToken = false,
+        };
+
+        private readonly Option<string[]> _skipUnchangeable = new("--skip-unchangeable")
+        {
+            Description = "Leave this collection's options that MongoDB can't change in place as they are, and apply the rest. Repeat for more.",
+            AllowMultipleArgumentsPerToken = false,
+        };
+
+        private readonly Option<string[]> _allowInvalidDocuments = new("--allow-invalid-documents")
+        {
+            Description = "Apply this collection's validator although existing documents fail it. Repeat for more.",
+            AllowMultipleArgumentsPerToken = false,
+        };
+
         private readonly Option<bool> _allowSuperseded = new("--allow-superseded") { Description = "Apply collection definitions that a newer run has already replaced (e.g. when rolling back on purpose)." };
 
         public CollectionOptions() => _only.AcceptOnlyFromAmong(OnlyScopes.Migrations, OnlyScopes.Collections);
@@ -253,6 +271,9 @@ public static class MigrateMongoCli
             command.Options.Add(_only);
             command.Options.Add(_allowRebuild);
             command.Options.Add(_allowUnmatched);
+            command.Options.Add(_allowConvertToCapped);
+            command.Options.Add(_skipUnchangeable);
+            command.Options.Add(_allowInvalidDocuments);
             command.Options.Add(_allowSuperseded);
         }
 
@@ -261,6 +282,9 @@ public static class MigrateMongoCli
             arguments.Only = p.GetValue(_only);
             arguments.AllowRebuild = p.GetValue(_allowRebuild) is { Length: > 0 } rebuild ? [.. rebuild] : null;
             arguments.AllowUnmatched = p.GetValue(_allowUnmatched) is { Length: > 0 } unmatched ? [.. unmatched] : null;
+            arguments.AllowConvertToCapped = p.GetValue(_allowConvertToCapped) is { Length: > 0 } capped ? [.. capped] : null;
+            arguments.SkipUnchangeable = p.GetValue(_skipUnchangeable) is { Length: > 0 } skip ? [.. skip] : null;
+            arguments.AllowInvalidDocuments = p.GetValue(_allowInvalidDocuments) is { Length: > 0 } invalid ? [.. invalid] : null;
             arguments.AllowSuperseded = p.GetValue(_allowSuperseded);
             return arguments;
         }

@@ -8,6 +8,19 @@ public enum ChecksumMismatchBehavior
     Ignore,
 }
 
+/// <summary>What happens to collections and views in the database that no definition declares (<c>collections.prune</c>).</summary>
+public enum CollectionPrune
+{
+    /// <summary>They aren't looked at.</summary>
+    Off,
+
+    /// <summary>Each is listed, with a warning, and left alone.</summary>
+    Report,
+
+    /// <summary>Views are dropped, and collections that are empty; collections with documents are reported. What's dropped is recorded first.</summary>
+    Drop,
+}
+
 /// <summary>
 /// Settings for running migrations in-app. They mirror the <c>migrate-mongo.yaml</c> settings, so keep them the same as the
 /// config the CLI uses for the same database.
@@ -78,6 +91,29 @@ public sealed class MongoMigrationOptions
     /// <summary>When waiting for search indexes, how long before giving up (<c>searchIndexes.waitTimeout</c>).</summary>
     public TimeSpan SearchIndexWaitTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Whether an existing collection declared capped may be converted with <c>convertToCapped</c>, which holds an exclusive
+    /// database lock while it copies the data (<c>collections.onConvertToCapped</c>).
+    /// </summary>
+    public ConvertToCapped ConvertToCapped { get; set; } = ConvertToCapped.Fail;
+
+    /// <summary>What happens to a declared option MongoDB can't change on an existing collection (<c>collections.onUnchangeable</c>).</summary>
+    public UnchangeableOption OnUnchangeable { get; set; } = UnchangeableOption.Fail;
+
+    /// <summary>What happens to collections and views no definition declares (<c>collections.prune</c>).</summary>
+    public CollectionPrune CollectionPrune { get; set; } = CollectionPrune.Off;
+
+    /// <summary>Name patterns (<c>*</c> matches anything) <see cref="CollectionPrune"/> leaves alone (<c>collections.ignore</c>).</summary>
+    public IList<string> CollectionIgnore { get; set; } = new List<string>();
+
+    /// <summary>What happens to a validator on the server that a collection definition doesn't declare (<c>validators.prune</c>).</summary>
+    public ValidatorPrune ValidatorPrune { get; set; } = ValidatorPrune.Report;
+
+    /// <summary>What happens when existing documents fail a new or changed validator (<c>validators.onInvalidDocuments</c>).</summary>
+    public InvalidDocuments OnInvalidDocuments { get; set; } = InvalidDocuments.Warn;
+
+    /// <summary>Whether existing documents are counted against a new or changed validator (<c>validators.countInvalidDocuments</c>).</summary>
+    public bool CountInvalidDocuments { get; set; } = true;
     /// <summary>
     /// An SSH tunnel to connect through, like the <c>tunnel</c> config section. Needs <see cref="ConnectionString"/> and a
     /// <see cref="TunnelProvider"/>. The tunnel is open only while migrations run.

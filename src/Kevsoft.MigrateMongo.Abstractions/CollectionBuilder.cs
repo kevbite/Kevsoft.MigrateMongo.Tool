@@ -38,6 +38,15 @@ public sealed class CollectionBuilder<TDocument>
 
     /// <summary>The collection's Atlas Search and Vector Search indexes (Atlas and Atlas Local only).</summary>
     public SearchIndexesBuilder<TDocument> SearchIndexes { get; } = new();
+
+    /// <summary>
+    /// The options the collection is created with: capped, time series, clustered, default collation and change stream
+    /// pre- and post-images. Only declared options are compared with the server's.
+    /// </summary>
+    public CollectionOptionsBuilder<TDocument> Options { get; } = new();
+
+    /// <summary>The collection's validator: a raw <c>$jsonSchema</c>, with its level and action.</summary>
+    public ValidatorBuilder Validator { get; } = new();
 }
 
 /// <summary>The indexes a collection should have.</summary>

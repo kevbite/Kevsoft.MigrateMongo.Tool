@@ -109,7 +109,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
                 ["Collection", "State", "Reconciled", "Changes"],
                 statuses.Select(c => new[]
                 {
-                    c.Name,
+                    c.ViewOn is { } on ? $"{c.Name} (view on {on})" : c.Name,
                     StateText(c.State),
                     c.ReconciledAt?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "",
                     ChangeCounts(c.Changes),
@@ -141,11 +141,11 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
             {
                 if (item.Changes.Count == 0)
                 {
-                    WriteLine(Paint($"  ⟳ {item.Name}   {StateText(item.State)}", item.State == CollectionStates.InSync ? Dim : Yellow));
+                    WriteLine(Paint($"  ⟳ {CollectionLabel(item)}   {StateText(item.State)}", item.State == CollectionStates.InSync ? Dim : Yellow));
                     continue;
                 }
 
-                WriteLine($"  ⟳ {item.Name}" + (item.State == CollectionStates.Superseded ? Paint("   superseded (skipped)", Yellow) : ""));
+                WriteLine($"  ⟳ {CollectionLabel(item)}" + (item.State == CollectionStates.Superseded ? Paint("   superseded (skipped)", Yellow) : ""));
                 WriteChanges(item.Changes, "      ");
             }
         }
@@ -315,7 +315,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
 
     private void RenderShowCollection(CollectionInfo collection)
     {
-        WriteLine(Paint($"{collection.Name} (collection)", Cyan));
+        WriteLine(Paint(collection.ViewOn is { } viewOn ? $"{collection.Name} (view on {viewOn})" : $"{collection.Name} (collection)", Cyan));
         var rows = new List<(string Label, string Value)> { ("State", StateText(collection.State)) };
         if (collection.ReconciledAt is { } reconciledAt)
         {
@@ -342,6 +342,11 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         if (collection.RunId is { Length: > 0 } runId)
         {
             rows.Add(("Run", runId));
+        }
+
+        if (collection.Options is { ValueKind: JsonValueKind.Object } serverOptions && serverOptions.EnumerateObject().Any())
+        {
+            rows.Add(("Options", FormatOptions(serverOptions)));
         }
 
         foreach (var (label, value) in rows)
@@ -395,6 +400,10 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         }
     }
 
+    /// <summary>e.g. <c>active_customers   (view on customers)</c>, or just the name for a collection.</summary>
+    private static string CollectionLabel(CollectionInfo collection) =>
+        collection.ViewOn is { } on ? $"{collection.Name}   (view on {on})" : collection.Name;
+
     /// <summary>One line per change, e.g. <c>+ create   status_1   { status: 1 }</c>.</summary>
     private void WriteChanges(List<IndexChangeInfo> changes, string indent)
     {
@@ -404,21 +413,29 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
         {
             var (symbol, colour) = change.Action switch
             {
-                IndexActions.Create => ("+", Green),
-                IndexActions.CreateSearch => ("+", Green),
-                IndexActions.Modify => ("~", Yellow),
-                IndexActions.UpdateSearch => ("~", Yellow),
-                IndexActions.Rebuild => ("↻", Yellow),
-                IndexActions.Hide or IndexActions.Drop or IndexActions.DropSearch => ("-", Red),
+                IndexActions.Create or IndexActions.CreateSearch or IndexActions.CreateCollection or IndexActions.CreateView => ("+", Green),
+                IndexActions.Modify or IndexActions.UpdateSearch or IndexActions.ModifyCollection or IndexActions.SetValidator or IndexActions.ModifyView => ("~", Yellow),
+                IndexActions.Rebuild or IndexActions.ConvertToCapped or IndexActions.RecreateView => ("↻", Yellow),
+                IndexActions.Hide or IndexActions.Drop or IndexActions.DropSearch or IndexActions.RemoveValidator or IndexActions.DropCollection or IndexActions.DropView => ("-", Red),
+                IndexActions.Skip => ("⊘", Yellow),
                 _ => ("!", Dim),
             };
             var detail = change.Action == IndexActions.Create
                 ? Keys(change.Keys) + (change.Detail is { } options ? "  " + options : "")
                 : change.Detail ?? "";
+            if (change.Action == IndexActions.Skip && change.Reason is { } skipped)
+            {
+                detail += "   " + skipped;
+            }
+
             var line = $"{indent}{symbol} {change.Action.PadRight(actionWidth)} {change.Index.PadRight(width)}   {detail}";
             WriteLine(change.Blocked == true
                 ? Paint(line + $"   ✖ blocked: {change.Reason}", Red)
                 : Paint(line, colour));
+            if (change.Warning is { } warning && change.Blocked != true && change.Action != IndexActions.Skip)
+            {
+                WriteLine(Paint($"{indent}{new string(' ', actionWidth + width + 6)}⚠ {warning}", Yellow));
+            }
         }
     }
 
@@ -443,7 +460,7 @@ public sealed class ConsoleRenderer(TextWriter output, bool color)
     private static string ChangeCounts(List<IndexChangeInfo> changes) =>
         string.Join(" · ", changes
             .GroupBy(c => c.Action)
-            .Select(g => $"{g.Count().ToString(CultureInfo.InvariantCulture)} {(g.Key == IndexActions.Keep ? "kept" : g.Key)}"));
+            .Select(g => $"{g.Count().ToString(CultureInfo.InvariantCulture)} {g.Key switch { IndexActions.Keep => "kept", IndexActions.Skip => "skipped", _ => g.Key }}"));
 
     /// <summary>The results, notes and operations a migration or collection change recorded.</summary>
     private void RenderOutputDetail(MigrationOutputInfo? output)

@@ -24,6 +24,9 @@ internal sealed class MongoMigrationStartupService(IMongoMigrationRunner runner,
             Only = startup.Collections ? null : OnlyScopes.Migrations,
             AllowRebuild = [.. startup.AllowRebuild],
             AllowUnmatched = [.. startup.AllowUnmatched],
+            AllowConvertToCapped = [.. startup.AllowConvertToCapped],
+            SkipUnchangeable = [.. startup.SkipUnchangeable],
+            AllowInvalidDocuments = [.. startup.AllowInvalidDocuments],
             AllowSuperseded = startup.AllowSuperseded,
         };
         var result = await runner.ExecuteAsync("up", arguments, cancellationToken);
