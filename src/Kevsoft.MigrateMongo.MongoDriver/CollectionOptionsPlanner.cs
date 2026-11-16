@@ -63,7 +63,9 @@ internal static class CollectionOptionsPlanner
             return plan;
         }
 
-        plan.Problems.AddRange(TooOld(declaration, wireVersion));
+        var tooOld = TooOld(declaration, wireVersion);
+        plan.Problems.AddRange(tooOld);
+        plan.CapabilityProblems.AddRange(tooOld);
         if (plan.Problems.Count > 0)
         {
             return plan;
@@ -688,7 +690,11 @@ internal sealed class CollectionOptionsPlan
 
     public List<string> Problems { get; } = [];
 
-    /// <summary>Whether applying the plan runs any command.</summary>
+    /// <summary>
+    /// The subset of <see cref="Problems"/> that no migration can ever fix (the server is too old for a declared option or
+    /// validator). These stay errors even when migrations are pending, since running them can't change the server's version.
+    /// </summary>
+    public List<string> CapabilityProblems { get; } = [];
     public bool RunsCommands => Changes.Any(c => c.Commands.Count > 0);
 }
 

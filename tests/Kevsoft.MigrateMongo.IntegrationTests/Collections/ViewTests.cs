@@ -86,6 +86,43 @@ public sealed class ViewTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task A_view_with_a_lookup_sub_pipeline_is_created_and_joins_on_the_server()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.Collection("customers").InsertOneAsync(new BsonDocument { { "_id", 1 }, { "status", "active" } });
+        await mongo.Collection("orders").InsertManyAsync(
+        [
+            new BsonDocument { { "customerId", 1 }, { "total", 10 } },
+            new BsonDocument { { "customerId", 1 }, { "total", 20 } },
+            new BsonDocument { { "customerId", 2 }, { "total", 99 } },
+        ]);
+
+        var orders = CollectionHarness.Define<BsonDocument>(c => c.Indexes.Add(i => i.Ascending("customerId")), "orders");
+        var joined = CollectionHarness.DefineView("customer_orders", "customers", v => v.Pipeline(
+            """
+            [{ "$lookup": {
+                "from": "orders",
+                "let": { "cid": "$_id" },
+                "pipeline": [{ "$match": { "$expr": { "$eq": ["$customerId", "$$cid"] } } }],
+                "as": "orders"
+            } }]
+            """));
+
+        var up = await mongo.UpAllAsync([joined, Customers, orders]);
+
+        up.Reconciled.ShouldBe(["customers", "orders", "customer_orders"]);
+        var entry = mongo.ListCollection("customer_orders").ShouldNotBeNull();
+        entry["type"].AsString.ShouldBe("view");
+        entry["options"]["viewOn"].AsString.ShouldBe("customers");
+        entry["options"]["pipeline"].AsBsonArray.ShouldHaveSingleItem().AsBsonDocument.Names.ShouldHaveSingleItem().ShouldBe("$lookup");
+
+        var document = (await mongo.Collection("customer_orders").FindAsync(FilterDefinition<BsonDocument>.Empty)).ToList().ShouldHaveSingleItem();
+        document["orders"].AsBsonArray.Count.ShouldBe(2);
+
+        await mongo.ShouldBeInSyncAsync(joined);
+    }
+
+    [Fact]
     public async Task A_collection_with_the_same_name_blocks_the_view()
     {
         await using var mongo = new CollectionHarness(environment);

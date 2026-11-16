@@ -231,10 +231,12 @@ public interface IMigrationExecutor
         Task.FromResult(new CollectionPlan());
 
     /// <summary>
-    /// Plans again and drops what the plan drops: views, and collections that are still empty. Each drop is recorded with
-    /// the definition it removed. A drop that fails is returned with its error; the rest still run.
+    /// Plans again and drops what the plan drops: views, and collections that are still empty. Each namespace's definition and
+    /// indexes are captured before it's dropped, and <paramref name="onDropped"/> is awaited for each outcome as it happens, so
+    /// a drop that's cancelled part-way through the batch can't erase the record of the drops that already succeeded. A drop
+    /// that fails is reported with its error; the rest still run.
     /// </summary>
-    Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken) =>
+    Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, Func<UndeclaredDrop, Task> onDropped, CancellationToken cancellationToken) =>
         Task.FromResult(new UndeclaredApplyResult { Plan = new CollectionPlan() });
 }
 
@@ -249,6 +251,12 @@ public sealed class UndeclaredPolicy
 
     /// <summary>The declared collections and views, and the sources declared views read from.</summary>
     public IReadOnlySet<string> Declared { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The declared collection and view definitions, so a view's full dependency chain (its <c>viewOn</c> and the namespaces
+    /// its pipeline reads from) can be protected from pruning, not just its immediate <c>viewOn</c>.
+    /// </summary>
+    public IReadOnlyList<CollectionDescriptor> Declarations { get; init; } = [];
 }
 
 /// <summary>What <see cref="IMigrationExecutor.ApplyUndeclaredAsync"/> did.</summary>
@@ -346,6 +354,12 @@ public sealed class CollectionPlan
 
     /// <summary>Why the plan can't be applied: an invalid definition, a blocked rebuild, or no existing index matching.</summary>
     public List<string> Problems { get; init; } = [];
+
+    /// <summary>
+    /// The subset of <see cref="Problems"/> that no migration can fix (e.g. the server is too old for a declared option).
+    /// These stay errors even when migrations are pending, rather than being reported as drift a migration might repair.
+    /// </summary>
+    public List<string> CapabilityProblems { get; init; } = [];
 
     /// <summary>True when the definition itself couldn't be rendered or is inconsistent.</summary>
     public bool Invalid { get; init; }

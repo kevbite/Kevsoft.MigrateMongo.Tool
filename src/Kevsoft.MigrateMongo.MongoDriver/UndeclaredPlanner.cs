@@ -1,5 +1,4 @@
 using System.Text.RegularExpressions;
-using Kevsoft.MigrateMongo.Engine;
 using Kevsoft.MigrateMongo.Protocol;
 using MongoDB.Bson;
 
@@ -13,17 +12,54 @@ namespace Kevsoft.MigrateMongo.MongoDriver;
 internal static class UndeclaredPlanner
 {
     /// <summary>The <c>listCollections</c> entries that aren't declared, ignored or this tool's own, in name order.</summary>
-    public static List<BsonDocument> Undeclared(IEnumerable<BsonDocument> entries, UndeclaredPolicy policy, string? stateCollection)
+    /// <remarks>
+    /// A namespace that a declared or protected view reads from (directly or transitively, through <c>viewOn</c> or a
+    /// <c>$lookup</c>/<c>$unionWith</c>/<c>$graphLookup</c>/<c>$facet</c> pipeline) is protected too, so pruning never drops a
+    /// dependency a managed view still reads from.
+    /// </remarks>
+    public static List<BsonDocument> Undeclared(IEnumerable<BsonDocument> entries, IReadOnlySet<string> declared, IReadOnlyList<string> ignore, string? stateCollection)
     {
-        var ignore = policy.Ignore.Select(Glob).ToList();
-        return entries
+        var all = entries as IReadOnlyCollection<BsonDocument> ?? entries.ToList();
+        var @protected = Protect(all, declared);
+        var ignored = ignore.Select(Glob).ToList();
+        return all
             .Where(e => e.GetValue("name", "").ToString() is { Length: > 0 } name &&
-                        !policy.Declared.Contains(name) &&
+                        !@protected.Contains(name) &&
                         !name.StartsWith("system.", StringComparison.Ordinal) &&
                         !IsState(name, stateCollection) &&
-                        !ignore.Any(r => r.IsMatch(name)))
+                        !ignored.Any(r => r.IsMatch(name)))
             .OrderBy(e => e["name"].AsString, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// The declared namespaces plus every namespace reachable from them through view dependencies. A view that a protected
+    /// name reads from is protected in turn, so an undeclared view a managed view depends on, and whatever it reads from, are
+    /// all kept.
+    /// </summary>
+    private static HashSet<string> Protect(IReadOnlyCollection<BsonDocument> entries, IReadOnlySet<string> declared)
+    {
+        var views = entries
+            .Where(IsView)
+            .Where(e => e.GetValue("name", "").ToString() is { Length: > 0 })
+            .ToDictionary(e => e["name"].AsString, StringComparer.Ordinal);
+        var @protected = new HashSet<string>(declared, StringComparer.Ordinal);
+        var pending = new Queue<string>(@protected);
+        while (pending.Count > 0)
+        {
+            if (views.TryGetValue(pending.Dequeue(), out var view) && view.GetValue("options", null) is BsonDocument options)
+            {
+                foreach (var dependency in ViewDependencies.ReferencedBy(options))
+                {
+                    if (@protected.Add(dependency))
+                    {
+                        pending.Enqueue(dependency);
+                    }
+                }
+            }
+        }
+
+        return @protected;
     }
 
     /// <summary>

@@ -313,20 +313,26 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
         return Task.FromResult(new CollectionPlan { Changes = [.. Undeclared] });
     }
 
-    public Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken)
+    public async Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, Func<UndeclaredDrop, Task> onDropped, CancellationToken cancellationToken)
     {
         Calls.Add("ApplyUndeclared");
         UndeclaredPolicies.Add(policy);
-        return Task.FromResult(new UndeclaredApplyResult
+        var drops = Undeclared.Where(c => c.Action != IndexActions.Keep).Select(c => new UndeclaredDrop
+        {
+            Name = c.Index,
+            Change = c,
+            Output = new MigrationOutputInfo { Operations = [new OperationRecord { Kind = "runCommand", Collection = c.Index }] },
+        }).ToList();
+        foreach (var drop in drops)
+        {
+            await onDropped(drop);
+        }
+
+        return new UndeclaredApplyResult
         {
             Plan = new CollectionPlan { Changes = [.. Undeclared] },
-            Drops = Undeclared.Where(c => c.Action != IndexActions.Keep).Select(c => new UndeclaredDrop
-            {
-                Name = c.Index,
-                Change = c,
-                Output = new MigrationOutputInfo { Operations = [new OperationRecord { Kind = "runCommand", Collection = c.Index }] },
-            }).ToList(),
-        });
+            Drops = drops,
+        };
     }
 
     private sealed class EmptyServices : IServiceProvider

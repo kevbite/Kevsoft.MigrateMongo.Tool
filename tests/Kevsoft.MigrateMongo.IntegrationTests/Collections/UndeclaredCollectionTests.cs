@@ -123,4 +123,92 @@ public sealed class UndeclaredCollectionTests(IntegrationEnvironment environment
         up.ExitCode.ShouldBe(ExitCodes.Success, up.Message);
         mongo.CollectionNames().ShouldContain("empty_leftover");
     }
+
+    [Fact]
+    public async Task Drop_keeps_an_empty_collection_a_declared_view_reads_from_through_a_lookup()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        var customers = CollectionHarness.Define<BsonDocument>(c => c.Indexes.Add(i => i.Ascending("status")), "customers");
+        var joined = CollectionHarness.DefineView("customer_orders", "customers", v => v.Pipeline(
+            """
+            [{ "$lookup": { "from": "lookup_orders", "localField": "_id", "foreignField": "customerId", "as": "orders" } }]
+            """));
+        await mongo.UpAllAsync([customers, joined]);
+        // An undeclared, empty collection the declared view reads from through $lookup: an empty collection would be dropped,
+        // but a managed view depends on it, so it must be kept.
+        await mongo.Database.CreateCollectionAsync("lookup_orders");
+
+        var plan = await mongo.RunAsync("plan", [customers, joined], Prune("drop"));
+        plan.Collections.ShouldNotBeNull().ShouldNotContain(c => c.Kind == "undeclared");
+
+        var up = await mongo.RunAsync("up", [customers, joined], Prune("drop"));
+
+        up.ExitCode.ShouldBe(ExitCodes.Success, up.Message);
+        mongo.CollectionNames().ShouldContain("lookup_orders");
+    }
+
+    [Fact]
+    public async Task Drop_keeps_an_undeclared_view_and_its_source_that_a_declared_view_depends_on()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        // base_things (undeclared, empty) <- mid_view (undeclared view) <- top_view (declared view).
+        await mongo.Database.CreateCollectionAsync("base_things");
+        await mongo.Database.CreateViewAsync<BsonDocument, BsonDocument>("mid_view", "base_things",
+            PipelineDefinition<BsonDocument, BsonDocument>.Create(BsonDocument.Parse("""{ "$match": { "n": 1 } }""")));
+        var top = CollectionHarness.DefineView("top_view", "mid_view", v => v.Pipeline("""[{ "$limit": 5 }]"""));
+
+        var up = await mongo.UpAllAsync([top], Prune("drop"));
+
+        up.ExitCode.ShouldBe(ExitCodes.Success, up.Message);
+        var names = mongo.CollectionNames();
+        names.ShouldContain("top_view");
+        names.ShouldContain("mid_view");
+        names.ShouldContain("base_things");
+    }
+
+    [Fact]
+    public async Task Drop_cancelled_part_way_through_still_records_the_drops_that_already_happened()
+    {
+        await using var mongo = await SeedAsync(environment);
+        // Two empty, undeclared collections so there are at least two drops; the cancel fires after the first one.
+        await mongo.Database.CreateCollectionAsync("aaa_leftover");
+        await mongo.Database.CreateCollectionAsync("bbb_leftover");
+        await mongo.Collection("full_leftover").DeleteManyAsync(FilterDefinition<BsonDocument>.Empty);
+        using var cancel = new CancellationTokenSource();
+        using var client = mongo.CancellingAfter("drop", cancel);
+
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            mongo.RunAsync("up", [Orders], Prune("drop"), client: client, cancellationToken: cancel.Token));
+
+        // The first drop happened and its history was persisted durably, even though the run was cancelled before finishing.
+        var dropped = mongo.History().Where(h => h["event"] == "dropped").Select(h => h["migrationId"].AsString).ToList();
+        dropped.ShouldContain("aaa_leftover");
+        mongo.CollectionNames().ShouldNotContain("aaa_leftover");
+    }
+
+    [Fact]
+    public async Task Planning_shares_one_listCollections_read_across_all_the_definitions_and_pruning()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        var one = CollectionHarness.Define<BsonDocument>(c => c.Indexes.Add(i => i.Ascending("a")), "one");
+        var two = CollectionHarness.Define<BsonDocument>(c => c.Indexes.Add(i => i.Ascending("a")), "two");
+        var three = CollectionHarness.Define<BsonDocument>(c => c.Indexes.Add(i => i.Ascending("a")), "three");
+
+        var withOne = new Dictionary<string, int>();
+        using (var client = mongo.Counting(withOne))
+        {
+            await mongo.RunAsync("plan", [one], Prune("report"), client: client);
+        }
+
+        var withThree = new Dictionary<string, int>();
+        using (var client = mongo.Counting(withThree))
+        {
+            await mongo.RunAsync("plan", [one, two, three], Prune("report"), client: client);
+        }
+
+        // Planning three definitions reads the namespace listing no more times than planning one does: the pass shares a
+        // single listCollections across every definition and the pruning scan rather than listing once per definition.
+        withThree.GetValueOrDefault("listCollections").ShouldBe(withOne.GetValueOrDefault("listCollections"));
+        withThree.GetValueOrDefault("listCollections").ShouldBeLessThan(3);
+    }
 }

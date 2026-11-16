@@ -803,7 +803,16 @@ public sealed class ActiveCustomers : IViewDefinition<Customer>
 ```
 
 `Pipeline` also takes a `PipelineDefinition`, a JSON array string or a list of `BsonDocument` stages. A view can't
-write, so `$out` and `$merge` make the definition invalid.
+write, so a [`$out`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/out/) or
+[`$merge`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/merge/) stage makes the definition invalid
+(MongoDB [doesn't allow either in a view](https://www.mongodb.com/docs/manual/core/views/)). The check follows only the
+places MongoDB runs a nested pipeline — each facet of a
+[`$facet`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/facet/), and the `pipeline` of a
+[`$lookup`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/lookup/) or
+[`$unionWith`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/unionWith/) (the only stages that nest
+one) — so a `$out` or `$merge` buried in a sub-pipeline is still rejected, while a field or literal that merely happens to
+be named `$out`/`$merge` (for example under [`$literal`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/literal/))
+is data, not a stage, and is left alone.
 
 | On the server | `up` |
 |---|---|
@@ -826,7 +835,9 @@ each other in a cycle are a build error.
 | `drop` | Views are dropped. Collections are dropped only if they're empty; one with documents is kept and reported. The `listCollections` entry and indexes are recorded in history first. |
 
 Names matching `collections.ignore` are left alone, and so are the state collections (`<stateCollection>` and
-`<stateCollection>.*`), `system.*` collections and any collection a declared view reads from. They're shown as
+`<stateCollection>.*`), `system.*` collections and anything a declared or kept view depends on, directly or
+indirectly — a view's source as well as the collections and views reached through `$lookup`, `$graphLookup`,
+`$unionWith` and `$facet` in its pipeline, following the chain through intermediate views. They're shown as
 `(undeclared)` in `plan`, `status` and `up`.
 
 ### When they run

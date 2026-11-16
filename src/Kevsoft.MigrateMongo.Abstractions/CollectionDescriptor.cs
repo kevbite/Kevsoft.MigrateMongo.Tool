@@ -215,7 +215,7 @@ internal static class CollectionRendering
             throw new InvalidOperationException($"The pipeline of view '{builder.Name}' couldn't be rendered: {e.Message}", e);
         }
 
-        if (pipeline.Select(OutputStage).FirstOrDefault(s => s is not null) is { } stage)
+        if (OutputStage(pipeline) is { } stage)
         {
             throw new InvalidOperationException(
                 $"The pipeline of view '{builder.Name}' has a {stage} stage, which MongoDB doesn't allow in a view.");
@@ -234,17 +234,49 @@ internal static class CollectionRendering
         };
     }
 
-    /// <summary>The name of a <c>$out</c> or <c>$merge</c> stage, at the top level or nested (e.g. in <c>$facet</c>), or null.</summary>
-    private static string? OutputStage(BsonDocument stage) =>
-        stage.Select(e => e.Name is "$out" or "$merge" ? e.Name : Nested(e.Value).Select(OutputStage).FirstOrDefault(s => s is not null))
-            .FirstOrDefault(s => s is not null);
+    /// <summary>
+    /// The name of the first <c>$out</c> or <c>$merge</c> stage MongoDB would run in <paramref name="pipeline"/>, or null.
+    /// Only <c>$facet</c>, <c>$lookup</c> and <c>$unionWith</c> nest a pipeline (see <see cref="SubPipelines"/>), so the walk
+    /// follows those positions alone: a field merely named <c>$out</c> or <c>$merge</c> inside expression or literal data
+    /// (e.g. under <c>$literal</c>) is a value, not a stage, and is left alone.
+    /// </summary>
+    private static string? OutputStage(IEnumerable<BsonDocument> pipeline) =>
+        pipeline.Select(WritesIn).FirstOrDefault(name => name is not null);
 
-    private static IEnumerable<BsonDocument> Nested(BsonValue value) => value switch
+    private static string? WritesIn(BsonDocument stage)
     {
-        BsonDocument document => [document],
-        BsonArray array => array.SelectMany(Nested),
+        foreach (var element in stage)
+        {
+            if (element.Name is "$out" or "$merge")
+            {
+                return element.Name;
+            }
+
+            if (SubPipelines(element.Name, element.Value).Select(OutputStage).FirstOrDefault(name => name is not null) is { } nested)
+            {
+                return nested;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The sub-pipelines a stage nests, which MongoDB runs as pipelines in their own right: each facet of a <c>$facet</c>,
+    /// and the <c>pipeline</c> of a <c>$lookup</c> or <c>$unionWith</c>. No other stage nests a pipeline, so nothing else is
+    /// followed. (MongoDB forbids <c>$out</c>/<c>$merge</c> in these sub-pipelines too, so a view declaring one is rejected
+    /// before it reaches the server.)
+    /// </summary>
+    private static IEnumerable<IEnumerable<BsonDocument>> SubPipelines(string stage, BsonValue value) => stage switch
+    {
+        "$facet" when value is BsonDocument facets =>
+            facets.Select(facet => facet.Value).OfType<BsonArray>().Select(Stages),
+        "$lookup" or "$unionWith" when value is BsonDocument spec && spec.GetValue("pipeline", BsonNull.Value) is BsonArray pipeline =>
+            [Stages(pipeline)],
         _ => [],
     };
+
+    private static IEnumerable<BsonDocument> Stages(BsonArray pipeline) => pipeline.OfType<BsonDocument>();
 
     private static BsonDocument CollectionOptions<TDocument>(string name, CollectionOptionsBuilder<TDocument> options, RenderArgs<TDocument> args)
     {

@@ -29,8 +29,33 @@ public sealed class MongoMigrationExecutor(
 
     private int? _maxWireVersion;
 
+    /// <summary>
+    /// The database's <c>listCollections</c> entries, keyed by name, read once and shared across every definition and the
+    /// pruning pass instead of listing namespaces per definition. It's forgotten with <see cref="NamespacesChanged"/> after
+    /// anything that can change the set of namespaces (a migration, applying a collection or view, or dropping an undeclared
+    /// one) so the next read reflects the server as it is then.
+    /// </summary>
+    private Dictionary<string, BsonDocument>? _namespaces;
+
     /// <summary>A collection name that doesn't exist, to explain a view's collation against.</summary>
     private const string CollationProbe = "__migrate_mongo_collation_probe";
+
+    private async Task<Dictionary<string, BsonDocument>> NamespacesAsync(CancellationToken cancellationToken)
+    {
+        if (_namespaces is not null)
+        {
+            return _namespaces;
+        }
+
+        using var cursor = await CollectionsDatabase.ListCollectionsAsync(cancellationToken: cancellationToken);
+        var entries = await cursor.ToListAsync(cancellationToken);
+        return _namespaces = entries
+            .Where(e => e.GetValue("name", BsonNull.Value) is BsonString { Value.Length: > 0 })
+            .ToDictionary(e => e["name"].AsString, StringComparer.Ordinal);
+    }
+
+    /// <summary>Forgets the cached listing so the next read reflects namespaces as they are after a change.</summary>
+    private void NamespacesChanged() => _namespaces = null;
 
     public async Task<CollectionPlan> PlanUndeclaredAsync(UndeclaredPolicy policy, CancellationToken cancellationToken)
     {
@@ -38,7 +63,7 @@ public sealed class MongoMigrationExecutor(
         return new CollectionPlan { Changes = changes };
     }
 
-    public async Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken)
+    public async Task<UndeclaredApplyResult> ApplyUndeclaredAsync(UndeclaredPolicy policy, MigrationRunInfo run, OutputOptions options, Func<UndeclaredDrop, Task> onDropped, CancellationToken cancellationToken)
     {
         var (entries, changes) = await PlanUndeclaredChangesAsync(policy, cancellationToken);
         var result = new UndeclaredApplyResult { Plan = new CollectionPlan { Changes = [] } };
@@ -55,8 +80,11 @@ public sealed class MongoMigrationExecutor(
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var results = new MigrationResults(options.CaptureStatements);
             var context = new MigrationContext(CollectionsDatabase, null, loggerFactory.CreateLogger($"Collection.{name}"), services, run, results);
+            UndeclaredDrop drop;
             try
             {
+                // Capture the namespace's definition (and, for a collection, its indexes) before the drop, so its outcome can
+                // be recorded with what it removed even if everything after it is cancelled.
                 var statement = new BsonDocument { { "command", new BsonDocument("drop", name) }, { "droppedCollection", entry } };
                 if (change.Action == IndexActions.DropCollection)
                 {
@@ -80,26 +108,31 @@ public sealed class MongoMigrationExecutor(
                 }
 
                 await context.Track(context.Database).RunCommandAsync(new BsonDocument("drop", name), recordStatement: statement, cancellationToken: cancellationToken);
+                NamespacesChanged();
                 result.Plan.Changes.Add(change);
-                result.Drops.Add(new UndeclaredDrop
+                drop = new UndeclaredDrop
                 {
                     Name = name,
                     Change = change,
                     DurationMs = stopwatch.ElapsedMilliseconds,
                     Output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out _),
-                });
+                };
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {
-                result.Drops.Add(new UndeclaredDrop
+                drop = new UndeclaredDrop
                 {
                     Name = name,
                     Change = change,
                     DurationMs = stopwatch.ElapsedMilliseconds,
                     Output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out _),
                     Error = e.Message,
-                });
+                };
             }
+
+            result.Drops.Add(drop);
+            // Record this drop durably before the next one runs, so a later cancellation can't lose it.
+            await onDropped(drop);
         }
 
         return result;
@@ -112,8 +145,7 @@ public sealed class MongoMigrationExecutor(
             return ([], []);
         }
 
-        using var cursor = await CollectionsDatabase.ListCollectionsAsync(cancellationToken: cancellationToken);
-        var entries = UndeclaredPlanner.Undeclared(await cursor.ToListAsync(cancellationToken), policy, stateCollection);
+        var entries = UndeclaredPlanner.Undeclared((await NamespacesAsync(cancellationToken)).Values, DeclaredWithDependencies(policy), policy.Ignore, stateCollection);
         var counts = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (var entry in entries.Where(e => !UndeclaredPlanner.IsView(e)))
         {
@@ -122,6 +154,36 @@ public sealed class MongoMigrationExecutor(
         }
 
         return (entries, UndeclaredPlanner.Plan(entries, policy.Prune, counts));
+    }
+
+    /// <summary>
+    /// The declared names plus the namespaces each declared view reads from, so a dependency reached through a declared view's
+    /// pipeline is protected even before that view exists on the server. A view whose definition can't be rendered is skipped;
+    /// the main plan reports it as invalid.
+    /// </summary>
+    private HashSet<string> DeclaredWithDependencies(UndeclaredPolicy policy)
+    {
+        var declared = new HashSet<string>(policy.Declared, StringComparer.Ordinal);
+        foreach (var definition in policy.Declarations.Where(d => d.IsView))
+        {
+            ViewDeclaration? view;
+            try
+            {
+                view = definition.Declare(services, database).View;
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                continue;
+            }
+
+            if (view is not null)
+            {
+                declared.Add(view.ViewOn);
+                declared.UnionWith(ViewDependencies.Referenced(view.Pipeline));
+            }
+        }
+
+        return declared;
     }
 
     // Index changes are planned from the primary's view and written with majority, whatever the connection string says;
@@ -156,6 +218,7 @@ public sealed class MongoMigrationExecutor(
             if (collectionOptions is not null)
             {
                 await CollectionOptionsApplier.ApplyAsync(context, collectionOptions, cancellationToken);
+                NamespacesChanged();
 
                 // Creating the collection sets the default collation its indexes inherit, and convertToCapped keeps only _id_,
                 // so the indexes are planned again against the collection as it is now.
@@ -205,10 +268,12 @@ public sealed class MongoMigrationExecutor(
     {
         var changes = new List<IndexChangeInfo>();
         var problems = new List<string>();
+        var capabilityProblems = new List<string>();
         if (options is not null)
         {
             changes.AddRange(options.Changes.Select(c => c.Info));
             problems.AddRange(options.Problems);
+            capabilityProblems.AddRange(options.CapabilityProblems);
         }
 
         changes.AddRange(index.Changes.Select(c => c.Info));
@@ -238,6 +303,7 @@ public sealed class MongoMigrationExecutor(
             Declaration = declaration,
             Changes = changes,
             Problems = problems,
+            CapabilityProblems = capabilityProblems,
             Invalid = invalid,
             Indexes = indexes,
             Hidden = new Dictionary<string, DateTime>(index.Hidden, StringComparer.Ordinal),
@@ -290,11 +356,8 @@ public sealed class MongoMigrationExecutor(
     }
 
     /// <summary>The collection's <c>listCollections</c> entry, or null when it doesn't exist.</summary>
-    private async Task<BsonDocument?> ListCollectionAsync(string name, CancellationToken cancellationToken)
-    {
-        using var cursor = await CollectionsDatabase.ListCollectionsAsync(new ListCollectionsOptions { Filter = new BsonDocument("name", name) }, cancellationToken);
-        return await cursor.FirstOrDefaultAsync(cancellationToken);
-    }
+    private async Task<BsonDocument?> ListCollectionAsync(string name, CancellationToken cancellationToken) =>
+        (await NamespacesAsync(cancellationToken)).GetValueOrDefault(name);
 
     private async Task<CollectionOptionsPlan> PlanOptionsAsync(
         CollectionDeclaration declaration,
@@ -536,6 +599,11 @@ public sealed class MongoMigrationExecutor(
         catch (Exception e)
         {
             throw new MigrationExecutionException(MigrationOutputMapper.From(results, options.MaxResultsBytes, out _), e);
+        }
+        finally
+        {
+            // A migration can create or drop collections, so any shared listing read before it is no longer trustworthy.
+            NamespacesChanged();
         }
 
         var output = MigrationOutputMapper.From(results, options.MaxResultsBytes, out var tooLarge);

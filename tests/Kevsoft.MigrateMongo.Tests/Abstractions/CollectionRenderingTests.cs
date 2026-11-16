@@ -191,11 +191,26 @@ public sealed class CollectionRenderingTests
     [InlineData("""[{ "$match": {} }, { "$out": "copy" }]""", "$out")]
     [InlineData("""[{ "$merge": { "into": "copy" } }]""", "$merge")]
     [InlineData("""[{ "$facet": { "a": [{ "$match": {} }, { "$out": "copy" }] } }]""", "$out")]
+    [InlineData("""[{ "$lookup": { "from": "c", "pipeline": [{ "$merge": { "into": "copy" } }], "as": "x" } }]""", "$merge")]
+    [InlineData("""[{ "$unionWith": { "coll": "c", "pipeline": [{ "$out": "copy" }] } }]""", "$out")]
+    [InlineData("""[{ "$facet": { "a": [{ "$lookup": { "from": "c", "pipeline": [{ "$out": "copy" }], "as": "x" } }] } }]""", "$out")]
     public void A_view_pipeline_that_writes_output_is_invalid(string pipeline, string stage)
     {
         var error = Should.Throw<InvalidOperationException>(() => DeclareView<BsonDocument>(v => v.Pipeline(pipeline)));
 
         error.Message.ShouldBe($"The pipeline of view 'open_orders' has a {stage} stage, which MongoDB doesn't allow in a view.");
+    }
+
+    [Theory]
+    [InlineData("""[{ "$project": { "payload": { "$literal": { "$out": "copy" } } } }]""", "$project")]
+    [InlineData("""[{ "$addFields": { "label": { "$merge": "$name" } } }]""", "$addFields")]
+    [InlineData("""[{ "$unionWith": "more_orders" }]""", "$unionWith")]
+    [InlineData("""[{ "$lookup": { "from": "customers", "localField": "customer", "foreignField": "_id", "as": "customer" } }]""", "$lookup")]
+    public void A_view_pipeline_with_out_or_merge_only_as_data_or_a_field_name_is_valid(string pipeline, string firstStage)
+    {
+        var view = DeclareView<BsonDocument>(v => v.Pipeline(pipeline)).View.ShouldNotBeNull();
+
+        view.Pipeline.ShouldHaveSingleItem().Names.ShouldHaveSingleItem().ShouldBe(firstStage);
     }
 
     [Fact]

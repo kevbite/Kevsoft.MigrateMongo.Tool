@@ -77,8 +77,11 @@ public sealed partial class MigrationEngine
             issues.AddRange(Warnings(collection, plan));
             foreach (var problem in plan.Problems)
             {
-                var severity = plan.Invalid || !migrationsRunFirst ? "error" : "warning";
-                var message = plan.Invalid || !migrationsRunFirst ? problem : problem + " (The pending migrations may change this.)";
+                // A capability problem (the server is too old for a declared option) can never be fixed by running the
+                // pending migrations, so it stays an error and fails before any migration runs, rather than being softened.
+                var hard = plan.Invalid || !migrationsRunFirst || plan.CapabilityProblems.Contains(problem);
+                var severity = hard ? "error" : "warning";
+                var message = hard ? problem : problem + " (The pending migrations may change this.)";
                 issues.Add(Issue(severity, plan.Invalid ? "invalidCollection" : "collectionBlocked", collection.Name, message));
             }
         }
@@ -116,6 +119,8 @@ public sealed partial class MigrationEngine
         Ignore = _options.CollectionsIgnore,
         // A source a declared view reads from is kept even when nothing declares it.
         Declared = _collections.Select(c => c.Name).Concat(_collections.Select(c => c.ViewOn).OfType<string>()).ToHashSet(StringComparer.Ordinal),
+        // The definitions themselves, so the executor can protect each declared view's full pipeline dependency chain.
+        Declarations = _collections,
     };
 
     private static CollectionInfo UndeclaredInfo(CollectionPlan plan) => new()
@@ -399,11 +404,12 @@ public sealed partial class MigrationEngine
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var applied = await _executor.ApplyUndeclaredAsync(UndeclaredPolicy(), run, outputOptions, cancellationToken);
         var dropped = new List<string>();
         string? error = null;
-        foreach (var drop in applied.Drops)
+        var applied = await _executor.ApplyUndeclaredAsync(UndeclaredPolicy(), run, outputOptions, async drop =>
         {
+            // Record each drop as it happens, so a cancellation part-way through the batch still leaves history for the drops
+            // that already succeeded. CancellationToken.None: the record is written even while the run is being cancelled.
             var record = History(drop.Name, UndeclaredEntryName, drop.Error is null ? HistoryEvents.Dropped : HistoryEvents.Failed, "up", null, null,
                 drop.DurationMs, drop.Error, Committed(drop.Output, true));
             record.Kind = HistoryEvents.CollectionKind;
@@ -416,7 +422,7 @@ public sealed partial class MigrationEngine
             {
                 error ??= $"{drop.Name}: {drop.Error}";
             }
-        }
+        }, cancellationToken);
 
         issues.AddRange(UndeclaredWarnings(applied.Plan));
         var changes = applied.Plan.Changes.Where(c => c.Action != IndexActions.Keep).ToList();

@@ -386,6 +386,20 @@ public sealed class CollectionEngineTests
     }
 
     [Fact]
+    public async Task A_capability_problem_stays_an_error_while_migrations_are_pending()
+    {
+        const string tooOld = "users: a clustered collection needs MongoDB 5.3 or later, and this server is older.";
+        _executor.CollectionPlans = (_, _) => new CollectionPlan { Declaration = "sha256:a", Problems = [tooOld], CapabilityProblems = [tooOld] };
+
+        var result = await Engine([Migrations.Create("20260101000001", "seed")], "users").ExecuteAsync("plan", new CommandArguments(), CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.ValidationFailed);
+        var error = result.Issues!.ShouldHaveSingleItem();
+        error.Severity.ShouldBe("error");
+        error.Message.ShouldBe(tooOld);
+    }
+
+    [Fact]
     public async Task Dry_run_up_previews_collections_without_applying_them()
     {
         _executor.CollectionPlans = (_, _) => Collections.Plan("sha256:a", CreateStatus);

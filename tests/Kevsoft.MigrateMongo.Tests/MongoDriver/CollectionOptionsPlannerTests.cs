@@ -330,6 +330,7 @@ public sealed class CollectionOptionsPlannerTests
         var plan = Plan("{}", Existing("{}"), validator: new ValidatorDeclaration { Level = level, Action = action }, wireVersion: wireVersion);
 
         plan.Problems.ShouldBe([problem]);
+        plan.CapabilityProblems.ShouldBe([problem]);
         plan.Changes.ShouldBeEmpty();
     }
 
@@ -342,6 +343,7 @@ public sealed class CollectionOptionsPlannerTests
         var plan = Plan(options, existing: null, wireVersion: wireVersion);
 
         plan.Problems.ShouldBe([problem]);
+        plan.CapabilityProblems.ShouldBe([problem]);
         plan.Changes.ShouldBeEmpty();
     }
 

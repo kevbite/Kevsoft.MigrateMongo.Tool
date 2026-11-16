@@ -92,6 +92,26 @@ internal sealed class CollectionHarness(IntegrationEnvironment environment) : IA
         return new MongoClient(settings);
     }
 
+    /// <summary>
+    /// A client that counts how many of each command it runs on this database, so a test can assert that a pass shares one
+    /// <c>listCollections</c> read across its definitions and pruning instead of listing namespaces per definition.
+    /// </summary>
+    public MongoClient Counting(IDictionary<string, int> counts)
+    {
+        var settings = MongoClientSettings.FromConnectionString(environment.MongoUrl);
+        settings.ClusterConfigurator = builder => builder.Subscribe<CommandStartedEvent>(e =>
+        {
+            if (e.DatabaseNamespace.DatabaseName == DatabaseName)
+            {
+                lock (counts)
+                {
+                    counts[e.CommandName] = counts.TryGetValue(e.CommandName, out var n) ? n + 1 : 1;
+                }
+            }
+        });
+        return new MongoClient(settings);
+    }
+
     /// <summary>Applies <paramref name="collection"/> and checks that it changed something and that it's in line afterwards.</summary>
     public async Task<CommandResult> ApplyAsync(CollectionDescriptor collection, Action<EngineOptions>? options = null, CommandArguments? arguments = null)
     {
