@@ -213,6 +213,14 @@ public interface IMigrationExecutor
 
     TransactionErrorKind ClassifyTransactionError(Exception exception);
 
+    /// <summary>
+    /// Discards any server state the executor has cached (such as a shared <c>listCollections</c> read), so the next read
+    /// reflects the database as it is now. The engine calls this at the start of each command and again after acquiring the
+    /// apply lock, so a listing cached by an earlier pass can't hide collections or views another client created or dropped in
+    /// the meantime.
+    /// </summary>
+    void RefreshCollectionCache() { }
+
     /// <summary>Works out what bringing a collection in line with its definition would change, without changing anything.</summary>
     Task<CollectionPlan> PlanCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken);
 

@@ -216,6 +216,11 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
 
     public List<FakeScope> Scopes { get; } = [];
 
+    /// <summary>How many times the engine asked for the cached listing to be refreshed (command boundaries and after the lock).</summary>
+    public int RefreshCount { get; private set; }
+
+    public void RefreshCollectionCache() => RefreshCount++;
+
     /// <summary>Called on each commit; return an exception to make that commit fail.</summary>
     public Func<Exception?>? CommitFailure { get; set; }
 

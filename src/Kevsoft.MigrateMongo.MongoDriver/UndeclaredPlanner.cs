@@ -13,37 +13,47 @@ internal static class UndeclaredPlanner
 {
     /// <summary>The <c>listCollections</c> entries that aren't declared, ignored or this tool's own, in name order.</summary>
     /// <remarks>
-    /// A namespace that a declared or protected view reads from (directly or transitively, through <c>viewOn</c> or a
+    /// A namespace that a retained view reads from (directly or transitively, through <c>viewOn</c> or a
     /// <c>$lookup</c>/<c>$unionWith</c>/<c>$graphLookup</c>/<c>$facet</c> pipeline) is protected too, so pruning never drops a
-    /// dependency a managed view still reads from.
+    /// dependency a kept view still reads from. A view is retained not only when it's declared but also when it's ignored or
+    /// one of this tool's own or <c>system.*</c> namespaces, so each of those view's dependency chains is protected as well.
     /// </remarks>
     public static List<BsonDocument> Undeclared(IEnumerable<BsonDocument> entries, IReadOnlySet<string> declared, IReadOnlyList<string> ignore, string? stateCollection)
     {
         var all = entries as IReadOnlyCollection<BsonDocument> ?? entries.ToList();
-        var @protected = Protect(all, declared);
         var ignored = ignore.Select(Glob).ToList();
+
+        // Everything kept for any reason seeds the dependency traversal, so the chain under an ignored, state or system view
+        // is protected too, not just the sources of declared views.
+        var retained = new HashSet<string>(declared, StringComparer.Ordinal);
+        foreach (var entry in all)
+        {
+            if (entry.GetValue("name", "").ToString() is { Length: > 0 } name &&
+                (name.StartsWith("system.", StringComparison.Ordinal) || IsState(name, stateCollection) || ignored.Any(r => r.IsMatch(name))))
+            {
+                retained.Add(name);
+            }
+        }
+
+        var @protected = Protect(all, retained);
         return all
-            .Where(e => e.GetValue("name", "").ToString() is { Length: > 0 } name &&
-                        !@protected.Contains(name) &&
-                        !name.StartsWith("system.", StringComparison.Ordinal) &&
-                        !IsState(name, stateCollection) &&
-                        !ignored.Any(r => r.IsMatch(name)))
+            .Where(e => e.GetValue("name", "").ToString() is { Length: > 0 } name && !@protected.Contains(name))
             .OrderBy(e => e["name"].AsString, StringComparer.Ordinal)
             .ToList();
     }
 
     /// <summary>
-    /// The declared namespaces plus every namespace reachable from them through view dependencies. A view that a protected
-    /// name reads from is protected in turn, so an undeclared view a managed view depends on, and whatever it reads from, are
+    /// The retained namespaces plus every namespace reachable from them through view dependencies. A view that a protected
+    /// name reads from is protected in turn, so an undeclared view a kept view depends on, and whatever it reads from, are
     /// all kept.
     /// </summary>
-    private static HashSet<string> Protect(IReadOnlyCollection<BsonDocument> entries, IReadOnlySet<string> declared)
+    private static HashSet<string> Protect(IReadOnlyCollection<BsonDocument> entries, IReadOnlySet<string> retained)
     {
         var views = entries
             .Where(IsView)
             .Where(e => e.GetValue("name", "").ToString() is { Length: > 0 })
             .ToDictionary(e => e["name"].AsString, StringComparer.Ordinal);
-        var @protected = new HashSet<string>(declared, StringComparer.Ordinal);
+        var @protected = new HashSet<string>(retained, StringComparer.Ordinal);
         var pending = new Queue<string>(@protected);
         while (pending.Count > 0)
         {

@@ -63,28 +63,34 @@ public sealed partial class MigrationEngine
 
     public string RunId { get; } = Guid.NewGuid().ToString("N");
 
-    public Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken) => command switch
+    public Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken)
     {
-        _ when arguments.DryRun && command is not ("up" or "down") =>
-            Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"--dry-run is only supported by 'up' and 'down', not '{command}'." }),
-        _ when arguments.Only is not (null or OnlyScopes.Migrations or OnlyScopes.Collections) =>
-            Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"--only must be '{OnlyScopes.Migrations}' or '{OnlyScopes.Collections}', not '{arguments.Only}'." }),
-        "status" => StatusAsync(arguments.Check, cancellationToken),
-        "plan" => PreviewUpAsync(null, dryRun: false, arguments, cancellationToken),
-        "up" when arguments.DryRun => PreviewUpAsync(arguments.To, dryRun: true, arguments, cancellationToken),
-        "up" => UpAsync(arguments.To, OutputOptionsFor(arguments), arguments, cancellationToken),
-        "down" when arguments.DryRun => DryRunDownAsync(arguments, cancellationToken),
-        "down" => DownAsync(arguments, cancellationToken),
-        "validate" => ValidateAsync(cancellationToken),
-        "baseline" => BaselineAsync(arguments.To ?? "", cancellationToken),
-        "mark" when arguments.Applied is null =>
-            Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = "'mark' needs --applied or --unapplied." }),
-        "mark" => MarkAsync(arguments.Id ?? "", arguments.Applied.Value, cancellationToken),
-        "unlock" => UnlockAsync(arguments.Force, cancellationToken),
-        "history" => HistoryAsync(arguments.Id, arguments.Limit, cancellationToken),
-        "show" => ShowAsync(arguments.Id ?? "", arguments.Limit, arguments.NoStatements, cancellationToken),
-        _ => Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Unknown command '{command}'." }),
-    };
+        // A reused engine may hold a namespace listing cached by an earlier command; drop it so each command reads the
+        // database as it is now, not as it was when a previous command ran.
+        _executor.RefreshCollectionCache();
+        return command switch
+        {
+            _ when arguments.DryRun && command is not ("up" or "down") =>
+                Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"--dry-run is only supported by 'up' and 'down', not '{command}'." }),
+            _ when arguments.Only is not (null or OnlyScopes.Migrations or OnlyScopes.Collections) =>
+                Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"--only must be '{OnlyScopes.Migrations}' or '{OnlyScopes.Collections}', not '{arguments.Only}'." }),
+            "status" => StatusAsync(arguments.Check, cancellationToken),
+            "plan" => PreviewUpAsync(null, dryRun: false, arguments, cancellationToken),
+            "up" when arguments.DryRun => PreviewUpAsync(arguments.To, dryRun: true, arguments, cancellationToken),
+            "up" => UpAsync(arguments.To, OutputOptionsFor(arguments), arguments, cancellationToken),
+            "down" when arguments.DryRun => DryRunDownAsync(arguments, cancellationToken),
+            "down" => DownAsync(arguments, cancellationToken),
+            "validate" => ValidateAsync(cancellationToken),
+            "baseline" => BaselineAsync(arguments.To ?? "", cancellationToken),
+            "mark" when arguments.Applied is null =>
+                Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = "'mark' needs --applied or --unapplied." }),
+            "mark" => MarkAsync(arguments.Id ?? "", arguments.Applied.Value, cancellationToken),
+            "unlock" => UnlockAsync(arguments.Force, cancellationToken),
+            "history" => HistoryAsync(arguments.Id, arguments.Limit, cancellationToken),
+            "show" => ShowAsync(arguments.Id ?? "", arguments.Limit, arguments.NoStatements, cancellationToken),
+            _ => Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = $"Unknown command '{command}'." }),
+        };
+    }
 
     // status, validate, history, show and unlock only read (or just delete the lock), so they don't create the
     // collections' indexes: they work with a read-only database user and leave a database pointed at by mistake untouched.
@@ -1111,6 +1117,10 @@ public sealed partial class MigrationEngine
                           (holder is null ? "." : $" held by run {holder.RunId} ({holder.Host}), which expires at {holder.ExpiresAt:u}."),
             };
         }
+
+        // The database may have changed while we waited for the lock, so re-read any cached namespace listing before the
+        // action previews or applies anything under it.
+        _executor.RefreshCollectionCache();
 
         // The heartbeat runs until the action returns, not until cancellation is requested: migration code that doesn't
         // stop straight away is still changing the database, and the lock must not expire under it.

@@ -57,6 +57,9 @@ public sealed class MongoMigrationExecutor(
     /// <summary>Forgets the cached listing so the next read reflects namespaces as they are after a change.</summary>
     private void NamespacesChanged() => _namespaces = null;
 
+    /// <inheritdoc />
+    public void RefreshCollectionCache() => NamespacesChanged();
+
     public async Task<CollectionPlan> PlanUndeclaredAsync(UndeclaredPolicy policy, CancellationToken cancellationToken)
     {
         var (_, changes) = await PlanUndeclaredChangesAsync(policy, cancellationToken);
@@ -78,7 +81,10 @@ public sealed class MongoMigrationExecutor(
             var name = change.Index;
             var entry = entries.Single(e => e["name"].AsString == name);
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var results = new MigrationResults(options.CaptureStatements);
+            // The dropped namespace's definition (and a collection's indexes) are the only record of what the drop removed, so
+            // capture them even when statement capture is otherwise off: without them a pruned view or collection can't be
+            // recreated from its history.
+            var results = new MigrationResults(captureStatements: true);
             var context = new MigrationContext(CollectionsDatabase, null, loggerFactory.CreateLogger($"Collection.{name}"), services, run, results);
             UndeclaredDrop drop;
             try

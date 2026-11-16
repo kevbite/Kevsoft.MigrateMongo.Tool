@@ -99,6 +99,24 @@ public sealed class UndeclaredCollectionTests(IntegrationEnvironment environment
     }
 
     [Fact]
+    public async Task Drop_records_what_it_removed_in_history_even_when_statement_capture_is_off()
+    {
+        await using var mongo = await SeedAsync(environment);
+
+        // --no-capture-statements turns off the audit trail of ordinary statements, but a drop's record of the definition and
+        // indexes it removed is the only way to recreate a pruned view or collection, so it must still be kept.
+        var up = await mongo.RunAsync("up", [Orders], Prune("drop"), new CommandArguments { NoCaptureStatements = true });
+
+        up.ExitCode.ShouldBe(ExitCodes.Success, up.Message);
+
+        var dropped = mongo.History().Where(h => h["event"] == "dropped").ToDictionary(h => h["migrationId"].AsString);
+        var view = dropped["old_view"]["operations"][0].AsBsonDocument;
+        view["command"].ShouldBe(new BsonDocument("drop", "old_view"));
+        view["droppedCollection"]["options"]["viewOn"].AsString.ShouldBe("orders");
+        dropped["empty_leftover"]["operations"][0]["indexes"].AsBsonArray.Select(i => i["name"].AsString).ShouldBe(["_id_"]);
+    }
+
+    [Fact]
     public async Task Ignored_patterns_are_left_alone()
     {
         await using var mongo = await SeedAsync(environment);
@@ -184,6 +202,24 @@ public sealed class UndeclaredCollectionTests(IntegrationEnvironment environment
         var dropped = mongo.History().Where(h => h["event"] == "dropped").Select(h => h["migrationId"].AsString).ToList();
         dropped.ShouldContain("aaa_leftover");
         mongo.CollectionNames().ShouldNotContain("aaa_leftover");
+    }
+
+    [Fact]
+    public async Task Drop_keeps_the_source_an_ignored_view_reads_from()
+    {
+        await using var mongo = await SeedAsync(environment);
+        // audit_view is ignored (so kept); audit_source is undeclared and empty, so without dependency protection for ignored
+        // views it would be dropped out from under it.
+        await mongo.Database.CreateCollectionAsync("audit_source");
+        await mongo.Database.CreateViewAsync<BsonDocument, BsonDocument>("audit_view", "audit_source",
+            PipelineDefinition<BsonDocument, BsonDocument>.Create(BsonDocument.Parse("""{ "$match": { "n": 1 } }""")));
+
+        var up = await mongo.RunAsync("up", [Orders], Prune("drop", "audit_view"));
+
+        up.ExitCode.ShouldBe(ExitCodes.Success, up.Message);
+        var names = mongo.CollectionNames();
+        names.ShouldContain("audit_view");
+        names.ShouldContain("audit_source");
     }
 
     [Fact]

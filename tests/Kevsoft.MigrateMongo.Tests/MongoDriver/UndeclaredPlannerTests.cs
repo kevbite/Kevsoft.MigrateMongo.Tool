@@ -81,6 +81,38 @@ public sealed class UndeclaredPlannerTests
     }
 
     [Fact]
+    public void A_source_an_ignored_view_reads_from_is_protected()
+    {
+        BsonDocument[] entries =
+        [
+            Collection("audit_source"),
+            View("audit_view", "audit_source", [new BsonDocument("$lookup", new BsonDocument { { "from", "audit_extra" }, { "as", "x" } })]),
+            Collection("audit_extra"),
+        ];
+
+        // audit_view is kept because it's ignored; its source and lookup target must be kept too, not dropped under it.
+        var undeclared = UndeclaredPlanner.Undeclared(entries, new HashSet<string>(), ["audit_view"], "_migrations");
+
+        undeclared.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_source_a_system_or_state_view_reads_from_is_protected()
+    {
+        BsonDocument[] entries =
+        [
+            Collection("backing"),
+            View("system.buckets.view", "backing"),
+            Collection("state_backing"),
+            View("_migrations.view", "state_backing"),
+        ];
+
+        var undeclared = UndeclaredPlanner.Undeclared(entries, new HashSet<string>(), [], "_migrations");
+
+        undeclared.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Report_keeps_everything()
     {
         var changes = UndeclaredPlanner.Plan([Collection("empty"), Collection("one"), Entries[^1]], "report", new Dictionary<string, long> { ["empty"] = 0, ["one"] = 1 });

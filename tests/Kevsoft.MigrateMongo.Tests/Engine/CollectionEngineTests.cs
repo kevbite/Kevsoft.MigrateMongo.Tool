@@ -54,6 +54,24 @@ public sealed class CollectionEngineTests
     }
 
     [Fact]
+    public async Task Each_command_refreshes_the_cache_and_locking_commands_refresh_again_under_the_lock()
+    {
+        var engine = Engine([], "orders");
+
+        await engine.ExecuteAsync("status", new CommandArguments(), CancellationToken.None);
+        // A read-only command refreshes once, at the command boundary, so a reused engine never serves a namespace listing
+        // another client changed since an earlier command cached it.
+        _executor.RefreshCount.ShouldBe(1);
+
+        var up = await engine.ExecuteAsync("up", new CommandArguments(), CancellationToken.None);
+
+        up.ExitCode.ShouldBe(0, up.Message);
+        // 'up' refreshes at the command boundary and again after acquiring the apply lock, so it previews and applies against
+        // the database as it is under the lock, not as the earlier 'status' left it cached on this reused engine.
+        _executor.RefreshCount.ShouldBe(3);
+    }
+
+    [Fact]
     public async Task Cancelling_once_the_index_changes_are_made_still_records_them()
     {
         using var cancel = new CancellationTokenSource();
