@@ -686,6 +686,9 @@ internal static class IndexPlanner
         BsonDocument document => new BsonDocument(document.Select(e => new BsonElement(e.Name, Normalise(e.Value, booleansAsNumbers)))),
         BsonArray array => new BsonArray(array.Select(v => Normalise(v, booleansAsNumbers))),
         BsonBoolean boolean when booleansAsNumbers => new BsonInt64(boolean.Value ? 1 : 0),
+        // Integers keep their exact value: routing them through a double would collapse distinct values beyond 2^53 (e.g. two
+        // large ids a $match compares) to the same number, hiding a real change.
+        BsonInt32 or BsonInt64 => new BsonInt64(value.ToInt64()),
         { IsNumeric: true } when value.ToDouble() is var d && Math.Floor(d) == d && Math.Abs(d) < 9e15 => new BsonInt64((long)d),
         { IsNumeric: true } => new BsonDouble(value.ToDouble()),
         _ => value,

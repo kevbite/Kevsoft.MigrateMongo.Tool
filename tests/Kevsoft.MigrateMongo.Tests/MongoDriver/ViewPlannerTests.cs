@@ -89,6 +89,33 @@ public sealed class ViewPlannerTests
     }
 
     [Fact]
+    public void A_changed_large_integer_in_the_pipeline_is_not_hidden_by_numeric_normalisation()
+    {
+        // 9007199254740992 and 9007199254740993 are distinct Int64s that collapse to the same double, so a comparison that
+        // routed them through a double would miss the change and leave the view filtering on the old id while reporting in sync.
+        var plan = ViewPlanner.Plan("active", new ViewDeclaration
+        {
+            ViewOn = "customers",
+            Pipeline = [BsonDocument.Parse("""{ "$match": { "id": { "$numberLong": "9007199254740993" } } }""")],
+        }, ViewEntry("""{ "viewOn": "customers", "pipeline": [{ "$match": { "id": { "$numberLong": "9007199254740992" } } }] }"""));
+
+        plan.Changes.ShouldHaveSingleItem().Info.Action.ShouldBe("modify-view");
+    }
+
+    [Fact]
+    public void A_view_with_an_unchanged_large_integer_in_the_pipeline_is_in_sync()
+    {
+        var plan = ViewPlanner.Plan("active", new ViewDeclaration
+        {
+            ViewOn = "customers",
+            Pipeline = [BsonDocument.Parse("""{ "$match": { "id": { "$numberLong": "9007199254740993" } } }""")],
+        }, ViewEntry("""{ "viewOn": "customers", "pipeline": [{ "$match": { "id": { "$numberLong": "9007199254740993" } } }] }"""));
+
+        plan.Changes.ShouldBeEmpty();
+        plan.Problems.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void A_collection_with_the_view_name_is_a_problem()
     {
         var plan = ViewPlanner.Plan("active", Active, new BsonDocument { { "name", "active" }, { "type", "collection" }, { "options", new BsonDocument() } });

@@ -74,6 +74,30 @@ public sealed class ViewTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task A_recreate_cancelled_after_the_drop_restores_the_previous_view()
+    {
+        await using var mongo = new CollectionHarness(environment);
+        await mongo.UpAllAsync([Customers, Active()]);
+
+        var french = CollectionHarness.DefineView("active_customers", "customers", v => v
+            .Pipeline("""[{ "$match": { "status": "active" } }]""")
+            .Collation(new Collation("fr")));
+        using var cancel = new CancellationTokenSource();
+        using var client = mongo.CancellingAfter("drop", cancel);
+
+        var up = await mongo.RunAsync("up", [Customers, french], client: client, cancellationToken: cancel.Token);
+
+        up.ExitCode.ShouldBe(ExitCodes.Failure);
+        up.Message!.ShouldContain("the previous view was restored");
+        // The drop went through and the create was cancelled, so the view is created again as it was rather than left missing.
+        var entry = mongo.ListCollection("active_customers").ShouldNotBeNull();
+        entry["type"].AsString.ShouldBe("view");
+        entry["options"].AsBsonDocument.Contains("collation").ShouldBeFalse();
+        entry["options"]["pipeline"].AsBsonArray.ShouldHaveSingleItem().AsBsonDocument
+            .ShouldBe(BsonDocument.Parse("""{ "$match": { "status": "active" } }"""));
+    }
+
+    [Fact]
     public async Task A_view_on_a_view_is_created_after_the_view_it_reads_from()
     {
         await using var mongo = new CollectionHarness(environment);
