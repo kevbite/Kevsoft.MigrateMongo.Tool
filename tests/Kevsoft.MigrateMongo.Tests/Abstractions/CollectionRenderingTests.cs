@@ -227,7 +227,7 @@ public sealed class CollectionRenderingTests
         public void Define(ViewBuilder<T> view) => define(view);
     }
 
-    private static CollectionDeclaration Declare<T>(Action<CollectionBuilder<T>> define) =>        CollectionDescriptor.Create<Definition<T>, T>("orders", "Test.Orders", _ => new Definition<T>(define)).Declare(new EmptyServices(), Database);
+    private static CollectionDeclaration Declare<T>(Action<CollectionBuilder<T>> define) => CollectionDescriptor.Create<Definition<T>, T>("orders", "Test.Orders", _ => new Definition<T>(define)).Declare(new EmptyServices(), Database);
 
     private sealed class Definition<T>(Action<CollectionBuilder<T>> define) : ICollectionDefinition<T>
     {
