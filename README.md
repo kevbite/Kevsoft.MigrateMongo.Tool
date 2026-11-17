@@ -4,6 +4,9 @@ Database migrations for [MongoDB](https://www.mongodb.com/) in .NET. Write migra
 [MongoDB C# driver](https://github.com/mongodb/mongo-csharp-driver), then apply and roll them back from the command
 line, your build server or your application.
 
+**📖 [Read the documentation](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki)** for guides to every
+scenario and a full reference.
+
 - **Your SDK, your runtime, your driver.** Migrations live in a small console project you own. The `migrate-mongo`
   tool builds and runs it with whatever .NET (10 or later) and `MongoDB.Driver` (3.9 or later) you use, so upgrading
   either side doesn't break the other.
@@ -11,7 +14,7 @@ line, your build server or your application.
   and checksums catch migrations edited after they were applied.
 - **An audit trail of what changed.** Migrations can record results and notes, and `context.Track(...)` records each
   operation's filter, update and counts. `migrate-mongo show <id>` lists it all, alongside who ran it and when.
-  Statements are stored as sent, so [leave them out](USAGE.md#recording-results) for commands or filters that hold
+  Statements are stored as sent, so [leave them out](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Recording-Results#keeping-secrets-and-personal-data-out) for commands or filters that hold
   passwords or personal data.
 - **Collections kept in line with the code.** A `[ManagedCollection]` class declares a collection's options (capped,
   time series, clustered, collation), `$jsonSchema` validator, indexes and search indexes, and `[ManagedView]` declares
@@ -121,8 +124,8 @@ reported, or hidden or dropped if you set `indexes.prune`, and `Ignore` leaves t
 indexes are matched by their keys, collation and partial filter whatever they're called, so a database that already has
 them is adopted as it is. Options are the driver's own `CreateIndexOptions<TDocument>`, and a typed definition
 (`ICollectionDefinition<Order>`) renders its keys through your class maps. See
-[Managing collections](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#managing-collections)
-for rebuilds, pruning and rolling deploys.
+[Managing Collections](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Managing-Collections) and
+[Indexes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Indexes) for rebuilds, pruning and rolling deploys.
 
 ### 5. Run it
 
@@ -152,28 +155,48 @@ builder.Services
 ```
 
 Index builds and blocked index changes delay or stop startup; see
-[Running from your application](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#running-from-your-application).
+[Running from Your Application](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Running-from-Your-Application).
 
 ## Documentation
 
-[USAGE.md](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md) covers everything in detail:
+The [wiki](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki) covers everything in detail:
 
-- [Installing](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#installing) and
-  [setting up a project](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#setting-up-a-project)
-- [Configuration](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#configuration)
-- [Writing migrations](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#writing-migrations):
-  transactions, recording results, dependency injection and custom templates
-- [Managing collections](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#managing-collections):
-  declaring options, validators, indexes and views, rebuilds, pruning and rolling deploys
-- [Commands](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#commands) and
-  [exit codes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#exit-codes)
-- [When something goes wrong](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#when-something-goes-wrong)
-- [Running in CI](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#running-in-ci),
-  [bundles](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#bundles) and
-  [Docker](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#docker)
-- [Tunnelling through a bastion](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#tunnelling-through-a-bastion)
-- [AWS IAM authentication (Atlas)](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#aws-iam-authentication-atlas)
-- [Running from your application](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/blob/main/USAGE.md#running-from-your-application)
+- **Get started:** [Installation](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Installation),
+  [Getting Started](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Getting-Started) (a tutorial) and
+  [Project Setup](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Project-Setup)
+- **Migrations:** [Writing Migrations](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Writing-Migrations),
+  [Transactions](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Transactions),
+  [Recording Results](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Recording-Results),
+  [Dependency Injection](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Dependency-Injection),
+  [Custom Templates](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Custom-Templates) and
+  [Adopting an Existing Database](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Adopting-an-Existing-Database)
+- **Collections:** [Managing Collections](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Managing-Collections),
+  [Indexes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Indexes),
+  [Search Indexes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Search-Indexes),
+  [Collection Options](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Collection-Options),
+  [Validators](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Validators),
+  [Views](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Views) and
+  [Undeclared Collections](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Undeclared-Collections)
+- **Deploying:** [Environments and Secrets](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Environments-and-Secrets),
+  [Running in CI](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Running-in-CI),
+  [Bundles](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Bundles),
+  [Docker](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Docker),
+  [Running from Your Application](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Running-from-Your-Application) and
+  [Troubleshooting](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Troubleshooting)
+- **Connecting:** [SSH Tunnels](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/SSH-Tunnels) and
+  [AWS IAM Authentication](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/AWS-IAM-Authentication)
+- **Reference:** [Commands](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Commands),
+  [Configuration](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Configuration),
+  [Exit Codes](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Exit-Codes),
+  [Build Errors](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Build-Errors),
+  [What Gets Stored](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/What-Gets-Stored) and
+  [Packages](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Packages)
+- **Concepts:** [How It Works](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/How-It-Works),
+  [Migrations vs Collection Definitions](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Migrations-vs-Collection-Definitions) and
+  [Safety](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/Safety)
+
+The docs live in the [`wiki/`](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/tree/main/wiki) folder and are
+published to the wiki on every push to `main`, so change them there with a pull request.
 
 The [tests/fixtures](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/tree/main/tests/fixtures) folder has small
 working migrations projects, including one that runs migrations from an app with Hosting.

@@ -814,7 +814,7 @@ tracked-output path.
   independent, not shared with production rendering code.
 * **Integration** (`IntegrationTests`, Atlas Local via Testcontainers, which already supports search indexes):
   `up` creates and lists; changed definition updates online; prune; `--wait` to READY; non-Atlas target blocks clearly.
-* **Docs**: a "Search indexes" subsection under "Managing collections" in `USAGE.md`, a README bullet, and this section.
+* **Docs**: a [Search Indexes](wiki/guides/Search-Indexes.md) page in the wiki, a README bullet, and this section.
 
 ### 12.9 Phasing and open questions
 

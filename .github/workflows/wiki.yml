@@ -1,0 +1,61 @@
+name: Wiki
+
+# The docs live in wiki/ on main and are mirrored to the GitHub wiki. Edit them here, not in the wiki UI:
+# the next publish overwrites any change made there.
+on:
+  push:
+    branches: [main]
+    paths: ['wiki/**', '.github/workflows/wiki.yml', '.github/scripts/flatten-wiki.py']
+  pull_request:
+    paths: ['wiki/**', 'README.md', '.github/workflows/wiki.yml', '.github/scripts/flatten-wiki.py']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check links
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Offline: relative links between pages and their #anchors. External URLs aren't checked, so a flaky site
+      # can't fail a build.
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --offline --include-fragments --no-progress 'wiki/**/*.md' README.md
+          fail: true
+
+      # Fails on duplicate page names, which the flat wiki can't hold.
+      - run: python3 .github/scripts/flatten-wiki.py wiki "$RUNNER_TEMP/wiki"
+
+  publish:
+    name: Publish to the wiki
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # pushes to the <repo>.wiki.git repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The wiki is flat, but the action only rewrites links in top-level files, so flatten the folders first:
+      # README.md becomes Home and ../guides/Page.md#anchor links become Page#anchor.
+      - run: python3 .github/scripts/flatten-wiki.py wiki "$RUNNER_TEMP/wiki"
+
+      - uses: Andrew-Chen-Wang/github-wiki-action@1bbb4280446f9630e8e21a18012cbacf3b0f992e # v5.0.6
+        with:
+          path: ${{ runner.temp }}/wiki
+          preprocess: false
+          disable-empty-commits: true
