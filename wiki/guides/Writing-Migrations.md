@@ -82,10 +82,11 @@ Migrations can also be records, and can take constructor dependencies; see
 migrate-mongo status   # see what's pending
 migrate-mongo plan     # see what up would do, without changing anything
 migrate-mongo up       # apply it
-migrate-mongo down     # roll back the last batch
+migrate-mongo down     # roll back the newest migration
 ```
 
-Each `up` applies every pending migration as one **batch**, and `down` rolls back the most recent batch by default.
+Each `up` applies every pending migration as one **batch**. `down` rolls back only the newest applied migration by
+default; use `down --batch` to roll back the whole of the last batch.
 See [`up`](../reference/commands/Command-up.md) and [`down`](../reference/commands/Command-down.md).
 
 ## Don't edit applied migrations

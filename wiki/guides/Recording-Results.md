@@ -16,8 +16,9 @@ public sealed class TierCustomers : IMigration
             Builders<BsonDocument>.Update.Set("tier", "gold"),
             cancellationToken: cancellationToken);
 
-        var untiered = await context.Database.GetCollection<BsonDocument>("customers")
-            .Find(context.Session, Builders<BsonDocument>.Filter.Exists("spend", false))
+        var all = context.Database.GetCollection<BsonDocument>("customers");
+        var noSpend = Builders<BsonDocument>.Filter.Exists("spend", false);
+        var untiered = await (context.Session is { } session ? all.Find(session, noSpend) : all.Find(noSpend))
             .Project(c => c["_id"]).ToListAsync(cancellationToken);
         context.Results.Set("untiered", untiered);
         context.Results.Set("cutoff", DateTime.UtcNow);

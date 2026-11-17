@@ -22,8 +22,7 @@ return await MigrateMongoRunner.RunAsync(args, services =>
 public sealed class StampCreatedAt(IClock clock) : IMigration
 {
     public Task UpAsync(MigrationContext context, CancellationToken cancellationToken) =>
-        context.Database.GetCollection<BsonDocument>("orders").UpdateManyAsync(
-            context.Session,
+        context.Track(context.Database.GetCollection<BsonDocument>("orders")).UpdateManyAsync(
             Builders<BsonDocument>.Filter.Exists("createdAt", false),
             Builders<BsonDocument>.Update.Set("createdAt", clock.UtcNow),
             cancellationToken: cancellationToken);

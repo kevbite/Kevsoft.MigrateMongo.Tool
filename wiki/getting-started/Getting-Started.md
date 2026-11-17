@@ -151,6 +151,7 @@ only the changes needed to get there. Add this class anywhere in the migrations 
 ```csharp
 using Kevsoft.MigrateMongo;
 using MongoDB.Bson;
+using MongoDB.Driver;
 
 namespace MyApp.Migrations.Collections;
 

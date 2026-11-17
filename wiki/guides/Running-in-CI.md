@@ -43,13 +43,17 @@ migration, removed one, or added one older than the newest applied one. A read-o
 whether a deployment step (or an approval) is needed:
 
 ```bash
-migrate-mongo plan --env prod
-case $? in
+status=0
+migrate-mongo plan --env prod || status=$?
+case $status in
   0) echo "Nothing to deploy" ;;
   2) migrate-mongo up --env prod ;;
   *) exit 1 ;;
 esac
 ```
+
+Capture the exit code with `||`: CI shells usually run with `set -e`, which would stop the script as soon as `plan`
+exits with `2`.
 
 `status --check` exits with `2` in the same cases, and suits a scheduled check for indexes changed by hand. Add
 [`up --dry-run`](../reference/commands/Command-up.md#dry-runs) to see exactly what would run.

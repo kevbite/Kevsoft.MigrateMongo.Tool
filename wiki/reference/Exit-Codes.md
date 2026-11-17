@@ -14,13 +14,16 @@ act on them. With `--json`, the last line's `result` carries the same code.
 ## In scripts
 
 ```bash
-migrate-mongo plan --env prod
-case $? in
+status=0
+migrate-mongo plan --env prod || status=$?
+case $status in
   0) echo "Nothing to deploy" ;;
   2) migrate-mongo up --env prod ;;
   *) exit 1 ;;
 esac
 ```
+
+The `||` keeps `set -e` (the default in GitHub Actions) from stopping the script when `plan` exits with `2`.
 
 When you [run from your application](../guides/Running-from-Your-Application.md), `IMongoMigrationRunner` results have
 the same `ExitCode`.

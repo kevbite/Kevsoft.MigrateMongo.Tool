@@ -26,7 +26,7 @@ The output shows which was used: `✔ 20261014164029 split-full-name (0.42s, tra
 Pass `context.Session` to every operation, so it's part of the transaction:
 
 ```csharp
-[Migration("20261014164029", "split-full-name")]
+[Migration("20261014164029", "split-full-name", Transaction = TransactionMode.Always)]
 public sealed class SplitFullName : IMigration
 {
     public Task UpAsync(MigrationContext context, CancellationToken cancellationToken) =>
@@ -50,8 +50,20 @@ public sealed class SplitFullName : IMigration
 }
 ```
 
-`context.Session` is `null` when there's no transaction, and the driver accepts that, so the same code works either
-way. A [tracked collection](./Recording-Results.md) passes the session for you.
+`context.Session` is `null` when the migration runs without a transaction (with `never`, or with `auto` on a standalone
+server), and the driver's session overloads throw `ArgumentNullException` when given `null`. This example sets
+`TransactionMode.Always` so there's always a session. For a migration that may run either way:
+
+- use a [tracked collection](./Recording-Results.md), which picks the right overload for you; or
+- pick the overload yourself:
+
+```csharp
+var users = context.Database.GetCollection<BsonDocument>("users");
+var filter = Builders<BsonDocument>.Filter.Exists("firstName", false);
+var unsplit = context.Session is { } session
+    ? users.Find(session, filter)
+    : users.Find(filter);
+```
 
 The transaction reads from the primary and commits with majority write concern.
 

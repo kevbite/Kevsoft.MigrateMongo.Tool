@@ -5,9 +5,9 @@ name: Wiki
 on:
   push:
     branches: [main]
-    paths: ['wiki/**', '.github/workflows/wiki.yml']
+    paths: ['wiki/**', '.github/workflows/wiki.yml', '.github/scripts/flatten-wiki.py']
   pull_request:
-    paths: ['wiki/**', 'README.md', '.github/workflows/wiki.yml']
+    paths: ['wiki/**', 'README.md', '.github/workflows/wiki.yml', '.github/scripts/flatten-wiki.py']
   workflow_dispatch:
 
 permissions:
@@ -34,6 +34,9 @@ jobs:
           args: --offline --include-fragments --no-progress 'wiki/**/*.md' README.md
           fail: true
 
+      # Fails on duplicate page names, which the flat wiki can't hold.
+      - run: python3 .github/scripts/flatten-wiki.py wiki "$RUNNER_TEMP/wiki"
+
   publish:
     name: Publish to the wiki
     needs: check
@@ -47,8 +50,12 @@ jobs:
         with:
           persist-credentials: false
 
-      # Turns wiki/README.md into Home, ./Page.md links into wiki links and links to repo files into blob URLs.
+      # The wiki is flat, but the action only rewrites links in top-level files, so flatten the folders first:
+      # README.md becomes Home and ../guides/Page.md#anchor links become Page#anchor.
+      - run: python3 .github/scripts/flatten-wiki.py wiki "$RUNNER_TEMP/wiki"
+
       - uses: Andrew-Chen-Wang/github-wiki-action@1bbb4280446f9630e8e21a18012cbacf3b0f992e # v5.0.6
         with:
-          path: wiki/
+          path: ${{ runner.temp }}/wiki
+          preprocess: false
           disable-empty-commits: true

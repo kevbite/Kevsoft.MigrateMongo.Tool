@@ -36,7 +36,10 @@ These are shown as `(undeclared)` in `plan`, `status` and `up`.
 2. Declare the collections you need, and add the rest to `ignore` or delete them.
 3. Switch to `prune: drop` once the report is clean, if you want empty leftovers removed automatically.
 
-Collections with documents are never dropped, so data is never lost this way.
+`up` counts a collection's documents again just before dropping it and keeps it if it isn't empty. The count and the
+drop are separate commands, though, and the migration lock doesn't stop your application writing, so a document
+inserted between them is dropped with the collection. Before using `prune: drop`, stop anything writing to the
+collections it would drop, or add collections that are in use to `ignore`.
 
 ## See also
 
