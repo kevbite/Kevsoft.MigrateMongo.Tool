@@ -2,8 +2,10 @@
 
 GitHub wikis are flat and link pages by name, so this copies every page to the
 output folder by file name (README.md becomes Home.md) and rewrites relative
-Markdown links such as ../guides/Indexes.md#rebuilds to Indexes#rebuilds.
-It fails if two pages share a name or a link points at a page that doesn't exist.
+Markdown links such as ../guides/Indexes.md#rebuilds to Indexes#rebuilds, in
+inline links (with or without a title) and reference definitions.
+It fails if two pages share a name, a link points at a page that doesn't exist,
+or a relative .md link is in a form it can't rewrite (such as HTML).
 
 Usage: python flatten-wiki.py <source-dir> <output-dir>
 """
@@ -12,8 +14,14 @@ import re
 import sys
 from pathlib import Path
 
-LINK = re.compile(r"\]\(([^()\s]+)\)")
+# Inline links, with an optional <destination> and "title": [text](dest "title")
+LINK = re.compile(r"""\]\(\s*(<[^<>\n]*>|[^()\s<>]+)((?:\s+(?:"[^"]*"|'[^']*'|\([^()]*\)))?\s*)\)""")
+# Reference definitions: [label]: dest "title"
+REF_DEF = re.compile(r"""^(\s{0,3}\[[^\]]+\]:[ \t]*)(<[^<>\n]*>|\S+)(.*)$""", re.S)
+# Anything still pointing at a relative .md page after rewriting, e.g. HTML or link forms not handled above.
+LEFTOVER = re.compile(r"""(?:\]\(\s*<?|\]:\s*<?|(?:href|src)\s*=\s*["']?)(?![a-z][a-z0-9+.-]*:|#)[^)\s"'>]*\.md\b""", re.I)
 FENCE = re.compile(r"^\s*(```|~~~)")
+
 
 
 def page_name(path: Path) -> str:
@@ -21,8 +29,11 @@ def page_name(path: Path) -> str:
 
 
 def rewrite(target: str, source: Path, pages: dict[str, Path], errors: list[str]) -> str:
+    bracketed = target.startswith("<") and target.endswith(">")
+    if bracketed:
+        target = target[1:-1]
     if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I) or target.startswith("#"):
-        return target
+        return f"<{target}>" if bracketed else target
     path, _, fragment = target.partition("#")
     if not path.endswith(".md"):
         errors.append(f"{source}: relative link to a non-page {target}")
@@ -55,7 +66,17 @@ def main(source_dir: str, output_dir: str) -> int:
             if FENCE.match(line):
                 in_fence = not in_fence
             elif not in_fence:
-                lines[i] = LINK.sub(lambda m: f"]({rewrite(m.group(1), path, pages, errors)})", line)
+                fix = lambda target: rewrite(target, path, pages, errors)
+                before = len(errors)
+                # Rewrite only outside `code spans`, which show link syntax literally.
+                parts = re.split(r"(`[^`\n]*`)", line)
+                for j in range(0, len(parts), 2):
+                    part = LINK.sub(lambda m: f"]({fix(m.group(1))}{m.group(2)})", parts[j])
+                    part = REF_DEF.sub(lambda m: f"{m.group(1)}{fix(m.group(2))}{m.group(3)}", part) if j == 0 else part
+                    if len(errors) == before and LEFTOVER.search(part):
+                        errors.append(f"{path}:{i + 1}: link to a .md page that can't be rewritten: {line.strip()}")
+                    parts[j] = part
+                lines[i] = "".join(parts)
         (output_root / f"{name}.md").write_text("".join(lines), encoding="utf-8")
 
     for error in errors:
