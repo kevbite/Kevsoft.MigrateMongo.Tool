@@ -80,6 +80,34 @@ public sealed class DockerImageTests(IntegrationEnvironment environment)
     }
 
     [Fact]
+    public async Task Bundle_image_runs_javascript_migrations_without_dotnet()
+    {
+        var image = ImageOrSkip("MIGRATE_MONGO_TEST_BUNDLE_IMAGE");
+        await using var workspace = Workspace.Empty(environment);
+        workspace.AddFixture("ScriptMigrations");
+        workspace.WriteConfigFile($$"""
+            scripts: ScriptMigrations
+            mongodb:
+              url: ${{{UrlVariable}}}
+              databaseName: {{workspace.DatabaseName}}
+            lockWaitTimeout: 5
+            """);
+
+        var up = await DockerRunAsync(image, workspace, [], "up");
+
+        up.ExitCode.ShouldBe(0, up.ToString());
+        up.Output.ShouldContain("✔ 20260201000003 normalise-emails");
+        up.Output.ShouldContain("Applied 3 migration(s) in batch 1 and changed 2 collection(s).");
+        workspace.Find("_migrations").Select(s => s["_id"].AsString).ShouldBe(["20260201000001", "20260201000002", "20260201000003"]);
+        workspace.Find("users").Select(u => u["email"].AsString).Order().ShouldBe(["ann@example.com", "bob@example.com", "cat@example.com"]);
+
+        var down = await DockerRunAsync(image, workspace, [], "down", "--batch");
+
+        down.ExitCode.ShouldBe(0, down.ToString());
+        workspace.Find("_migrations").ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Bundle_image_asks_for_a_runner_as_it_cant_build_the_project()
     {
         var image = ImageOrSkip("MIGRATE_MONGO_TEST_BUNDLE_IMAGE");

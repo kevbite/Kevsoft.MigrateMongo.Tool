@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using Kevsoft.MigrateMongo.Config;
@@ -55,6 +56,8 @@ public static class MongoAuthentication
         EnsureSupported(settings.Credential?.Mechanism, Extensions);
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2057", Justification =
+        "The extension is an optional package. When it isn't in the app (including a trimmed tool), the type isn't found and the error says to add the package.")]
     internal static void EnsureSupported(string? mechanism, IReadOnlyDictionary<string, AuthenticationExtension> extensions)
     {
         if (mechanism is null || !extensions.TryGetValue(mechanism, out var extension) || IsRegistered(mechanism))

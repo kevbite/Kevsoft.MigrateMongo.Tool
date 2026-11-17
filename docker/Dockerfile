@@ -3,7 +3,8 @@
 #
 #   tool   (default)   the .NET 11 SDK plus the .NET 10 runtime: builds your migrations project on any supported
 #                      target framework (net10.0 the floor, net11.0) and runs it.
-#   bundle             runtime-deps only: drives a bundle (`up --runner ./bundle/Migrations`) on a machine without .NET.
+#   bundle             runtime-deps only: drives a bundle (`up --runner ./bundle/Migrations`), or runs JavaScript
+#                      migrations itself, on a machine without .NET.
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:11.0 AS bundle
 ARG TARGETARCH

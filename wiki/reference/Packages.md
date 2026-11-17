@@ -19,6 +19,7 @@ Which NuGet packages to reference, and where.
 | `Kevsoft.MigrateMongo.Abstractions` | `IMigration`, `[Migration]`, `MigrationContext`, collection and view definitions, and the source generator. Reference it directly to keep migrations in a class library. |
 | `Kevsoft.MigrateMongo` | The engine: planning, locking, state and checksums. |
 | `Kevsoft.MigrateMongo.MongoDriver` | The engine's MongoDB driver adapter. |
+| `Kevsoft.MigrateMongo.Scripting` | Runs [JavaScript migrations](../guides/JavaScript-Migrations.md) and collection definitions (Jint). Brought in by Runner and the tool. |
 | `Kevsoft.MigrateMongo.Contracts` | The runner protocol, resolved configuration and tunnel interfaces. No dependencies. |
 | `Kevsoft.MigrateMongo.Cli` | The command line, `migrate-mongo.yaml` loading and console output used by the tool and Runner (System.CommandLine, YamlDotNet). |
 | `Kevsoft.MigrateMongo.Hosting` | [Run migrations from your application](../guides/Running-from-Your-Application.md). Brings in the same packages as Runner except Cli. |

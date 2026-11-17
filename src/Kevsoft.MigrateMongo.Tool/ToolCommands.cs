@@ -5,6 +5,7 @@ using System.Text.Json;
 using Kevsoft.MigrateMongo.Cli;
 using Kevsoft.MigrateMongo.Config;
 using Kevsoft.MigrateMongo.Protocol;
+using Kevsoft.MigrateMongo.Scripting;
 using Kevsoft.MigrateMongo.Tunnel;
 
 namespace Kevsoft.MigrateMongo.Tool;
@@ -30,7 +31,7 @@ internal sealed class ToolCommands(string workingDirectory)
             {
                 "version" => Version(invocation),
                 "init" => await InitAsync(invocation, cancellationToken),
-                "create" => Create(invocation),
+                "create" => await CreateAsync(invocation, cancellationToken),
                 "bundle" => await BundleAsync(invocation, cancellationToken),
                 _ => await RunInRunnerAsync(invocation, cancellationToken),
             };
@@ -73,6 +74,11 @@ internal sealed class ToolCommands(string workingDirectory)
         if (File.Exists(configPath))
         {
             throw new ToolException(ExitCodes.Failure, $"{Relative(configPath)} already exists.");
+        }
+
+        if (invocation.Js)
+        {
+            return await InitScriptsAsync(invocation, configPath, cancellationToken);
         }
 
         var projectDirectory = Path.GetFullPath(invocation.Project ?? "Migrations", workingDirectory);
@@ -133,11 +139,94 @@ internal sealed class ToolCommands(string workingDirectory)
         return ExitCodes.Success;
     }
 
-    private int Create(CliInvocation invocation)
+    /// <summary>
+    /// <c>init --js</c>: a config with <c>scripts</c> and no project, the scripts folders, and the typings with a jsconfig
+    /// and package.json so editors show types and <c>npm run typecheck</c> checks the scripts.
+    /// </summary>
+    private async Task<int> InitScriptsAsync(CliInvocation invocation, string configPath, CancellationToken cancellationToken)
+    {
+        if (invocation.Auth == "aws")
+        {
+            throw new ToolException(ExitCodes.Failure, "--auth aws needs a C# migrations project (it adds the AWS authentication package); leave out --js.");
+        }
+
+        var configDirectory = Path.GetDirectoryName(configPath)!;
+        var scriptsDirectory = Path.GetFullPath(invocation.Project ?? configDirectory, workingDirectory);
+        var created = new List<string> { configPath };
+
+        foreach (var folder in new[] { ScriptMigrationSource.MigrationsFolder, ScriptMigrationSource.CollectionsFolder })
+        {
+            Directory.CreateDirectory(Path.Combine(scriptsDirectory, folder));
+        }
+
+        created.Add(await WriteTypesAsync(scriptsDirectory, cancellationToken) ?? Path.Combine(scriptsDirectory, TypesFile));
+        var directoryName = Path.GetFileName(scriptsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        foreach (var (file, content) in new[]
+                 {
+                     ("jsconfig.json", Scaffolding.JsConfigFile),
+                     ("package.json", Scaffolding.PackageJsonFile(Scaffolding.ToPackageName(directoryName))),
+                 })
+        {
+            var path = Path.Combine(scriptsDirectory, file);
+            if (File.Exists(path))
+            {
+                _progress.Muted($"Left the existing {Relative(path)} alone; see the JavaScript migrations guide for the settings that give you types.");
+                continue;
+            }
+
+            await File.WriteAllTextAsync(path, content, cancellationToken);
+            created.Add(path);
+        }
+
+        var databaseName = Scaffolding.ToPackageName(directoryName).Split('.', '-')[0];
+        var scriptsRelative = Path.GetRelativePath(configDirectory, scriptsDirectory).Replace('\\', '/');
+        await File.WriteAllTextAsync(configPath, Scaffolding.ScriptConfigFile(scriptsRelative, databaseName), cancellationToken);
+
+        foreach (var file in created)
+        {
+            _out.Info($"Created {Relative(file)}");
+        }
+
+        var next = "Next: set MONGODB_URL, then run `migrate-mongo create <name>` and `migrate-mongo status`. " +
+                   "For type checking, run `npm install` then `npm run typecheck`.";
+        if (invocation.Json)
+        {
+            WriteJsonResult(new CommandResult { ExitCode = 0, Message = next });
+        }
+        else
+        {
+            _out.Info(next);
+        }
+
+        return ExitCodes.Success;
+    }
+
+    private const string TypesFile = "types/migrate-mongo.d.ts";
+
+    /// <summary>Writes the typings for this version of the tool, returning the path if they were missing or out of date.</summary>
+    private static async Task<string?> WriteTypesAsync(string scriptsDirectory, CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(scriptsDirectory, TypesFile);
+        if (File.Exists(path) && await File.ReadAllTextAsync(path, cancellationToken) == ScriptModule.Declarations)
+        {
+            return null;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, ScriptModule.Declarations, cancellationToken);
+        return path;
+    }
+
+    private async Task<int> CreateAsync(CliInvocation invocation, CancellationToken cancellationToken)
     {
         var className = Scaffolding.ToClassName(invocation.Name ?? "")
                         ?? throw new ToolException(ExitCodes.Failure, $"'{invocation.Name}' isn't a valid migration name; use something like AddEmailIndexToUsers.");
         var (configPath, config) = LoadConfig(invocation, projectOnly: true);
+        if (invocation.Js || (config.Project is null && config.Scripts is not null))
+        {
+            return await CreateScriptAsync(invocation, configPath, config, className, cancellationToken);
+        }
+
         var projectFile = ResolveProjectFile(configPath, config);
         string? template = null;
         if (!invocation.Minimal && config.MigrationTemplate is { } templatePath)
@@ -186,9 +275,57 @@ internal sealed class ToolCommands(string workingDirectory)
         return ExitCodes.Success;
     }
 
+    private async Task<int> CreateScriptAsync(CliInvocation invocation, string configPath, ResolvedConfig config, string className, CancellationToken cancellationToken)
+    {
+        var scripts = config.Scripts ?? throw new ConfigException($"'scripts' is not set in {configPath}; add `scripts: <folder>` for JavaScript migrations.");
+        var migrationsDirectory = Path.Combine(scripts, ScriptMigrationSource.MigrationsFolder);
+        Directory.CreateDirectory(migrationsDirectory);
+
+        var time = DateTime.UtcNow;
+        string id;
+        while (true)
+        {
+            id = Scaffolding.NewId(time);
+            if (Directory.GetFiles(migrationsDirectory, $"{id}-*.js").Length == 0 && Directory.GetFiles(migrationsDirectory, $"{id}_*.js").Length == 0)
+            {
+                break;
+            }
+
+            time = time.AddSeconds(1);
+        }
+
+        var path = Path.Combine(migrationsDirectory, $"{id}-{Scaffolding.ToKebabCase(className)}.js");
+        await File.WriteAllTextAsync(path, invocation.Minimal ? Scaffolding.MinimalScriptMigrationFile : Scaffolding.ScriptMigrationFile, cancellationToken);
+
+        // Typings written by an older tool are refreshed, but they're never added to a project that didn't ask for them.
+        var types = Path.Combine(scripts, TypesFile);
+        var refreshed = File.Exists(types) ? await WriteTypesAsync(scripts, cancellationToken) : null;
+
+        if (invocation.Json)
+        {
+            WriteJsonResult(new CommandResult { ExitCode = 0, Message = path, Applied = [id] });
+        }
+        else
+        {
+            _out.Info($"Created {Relative(path)}");
+            if (refreshed is not null)
+            {
+                _out.Info($"Updated {Relative(refreshed)} for this version of the tool");
+            }
+        }
+
+        return ExitCodes.Success;
+    }
+
     private async Task<int> BundleAsync(CliInvocation invocation, CancellationToken cancellationToken)
     {
         var (configPath, config) = LoadConfig(invocation, projectOnly: true);
+        if (config.Project is null && config.Scripts is not null)
+        {
+            throw new ToolException(ExitCodes.Failure,
+                "There's nothing to bundle: JavaScript migrations run with the tool itself, including its -bundle Docker image.");
+        }
+
         var configDirectory = Path.GetDirectoryName(configPath)!;
         var projectFile = ResolveProjectFile(configPath, config);
         var runtimeIdentifier = invocation.RuntimeIdentifier ?? RuntimeInformation.RuntimeIdentifier;
@@ -254,6 +391,7 @@ internal sealed class ToolCommands(string workingDirectory)
         var configDirectory = Path.GetDirectoryName(configPath)!;
 
         string runnerPath;
+        var buildless = false;
         if (invocation.Runner is not null)
         {
             runnerPath = Path.GetFullPath(invocation.Runner, workingDirectory);
@@ -261,6 +399,17 @@ internal sealed class ToolCommands(string workingDirectory)
             {
                 throw new ToolException(ExitCodes.Failure, $"Runner '{invocation.Runner}' was not found.");
             }
+        }
+        else if (config.Project is null && config.Scripts is not null)
+        {
+            if (!Directory.Exists(config.Scripts))
+            {
+                throw new ConfigException($"The scripts folder '{config.Scripts}' (scripts in {configPath}) was not found.");
+            }
+
+            // Script-only projects have nothing to build: the tool runs them itself, as its own runner process.
+            runnerPath = Environment.ProcessPath ?? throw new ToolException(ExitCodes.Failure, "Can't find the tool's own executable to run the scripts.");
+            buildless = true;
         }
         else
         {
@@ -275,7 +424,9 @@ internal sealed class ToolCommands(string workingDirectory)
 
         var (fileName, prefix) = runnerPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
             ? (ProcessRunner.DotnetHost, new[] { runnerPath })
-            : (runnerPath, Array.Empty<string>());
+            : buildless && IsDotnetHost(runnerPath)
+                ? (runnerPath, new[] { Path.Combine(AppContext.BaseDirectory, "migrate-mongo.dll") })
+                : (runnerPath, Array.Empty<string>());
 
         var handshake = await HandshakeAsync(fileName, prefix, configDirectory, cancellationToken);
         var protocol = handshake.Protocol.Intersect(ProtocolVersions.Supported).DefaultIfEmpty(0).Max();
@@ -551,6 +702,9 @@ internal sealed class ToolCommands(string workingDirectory)
     }
 
     private string Relative(string path) => Path.GetRelativePath(workingDirectory, path);
+
+    private static bool IsDotnetHost(string path) =>
+        Path.GetFileNameWithoutExtension(path).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
 }
 
 internal sealed class ToolException(int exitCode, string message) : Exception(message)

@@ -7,6 +7,12 @@ public sealed class ResolvedConfig
 {
     public string? Project { get; set; }
 
+    /// <summary>
+    /// Directory of JavaScript migrations (<c>migrations/</c>) and collection definitions (<c>collections/</c>)
+    /// (<c>scripts</c>). Without a <c>project</c>, the tool runs them itself.
+    /// </summary>
+    public string? Scripts { get; set; }
+
     /// <summary>File <c>create</c> renders new migrations from instead of the built-in template. Only the tool uses it.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string? MigrationTemplate { get; set; }

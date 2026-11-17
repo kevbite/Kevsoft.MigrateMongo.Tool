@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+    <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>JavaScript migrations and collection definitions for Kevsoft.MigrateMongo, run with the Jint engine. The migrate-mongo tool runs them directly, and the Runner loads them alongside C# migrations from the config's scripts folder.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Abstractions\Kevsoft.MigrateMongo.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jint" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="runtime\migrate-mongo.js" LogicalName="migrate-mongo.js" />
+    <EmbeddedResource Include="runtime\migrate-mongo.d.ts" LogicalName="migrate-mongo.d.ts" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
+  </ItemGroup>
+
+</Project>

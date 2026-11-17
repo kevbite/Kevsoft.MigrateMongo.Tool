@@ -6,7 +6,7 @@
 | Image | Contains | Use it to |
 |---|---|---|
 | `ghcr.io/kevbite/migrate-mongo:<version>` | The tool on the .NET 11 SDK. | Build and run your migrations project, like the installed tool. A `global.json` that pins an older SDK won't work in it. |
-| `ghcr.io/kevbite/migrate-mongo:<version>-bundle` | The tool without .NET. | Run [bundles](./Bundles.md) with `--runner`. It can't build a project, so without `--runner` it stops and asks for one. |
+| `ghcr.io/kevbite/migrate-mongo:<version>-bundle` | The tool without .NET. | Run [bundles](./Bundles.md) with `--runner`, or [JavaScript migrations](./JavaScript-Migrations.md#running-in-docker). It can't build a project, so with a `project` and without `--runner` it stops and asks for one. |
 
 ## Running it
 

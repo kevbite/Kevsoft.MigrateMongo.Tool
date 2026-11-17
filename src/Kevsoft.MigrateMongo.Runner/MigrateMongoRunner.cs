@@ -9,6 +9,7 @@ using Kevsoft.MigrateMongo.Engine;
 using Kevsoft.MigrateMongo.MongoDriver;
 using Kevsoft.MigrateMongo.Protocol;
 using Kevsoft.MigrateMongo.Runner;
+using Kevsoft.MigrateMongo.Scripting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
@@ -260,7 +261,7 @@ public static class MigrateMongoRunner
         try
         {
             ConfigLoader.EnsureConnectable(config);
-            var (migrations, collections) = MigrationDiscovery.Discover(options, entryAssembly);
+            var (migrations, collections) = MigrationDiscovery.Discover(options, entryAssembly, config.Scripts);
             if (migrations.Count == 0 && collections.Count == 0 && command is not ("unlock" or "history" or "show"))
             {
                 // Silence here would hide a build that skipped the source generator: `up` would report nothing to do.
@@ -268,9 +269,13 @@ public static class MigrateMongoRunner
                 {
                     Type = EventTypes.Log,
                     Level = "warning",
-                    Message = "No migrations or collection definitions were found. If you expected some, check the build " +
-                              "output for warning CS9057 (the compiler is too old for the Kevsoft.MigrateMongo source " +
-                              "generator), or add the assembly that contains them to MigrateMongoRunnerOptions.Assemblies.",
+                    Message = config.Scripts is not null
+                        ? $"No migrations or collection definitions were found in {config.Scripts}. Add scripts to its " +
+                          $"{ScriptMigrationSource.MigrationsFolder}/ and {ScriptMigrationSource.CollectionsFolder}/ folders, " +
+                          "e.g. with 'migrate-mongo create <name>'."
+                        : "No migrations or collection definitions were found. If you expected some, check the build " +
+                          "output for warning CS9057 (the compiler is too old for the Kevsoft.MigrateMongo source " +
+                          "generator), or add the assembly that contains them to MigrateMongoRunnerOptions.Assemblies.",
                 });
             }
 
@@ -296,6 +301,10 @@ public static class MigrateMongoRunner
             }
         }
         catch (ConfigException e)
+        {
+            return new CommandResult { ExitCode = ExitCodes.Failure, Message = e.Message };
+        }
+        catch (ScriptException e)
         {
             return new CommandResult { ExitCode = ExitCodes.Failure, Message = e.Message };
         }

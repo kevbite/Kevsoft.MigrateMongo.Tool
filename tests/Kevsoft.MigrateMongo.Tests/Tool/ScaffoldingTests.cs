@@ -29,6 +29,12 @@ public sealed class ScaffoldingTests
     [InlineData("my-app.1migrations", "my_app._1migrations")]
     public void ToNamespace(string input, string expected) => Scaffolding.ToNamespace(input).ShouldBe(expected);
 
+    [Theory]
+    [InlineData("Shop.Database", "shop.database")]
+    [InlineData("My App (db)", "my-app--db")]
+    [InlineData("--", "migrations")]
+    public void ToPackageName(string input, string expected) => Scaffolding.ToPackageName(input).ShouldBe(expected);
+
     [Fact]
     public void RenderMigrationTemplate_replaces_the_known_placeholders_only() =>
         Scaffolding.RenderMigrationTemplate(

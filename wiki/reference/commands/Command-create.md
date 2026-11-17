@@ -1,8 +1,8 @@
-Creates a new migration file. Tool only. It only reads `project` and `migrationTemplate` from the config, so it works
-without connection variables set.
+Creates a new migration file. Tool only. It only reads `project`, `scripts` and `migrationTemplate` from the config, so
+it works without connection variables set.
 
 ```
-migrate-mongo create <name> [--minimal]
+migrate-mongo create <name> [--minimal] [--js]
 ```
 
 ```
@@ -16,6 +16,7 @@ Created src/MyApp.Migrations/Migrations/M20261014164028_AddEmailIndexToUsers.cs
 |---|---|
 | `<name>` | The migration's name in PascalCase, e.g. `AddEmailIndexToUsers`. It becomes the class name, and in kebab-case (`add-email-index-to-users`) the migration's name. |
 | `--minimal` | Write bare `UpAsync` and `DownAsync` methods, without the commented results and tracking examples. Ignores `migrationTemplate`. |
+| `--js` | Write a JavaScript migration in the `scripts` folder when the config has both `project` and `scripts`. Without a `project`, migrations are always JavaScript. |
 
 ## What it writes
 
@@ -25,6 +26,10 @@ second.
 
 With [`migrationTemplate`](../Configuration.md#migrations) set, that file is used instead of the built-in template.
 See [Custom Templates](../../guides/Custom-Templates.md).
+
+A JavaScript migration goes in `<scripts>/migrations/` as `<id>-<kebab-name>.js`, e.g.
+`migrations/20261014164028-add-email-index-to-users.js`. If `types/migrate-mongo.d.ts` exists, it's updated to match
+the tool. See [JavaScript Migrations](../../guides/JavaScript-Migrations.md).
 
 ## See also
 

@@ -5,7 +5,7 @@ Everything `migrate-mongo.yaml` can hold. For a walkthrough of environments and 
 
 `migrate-mongo.yaml` (or `migrate-mongo.yml`) is read from the current directory, or from the path passed with
 `-f <path>`. A [bundle](../guides/Bundles.md) also looks next to its executable. Paths in the file (`project`,
-`migrationTemplate`, `tunnel.privateKeyPath`, `tunnel.knownHostsPath`) are relative to the file itself.
+`scripts`, `migrationTemplate`, `tunnel.privateKeyPath`, `tunnel.knownHostsPath`) are relative to the file itself.
 
 Unknown settings are errors, in every environment and not just the one `--env` selects, so typos don't go unnoticed.
 
@@ -21,7 +21,7 @@ mongodb:
 ```
 
 A variable that isn't set, or is empty, is an error unless it has a `:-default`. Commands that don't connect, like
-`create`, only read `project` and `migrationTemplate`, so they work without the connection variables.
+`create`, only read `project`, `scripts` and `migrationTemplate`, so they work without the connection variables.
 
 ## A complete example
 
@@ -29,6 +29,7 @@ Every setting, with its default where it has one:
 
 ```yaml
 project: src/MyApp.Migrations        # the migrations project, relative to this file
+scripts: scripts                     # JavaScript migrations and collection definitions, relative to this file
 mongodb:
   url: ${MONGODB_URL}
   databaseName: myapp
@@ -80,6 +81,7 @@ environments:
 | Setting | Default | Meaning |
 |---|---|---|
 | `project` | | The migrations project directory or `.csproj`, relative to the config file. |
+| `scripts` | | The folder holding [JavaScript](../guides/JavaScript-Migrations.md) `migrations/` and `collections/`, relative to the config file. Without `project`, the tool runs them itself. |
 | `mongodb.url` | | Connection string. Required. Any driver option works here (`tls`, `authMechanism`, `proxyHost`, ...). |
 | `mongodb.databaseName` | | Database to migrate. Required. |
 

@@ -192,4 +192,98 @@ internal static class Scaffolding
         });
         return string.Join('.', parts);
     }
+
+    public static string ScriptConfigFile(string scriptsRelativePath, string databaseName) => $"""
+        # Kevsoft.MigrateMongo configuration. See https://github.com/kevbite/Kevsoft.MigrateMongo.Tool
+        scripts: {scriptsRelativePath}   # holds migrations/ and collections/
+        mongodb:
+          url: ${"{"}MONGODB_URL{"}"}
+          databaseName: {databaseName}
+        stateCollection: _migrations
+        lockTtl: 300
+        lockWaitTimeout: 60
+        onChecksumMismatch: fail   # fail | warn | ignore
+        transaction: auto          # auto | always | never
+        # environments:
+        #   prod:
+        #     mongodb:
+        #       url: ${"{"}PROD_MONGODB_URL{"}"}
+
+        """;
+
+    public static string ScriptMigrationFile => """
+        // @ts-check
+        import { defineMigration } from '@kevsoft/migrate-mongo';
+
+        export default defineMigration({
+          async up(db, context) {
+            // Every write is recorded in the migration's history; `migrate-mongo show <id>` lists them.
+            // const result = await db.collection('users').updateMany({ email: { $exists: false } }, { $set: { email: null } });
+            // context.results.set('backfilled', result.modifiedCount);
+            throw new Error('Not implemented yet.');
+          },
+
+          async down(db, context) {
+            throw new Error('Not implemented yet.');
+          },
+        });
+
+        """;
+
+    public static string MinimalScriptMigrationFile => """
+        // @ts-check
+        import { defineMigration } from '@kevsoft/migrate-mongo';
+
+        export default defineMigration({
+          async up(db, context) {
+            throw new Error('Not implemented yet.');
+          },
+
+          async down(db, context) {
+            throw new Error('Not implemented yet.');
+          },
+        });
+
+        """;
+
+    /// <summary>Type checks the scripts against the bundled declarations, with no npm packages needed for editors.</summary>
+    public static string JsConfigFile => """
+        {
+          "compilerOptions": {
+            "checkJs": true,
+            "noEmit": true,
+            "strict": true,
+            "noImplicitAny": false,
+            "module": "esnext",
+            "moduleResolution": "bundler",
+            "target": "es2022",
+            "lib": ["es2022"],
+            "types": []
+          },
+          "include": ["migrations/**/*.js", "collections/**/*.js", "types/**/*.d.ts"]
+        }
+
+        """;
+
+    public static string PackageJsonFile(string name) => $$"""
+        {
+          "name": "{{name}}",
+          "private": true,
+          "type": "module",
+          "scripts": {
+            "typecheck": "tsc -p jsconfig.json"
+          },
+          "devDependencies": {
+            "typescript": "^5.9.0"
+          }
+        }
+
+        """;
+
+    /// <summary>A lower-case npm package name made from a directory name.</summary>
+    public static string ToPackageName(string directoryName)
+    {
+        var cleaned = new string(directoryName.ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '-').ToArray()).Trim('-', '.', '_');
+        return cleaned.Length > 0 ? cleaned : "migrations";
+    }
 }

@@ -17,7 +17,7 @@ public static class ConfigLoader
     [
         "project", "mongodb", "stateCollection", "lockTtl", "lockWaitTimeout", "onChecksumMismatch",
         "transaction", "transactionRetryTimeout", "allowOutOfOrder", "environments", "tunnel", "migrationTemplate", "results", "indexes", "searchIndexes",
-        "collections", "validators",
+        "collections", "validators", "scripts",
     ];
 
     private static readonly HashSet<string> ResultsKeys = ["captureStatements", "maxBytes"];
@@ -62,6 +62,7 @@ public static class ConfigLoader
         }
 
         resolved.MigrationTemplate = ResolvePath(resolved.MigrationTemplate, directory);
+        resolved.Scripts = ResolvePath(resolved.Scripts, directory);
 
         if (resolved.Tunnel is { } tunnel)
         {
@@ -111,6 +112,7 @@ public static class ConfigLoader
         var config = new ResolvedConfig { Environment = string.IsNullOrEmpty(environment) ? null : environment };
         config.Project = OptionalString(root, "project", getEnvironmentVariable);
         config.MigrationTemplate = OptionalString(root, "migrationTemplate", getEnvironmentVariable);
+        config.Scripts = OptionalString(root, "scripts", getEnvironmentVariable);
         if (projectOnly)
         {
             return config;

@@ -60,6 +60,45 @@ public sealed class CollectionDescriptor(
             return CollectionRendering.RenderView(builder, database.GetCollection<TDocument>(on));
         }, on);
     }
+
+    /// <summary>
+    /// A collection definition that isn't a class, e.g. one read from a script. Field names are declared as stored, so it's
+    /// rendered against <see cref="BsonDocument"/>.
+    /// </summary>
+    /// <param name="name">The collection's name.</param>
+    /// <param name="source">Kind of source, e.g. <c>js</c>.</param>
+    /// <param name="origin">Where the definition came from, e.g. a file.</param>
+    /// <param name="define">Declares the collection; called each time it's declared.</param>
+    public static CollectionDescriptor Create(string name, string source, string origin, Action<CollectionBuilder<BsonDocument>> define)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(define);
+        return new CollectionDescriptor(name, source, origin, (_, database) =>
+        {
+            var builder = new CollectionBuilder<BsonDocument>(name);
+            define(builder);
+            return CollectionRendering.Render(builder, database.GetCollection<BsonDocument>(name));
+        });
+    }
+
+    /// <summary>A view definition that isn't a class, e.g. one read from a script.</summary>
+    /// <param name="name">The view's name.</param>
+    /// <param name="on">The collection or view it reads from.</param>
+    /// <param name="source">Kind of source, e.g. <c>js</c>.</param>
+    /// <param name="origin">Where the definition came from, e.g. a file.</param>
+    /// <param name="define">Declares the view; called each time it's declared.</param>
+    public static CollectionDescriptor CreateView(string name, string on, string source, string origin, Action<ViewBuilder<BsonDocument>> define)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(on);
+        ArgumentNullException.ThrowIfNull(define);
+        return new CollectionDescriptor(name, source, origin, (_, database) =>
+        {
+            var builder = new ViewBuilder<BsonDocument>(name, on);
+            define(builder);
+            return CollectionRendering.RenderView(builder, database.GetCollection<BsonDocument>(on));
+        }, on);
+    }
 }
 
 /// <summary>A declared view, rendered.</summary>
