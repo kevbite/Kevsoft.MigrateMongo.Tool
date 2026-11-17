@@ -2,7 +2,7 @@
 
 A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npmjs.com/package/migrate-mongo):
 
-* Migrations are written in **C#** (other formats such as JS/JSON are deferred but the architecture has a
+* Migrations are written in **C#** or **JavaScript** (JSON commands are deferred; the architecture has a
   pluggable loader for them).
 * The **CLI never breaks because of the installed .NET runtime/SDK version**, and never breaks because the
   user's project uses a different version of our library or of the MongoDB driver.
@@ -53,7 +53,15 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 > * The YAML config loader, the command line and the console renderer are in `Kevsoft.MigrateMongo.Cli`, which only
 >   the tool and Runner reference. `Kevsoft.MigrateMongo.Contracts` keeps the protocol, resolved config and tunnel
 >   types and has no dependencies, so apps using Hosting don't get YamlDotNet or System.CommandLine.
-> * Deferred: scripting loaders.
+> * JavaScript migrations and collection definitions are done (`Kevsoft.MigrateMongo.Scripting`, Jint). It plugs in as
+>   an `IMigrationSource` that the Runner adds when the config has `scripts:`. With no `project:`, the AOT tool
+>   spawns itself as the runner over the same protocol, so script-only projects need no .NET SDK and run in the
+>   `-bundle` image. The driver and Jint are rooted for Native AOT; their trim warnings are accepted in the tool's
+>   ILC step only, as our assemblies are `IsAotCompatible`. This carves out §3.2's "the tool never loads user code"
+>   for scripts: they run in a sandbox with no CLR access, so there's no version coupling. `init --js` writes
+>   hand-written `.d.ts` typings (documents are `Record<string, any>`), a `jsconfig.json` and `npm run typecheck`.
+>   See `wiki/guides/JavaScript-Migrations.md`.
+> * Deferred: the JSON-command loader, `.ts` files, npm packages in scripts, and scripts in bundles/Hosting.
 
 ---
 
@@ -123,7 +131,8 @@ A MongoDB migration toolkit for .NET inspired by [migrate-mongo](https://www.npm
 5. The same migrations can run on app startup (Mongock-style) or from the CLI, sharing state and lock.
 
 **Non-goals (v1)**
-* JS (Jint) and JSON-command migrations. Deferred, but anticipated by `IMigrationSource` (§4.4).
+* JSON-command migrations. Deferred, but anticipated by `IMigrationSource` (§4.4). (JS migrations are done; see the
+  implementation status.)
 * Schema diffing/model snapshots (MongoDB is schemaless).
 * Compatibility with migrate-mongo's `changelog` collection. We use our own, safer state model (§5.4).
   Teams adopting the tool on an existing database use `baseline`.
@@ -306,9 +315,9 @@ public interface IMigrationSource
 ```
 * **v1:** `GeneratedMigrationSource` (from the source generator) is the default and only registered
   source. A `ReflectionMigrationSource` exists as a fallback for projects that disable generators.
-* **Later (backburner):** `Kevsoft.MigrateMongo.Scripting` adds `JsMigrationSource` (Jint) and
-  `JsonCommandMigrationSource` (golang-migrate-style `*.up.json`). Because they plug in as sources, the
-  engine, state model and tool need no changes. Their checksum is a hash of the normalised file content.
+* **Done:** `Kevsoft.MigrateMongo.Scripting` adds `ScriptMigrationSource` (Jint) for JS migrations and collection
+  definitions; the engine and state model needed no changes. Its checksum hashes the file's tokens, like C#'s.
+* **Later (backburner):** `JsonCommandMigrationSource` (golang-migrate-style `*.up.json`).
 * Multiple sources can be combined. The engine merges them by id and rejects duplicates.
 
 ### 4.5 Running in-app
@@ -393,7 +402,7 @@ Our own design, not compatible with migrate-mongo. Three collections, with names
   _id: "20261009120000",                 // migration id
   v: 1,                                  // document schema version
   name: "add-email-index",
-  source: "csharp",                      // csharp (later: js | json)
+  source: "csharp",                      // csharp | js (later: json)
   origin: "MyApp.Migrations.AddEmailIndex, MyApp.Migrations",
   checksum: "sha256:9f86d081884c7d65...",
   state: "applied",                      // applying | applied | failed | rollingBack
@@ -494,7 +503,7 @@ src/
   Kevsoft.MigrateMongo.Tunnel/           # SSH.NET tunnel (used by the tool; opt-in for runner/bundles/hosting)
   Kevsoft.MigrateMongo.Tool/             # AOT global tool: launcher, scaffolding, build, tunnel, rendering
   Kevsoft.MigrateMongo.Templates/        # dotnet new templates (project + migration)
-  (later) Kevsoft.MigrateMongo.Scripting/  # JS (Jint) + JSON command IMigrationSource implementations
+  Kevsoft.MigrateMongo.Scripting/        # JS (Jint) IMigrationSource: migrations + collection definitions
 tests/
   Kevsoft.MigrateMongo.Tests/                 # Engine unit tests with in-memory ports
   Kevsoft.MigrateMongo.SourceGenerator.Tests/ # Generator snapshot + diagnostic tests
@@ -715,7 +724,7 @@ before release.
 | 6 | Distribution | `bundle` (scenario 15), `smoke` job, `release.yml`, `nightly.yml`, GitHub Releases, Docker images |
 | 7 | Hosting | DI extensions, `IHostedService`, shared lock/state with CLI |
 | 8 | Docs | README, "Coming from migrate-mongo" guide (rewrite to C#, `baseline` existing DBs), samples |
-| later | Other formats | `Kevsoft.MigrateMongo.Scripting`: JS (Jint) and JSON-command sources |
+| later | Other formats | `Kevsoft.MigrateMongo.Scripting`: JSON-command source (JS is done) |
 
 ---
 

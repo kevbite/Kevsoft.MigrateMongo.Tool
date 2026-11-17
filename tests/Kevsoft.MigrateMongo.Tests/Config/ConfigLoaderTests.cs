@@ -444,6 +444,26 @@ public sealed class ConfigLoaderTests
     }
 
     [Fact]
+    public void Scripts_are_resolved_relative_to_the_config_file_even_when_only_loading_the_project()
+    {
+        var directory = Directory.CreateTempSubdirectory("mm-config-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "migrate-mongo.yaml");
+            File.WriteAllText(path, "scripts: db/scripts\n");
+
+            ConfigLoader.LoadFile(path, null, Env).Scripts.ShouldBe(Path.Combine(directory.FullName, "db", "scripts"));
+            var projectOnly = ConfigLoader.LoadFile(path, null, Env, projectOnly: true);
+            projectOnly.Scripts.ShouldBe(Path.Combine(directory.FullName, "db", "scripts"));
+            projectOnly.Project.ShouldBeNull();
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void Migration_template_is_resolved_relative_to_the_config_file_even_when_only_loading_the_project()
     {
         var directory = Directory.CreateTempSubdirectory("mm-config-");

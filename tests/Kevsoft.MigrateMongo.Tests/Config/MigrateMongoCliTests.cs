@@ -45,6 +45,27 @@ public sealed class MigrateMongoCliTests
         invocation.Minimal.ShouldBe(minimal);
     }
 
+    [Theory]
+    [InlineData(false, "init")]
+    [InlineData(true, "init", "--js")]
+    [InlineData(false, "create", "AddProducts")]
+    [InlineData(true, "create", "AddProducts", "--js")]
+    public async Task Init_and_create_accept_js(bool js, params string[] args)
+    {
+        var (exitCode, invocation) = await Parse(true, args);
+
+        exitCode.ShouldBe(0);
+        invocation.ShouldNotBeNull();
+        invocation.Js.ShouldBe(js);
+    }
+
+    [Fact]
+    public async Task Init_leaves_the_project_unset_so_js_can_default_to_the_config_directory()
+    {
+        (await Parse(true, "init", "--js")).Invocation!.Project.ShouldBeNull();
+        (await Parse(true, "init", "--js", "-p", "db")).Invocation!.Project.ShouldBe("db");
+    }
+
     [Fact]
     public async Task Tool_accepts_insecure_skip_host_key_check()
     {

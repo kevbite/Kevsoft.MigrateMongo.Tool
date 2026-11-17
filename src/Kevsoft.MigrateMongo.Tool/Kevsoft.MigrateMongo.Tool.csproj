@@ -15,11 +15,11 @@
     <PackageId>Kevsoft.MigrateMongo.Tool</PackageId>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>migrate-mongo</ToolCommandName>
-    <!-- The framework-dependent fallback runs on whatever .NET is installed (10 or any later major); the tool never loads user code. -->
+    <!-- The framework-dependent fallback runs on whatever .NET is installed (10 or any later major); the tool never loads user .NET code (C# migrations run in the user's own project). -->
     <RollForward>LatestMajor</RollForward>
     <IsAotCompatible>true</IsAotCompatible>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Description>The migrate-mongo command line tool for Kevsoft.MigrateMongo: create, apply and roll back MongoDB migrations written in C#. Works with any .NET runtime (10+) and any supported MongoDB driver version because your migrations run in your own project.</Description>
+    <Description>The migrate-mongo command line tool for Kevsoft.MigrateMongo: create, apply and roll back MongoDB migrations written in C# or JavaScript. C# migrations run in your own project, so any .NET runtime (10+) and supported MongoDB driver version works; JavaScript migrations run in the tool itself, with no .NET SDK needed.</Description>
     <!-- linux-musl-* must be listed, otherwise the RID graph gives Alpine the glibc linux-* build. -->
     <ToolPackageRuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64;any</ToolPackageRuntimeIdentifiers>
     <!--
@@ -40,8 +40,40 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Cli\Kevsoft.MigrateMongo.Cli.csproj" />
+    <ProjectReference Include="..\Kevsoft.MigrateMongo.Runner\Kevsoft.MigrateMongo.Runner.csproj" />
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Tunnel\Kevsoft.MigrateMongo.Tunnel.csproj" />
   </ItemGroup>
+
+  <!--
+    JavaScript migrations run inside the tool (it spawns itself as the runner), so it carries the driver. The driver
+    isn't annotated for trimming; rooting it keeps the BsonDocument paths the scripts use working under Native AOT.
+  -->
+  <ItemGroup>
+    <TrimmerRootAssembly Include="MongoDB.Bson" />
+    <TrimmerRootAssembly Include="MongoDB.Driver" />
+  </ItemGroup>
+
+  <!--
+    The driver and Jint report trim/AOT warnings for code the scripts never reach (class-map serialization, and Jint's
+    CLR interop, which the script host doesn't enable). The driver collapses to one IL2104/IL3053 per assembly, accepted
+    here. Jint is marked trimmable, so its RequiresUnreferencedCode calls (IL2026) are reported one by one; they're
+    accepted for the Native AOT compile only, as all our assemblies are IsAotCompatible and checked by the analyzers at
+    build time. The integration tests run the JavaScript fixtures through the tool to prove the paths we use work.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="AcceptThirdPartyTrimWarnings" BeforeTargets="PrepareForILLink">
+    <PropertyGroup>
+      <NoWarn>$(NoWarn);IL2026</NoWarn>
+    </PropertyGroup>
+    <ItemGroup>
+      <ManagedAssemblyToLink Condition="'%(Filename)' == 'Jint' or '%(Filename)' == 'MongoDB.Bson' or '%(Filename)' == 'MongoDB.Driver'">
+        <TrimmerSingleWarn>true</TrimmerSingleWarn>
+      </ManagedAssemblyToLink>
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />

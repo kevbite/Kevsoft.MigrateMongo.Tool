@@ -23,6 +23,9 @@ scenario and a full reference.
   runs, SSH tunnels through a bastion, AWS IAM authentication, and self-contained bundles for agents without .NET.
 - **Mistakes caught at compile time.** A source generator finds migrations without reflection and reports duplicate
   or malformed ids as build errors.
+- **Or write them in JavaScript.** `migrate-mongo init --js` sets up
+  [JavaScript migrations and collection definitions](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki/JavaScript-Migrations)
+  with editor types and type checking. The tool runs them itself, with no .NET SDK, and they can sit alongside C# ones.
 
 ## Getting started
 

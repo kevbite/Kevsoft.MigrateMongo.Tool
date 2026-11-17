@@ -9,6 +9,7 @@
 **Migrations**
 
 - [Writing Migrations](./guides/Writing-Migrations.md)
+- [JavaScript Migrations](./guides/JavaScript-Migrations.md)
 - [Transactions](./guides/Transactions.md)
 - [Recording Results](./guides/Recording-Results.md)
 - [Dependency Injection](./guides/Dependency-Injection.md)

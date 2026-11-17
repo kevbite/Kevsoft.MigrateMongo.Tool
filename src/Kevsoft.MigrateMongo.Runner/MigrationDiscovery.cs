@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using Kevsoft.MigrateMongo.Scripting;
 
 namespace Kevsoft.MigrateMongo.Runner;
 
@@ -9,7 +11,7 @@ internal static class MigrationDiscovery
     // .NET, the MongoDB driver and this library, which never contain migrations.
     private static readonly string[] SkippedAssemblies = ["System", "Microsoft", "MongoDB.Bson", "MongoDB.Driver", "Kevsoft.MigrateMongo"];
 
-    public static (List<MigrationDescriptor> Migrations, List<CollectionDescriptor> Collections) Discover(MigrateMongoRunnerOptions options, Assembly? entryAssembly)
+    public static (List<MigrationDescriptor> Migrations, List<CollectionDescriptor> Collections) Discover(MigrateMongoRunnerOptions options, Assembly? entryAssembly, string? scripts = null)
     {
         var assemblies = options.Assemblies.Count > 0
             ? options.Assemblies.Distinct().ToList()
@@ -19,6 +21,7 @@ internal static class MigrationDiscovery
             .Select(MigrationRegistry.ForAssembly)
             .OfType<IMigrationSource>()
             .Concat(options.Sources)
+            .Concat(scripts is null ? [] : [new ScriptMigrationSource(scripts)])
             .Distinct()
             .ToList();
 
@@ -26,6 +29,8 @@ internal static class MigrationDiscovery
     }
 
     /// <summary>The entry assembly plus any directly referenced assembly that references the abstractions.</summary>
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification =
+        "A trimmed reference can't hold migrations the app runs. The trimmed tool names its assemblies, so it never scans.")]
     private static List<Assembly> CandidateAssemblies(Assembly? entryAssembly)
     {
         var result = new List<Assembly>();

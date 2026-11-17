@@ -1,10 +1,20 @@
 using System.CommandLine;
 using System.Runtime.InteropServices;
 using System.Text;
+using Kevsoft.MigrateMongo;
 using Kevsoft.MigrateMongo.Cli;
+using Kevsoft.MigrateMongo.Protocol;
 using Kevsoft.MigrateMongo.Tool;
 
 Console.OutputEncoding = new UTF8Encoding(false);
+
+// For JavaScript-only projects the tool is its own runner: it spawns itself, speaking the runner protocol.
+if (args.Length > 0 && args[0] is ProtocolVersions.HandshakeArgument or ProtocolVersions.ProtocolArgument)
+{
+    var runnerOptions = new MigrateMongoRunnerOptions();
+    runnerOptions.Assemblies.Add(typeof(ToolCommands).Assembly);
+    return await MigrateMongoRunner.RunAsync(args, runnerOptions);
+}
 
 using var cancellation = new CancellationTokenSource();
 var cancelRequests = 0;

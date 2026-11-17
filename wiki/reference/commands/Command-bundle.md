@@ -20,3 +20,7 @@ The bundle is named after the project, and `migrate-mongo.yaml` is copied next t
 current platform, `bundle` checks it starts.
 
 See [Bundles](../../guides/Bundles.md) for running them and using them in pipelines.
+
+A config with only `scripts` (no `project`) has nothing to bundle: the tool runs
+[JavaScript migrations](../../guides/JavaScript-Migrations.md) itself, including in the `-bundle` Docker image. A
+mixed project's bundle runs only its C# migrations.

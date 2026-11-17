@@ -11,6 +11,7 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.15" />
     <PackageVersion Include="System.CommandLine" Version="3.0.0" />
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+    <PackageVersion Include="Jint" Version="4.18.0" />
 
     <!--
       Source generator: this is the oldest compiler that can load it. A compiler older than this skips the generator
