@@ -5,7 +5,7 @@
 #                      target framework (net10.0 the floor, net11.0) and runs it.
 #   bundle             runtime-deps only: drives a bundle (`up --runner ./bundle/Migrations`) on a machine without .NET.
 
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS bundle
+FROM mcr.microsoft.com/dotnet/runtime-deps:11.0 AS bundle
 ARG TARGETARCH
 COPY --chmod=755 bin/${TARGETARCH}/migrate-mongo /usr/local/bin/migrate-mongo
 WORKDIR /src
