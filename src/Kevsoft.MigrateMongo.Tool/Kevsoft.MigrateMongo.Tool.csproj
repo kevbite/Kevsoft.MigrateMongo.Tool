@@ -44,6 +44,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>Kevsoft.MigrateMongo.DefaultMongoDriverVersion</_Parameter1>
+      <_Parameter2>$(DefaultMongoDriverVersion)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
   </ItemGroup>
 
