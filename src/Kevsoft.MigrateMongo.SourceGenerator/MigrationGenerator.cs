@@ -92,6 +92,7 @@ public sealed class MigrationGenerator : IIncrementalGenerator
             Parameters: new EquatableArray<string>(parameters),
             ImplementsInterface: implementsInterface,
             IsAbstract: symbol.IsAbstract,
+            IsGeneric: HasGenericContainingType(symbol),
             IsAccessible: accessible,
             HasConstructor: ctor is not null,
             Location: location);
@@ -148,6 +149,19 @@ public sealed class MigrationGenerator : IIncrementalGenerator
         return true;
     }
 
+    private static bool HasGenericContainingType(INamedTypeSymbol symbol)
+    {
+        for (var current = symbol; current is not null; current = current.ContainingType)
+        {
+            if (current.Arity > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// SHA-256 over the type's tokens joined by single spaces, so whitespace and comment changes don't alter
     /// the checksum but any code change does.
@@ -194,6 +208,12 @@ public sealed class MigrationGenerator : IIncrementalGenerator
             if (item.IsAbstract || !item.IsAccessible || !item.HasConstructor)
             {
                 spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.NotConstructible, location, item.DisplayName));
+                ok = false;
+            }
+
+            if (item.IsGeneric)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(Diagnostics.GenericMigration, location, item.DisplayName));
                 ok = false;
             }
 

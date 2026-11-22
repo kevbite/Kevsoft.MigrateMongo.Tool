@@ -135,6 +135,23 @@ public sealed class MigrationGeneratorTests
         diagnostics.Single().Severity.ShouldBe(DiagnosticSeverity.Error);
     }
 
+    [Theory]
+    [InlineData("[Migration(\"20260101000001\", \"a\")] public sealed class A<T> : IMigration { " + Body + " }")]
+    [InlineData("[Migration(\"20260101000001\", \"a\")] public sealed record A<T> : IMigration { " + Body + " }")]
+    [InlineData("public class Outer<T> { [Migration(\"20260101000001\", \"a\")] public sealed class A : IMigration { " + Body + " } }")]
+    public void Generic_migrations_report_a_diagnostic_without_invalid_generated_code(string declaration)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var compilation = CreateCompilation(CSharpSyntaxTree.ParseText(Usings + "namespace App;\n" + declaration, cancellationToken: cancellationToken));
+
+        CSharpGeneratorDriver.Create(new MigrationGenerator())
+            .RunGeneratorsAndUpdateCompilation(compilation, out var output, out var diagnostics, cancellationToken);
+
+        diagnostics.Select(d => d.Id).ShouldBe(["MM0013"]);
+        diagnostics.Single().GetMessage().ShouldContain("cannot be a generic migration");
+        output.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+    }
+
     [Fact]
     public void MongoDB_operations_without_the_session_are_reported_for_transactional_migrations()
     {

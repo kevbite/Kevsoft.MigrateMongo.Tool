@@ -18,6 +18,7 @@ internal sealed record MigrationModel(
     EquatableArray<string> Parameters,
     bool ImplementsInterface,
     bool IsAbstract,
+    bool IsGeneric,
     bool IsAccessible,
     bool HasConstructor,
     LocationInfo Location);
