@@ -30,7 +30,7 @@ public sealed class MongoDriverBackend
         ?? typeof(MongoClient).Assembly.GetName().Version?.ToString()
         ?? "unknown";
 
-    public static MongoDriverBackend Create(ResolvedConfig config, IServiceProvider services, ILoggerFactory loggerFactory)
+    internal static MongoDriverBackend Create(ResolvedConfig config, IServiceProvider services, ILoggerFactory loggerFactory)
     {
         var settings = MongoClientSettings.FromConnectionString(config.MongoUrl);
         settings.ApplicationName ??= "Kevsoft.MigrateMongo";

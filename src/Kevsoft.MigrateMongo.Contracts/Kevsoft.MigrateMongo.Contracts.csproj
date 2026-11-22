@@ -9,6 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Cli" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Hosting" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.MongoDriver" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Runner" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.IntegrationTests" />
+    <InternalsVisibleTo Include="migrate-mongo" />
     <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
   </ItemGroup>
 

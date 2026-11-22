@@ -8,7 +8,7 @@ namespace Kevsoft.MigrateMongo.Protocol;
 /// <summary>
 /// Helpers for reading the MongoDB Extended JSON values in <see cref="MigrationOutputInfo"/>, canonical or relaxed.
 /// </summary>
-public static class ExtendedJson
+internal static class ExtendedJson
 {
     /// <summary>
     /// Formats a value for people: <c>ObjectId("…")</c>, ISO dates, plain numbers and decimals, and

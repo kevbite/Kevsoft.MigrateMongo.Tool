@@ -7,7 +7,7 @@ namespace Kevsoft.MigrateMongo.Config;
 /// <summary>
 /// Loads <c>migrate-mongo.yaml</c>. Uses the YAML representation model (no reflection) so it is Native AOT safe.
 /// </summary>
-public static class ConfigLoader
+internal static class ConfigLoader
 {
     public const string DefaultFileName = "migrate-mongo.yaml";
 

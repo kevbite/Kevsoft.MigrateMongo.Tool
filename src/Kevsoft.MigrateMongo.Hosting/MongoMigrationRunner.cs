@@ -147,7 +147,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             CaptureStatements = options.CaptureStatements,
             ResultsMaxBytes = options.ResultsMaxBytes,
             IndexesPrune = options.IndexPrune.ToString().ToLowerInvariant(),
-            IndexesOnRebuild = options.IndexRebuild.ToString().ToLowerInvariant(),
+            IndexesOnRebuild = options.IndexRebuild,
             IndexesDropHiddenAfter = options.DropHiddenIndexesAfter,
             IndexesSupersededWindow = options.SupersededDefinitionWindow,
             SearchIndexesPrune = options.SearchIndexPrune.ToString().ToLowerInvariant(),
@@ -158,7 +158,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             CollectionsPrune = options.CollectionPrune.ToString().ToLowerInvariant(),
             CollectionsIgnore = [.. options.CollectionIgnore],
             ValidatorsPrune = options.ValidatorPrune.ToString().ToLowerInvariant(),
-            ValidatorsOnInvalidDocuments = options.OnInvalidDocuments.ToString().ToLowerInvariant(),
+            ValidatorsOnInvalidDocuments = options.OnInvalidDocuments,
             ValidatorsCountInvalidDocuments = options.CountInvalidDocuments,
             Provenance = new Provenance
             {

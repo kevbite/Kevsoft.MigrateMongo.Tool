@@ -321,7 +321,12 @@ public static class MigrateMongoRunner
         CaptureStatements = config.ResultsCaptureStatements,
         ResultsMaxBytes = config.ResultsMaxBytes,
         IndexesPrune = config.IndexesPrune,
-        IndexesOnRebuild = config.IndexesOnRebuild,
+        IndexesOnRebuild = config.IndexesOnRebuild switch
+        {
+            "allow" => IndexRebuild.Allow,
+            "fail" => IndexRebuild.Fail,
+            _ => throw new ConfigException("Config setting 'indexes.onRebuild' must be allow or fail."),
+        },
         IndexesDropHiddenAfter = TimeSpan.FromSeconds(config.IndexesDropHiddenAfterSeconds),
         IndexesSupersededWindow = TimeSpan.FromSeconds(config.IndexesSupersededWindowSeconds),
         SearchIndexesPrune = config.SearchIndexesPrune,
@@ -332,7 +337,12 @@ public static class MigrateMongoRunner
         CollectionsPrune = config.CollectionsPrune,
         CollectionsIgnore = [.. config.CollectionsIgnore],
         ValidatorsPrune = config.ValidatorsPrune,
-        ValidatorsOnInvalidDocuments = config.ValidatorsOnInvalidDocuments,
+        ValidatorsOnInvalidDocuments = config.ValidatorsOnInvalidDocuments switch
+        {
+            "warn" => InvalidDocuments.Warn,
+            "fail" => InvalidDocuments.Fail,
+            _ => throw new ConfigException("Config setting 'validators.onInvalidDocuments' must be warn or fail."),
+        },
         ValidatorsCountInvalidDocuments = config.ValidatorsCountInvalidDocuments,
         Provenance = new Provenance
         {

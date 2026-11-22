@@ -123,7 +123,7 @@ public sealed class ValidatorTests(IntegrationEnvironment environment)
 
     private static CollectionDescriptor Tiered => CollectionHarness.Define<BsonDocument>(c => c.Validator.JsonSchema(TierRequired));
 
-    private static void FailOnInvalid(EngineOptions options) => options.ValidatorsOnInvalidDocuments = "fail";
+    private static void FailOnInvalid(EngineOptions options) => options.ValidatorsOnInvalidDocuments = InvalidDocuments.Fail;
 
     private static void RemoveValidators(EngineOptions options) => options.ValidatorsPrune = "remove";
 

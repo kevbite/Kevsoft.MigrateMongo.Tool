@@ -2,7 +2,7 @@ using Kevsoft.MigrateMongo.Protocol;
 
 namespace Kevsoft.MigrateMongo.Engine;
 
-public static class MigrationStates
+internal static class MigrationStates
 {
     public const string Applied = "applied";
     public const string Applying = "applying";
@@ -11,7 +11,7 @@ public static class MigrationStates
     public const string Pending = "pending";
 }
 
-public static class HistoryEvents
+internal static class HistoryEvents
 {
     public const string Applied = "applied";
     public const string RolledBack = "rolledBack";
@@ -413,12 +413,12 @@ public sealed class MigrationExecutionException(MigrationOutputInfo? output, Exc
     public MigrationOutputInfo? Output { get; } = output;
 }
 
-public interface IMigrationEventSink
+internal interface IMigrationEventSink
 {
     void OnEvent(RunnerEvent runnerEvent);
 }
 
-public sealed class EngineOptions
+internal sealed class EngineOptions
 {
     public TimeSpan LockTtl { get; set; } = TimeSpan.FromMinutes(5);
 
@@ -464,7 +464,7 @@ public sealed class EngineOptions
     public TimeSpan SearchIndexesWaitTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary><c>allow</c> or <c>fail</c>: whether an index may be dropped and created again.</summary>
-    public string IndexesOnRebuild { get; set; } = "allow";
+    public IndexRebuild IndexesOnRebuild { get; set; } = IndexRebuild.Allow;
 
     /// <summary>With <c>prune: hide</c>, how long an undeclared index stays hidden before it's dropped.</summary>
     public TimeSpan IndexesDropHiddenAfter { get; set; } = TimeSpan.FromDays(7);
@@ -485,7 +485,7 @@ public sealed class EngineOptions
     public string ValidatorsPrune { get; set; } = "report";
 
     /// <summary><c>warn</c> or <c>fail</c>: what happens when existing documents fail a new or changed validator.</summary>
-    public string ValidatorsOnInvalidDocuments { get; set; } = "warn";
+    public InvalidDocuments ValidatorsOnInvalidDocuments { get; set; } = InvalidDocuments.Warn;
 
     /// <summary>Count existing documents that fail a new or changed validator before it's applied.</summary>
     public bool ValidatorsCountInvalidDocuments { get; set; } = true;

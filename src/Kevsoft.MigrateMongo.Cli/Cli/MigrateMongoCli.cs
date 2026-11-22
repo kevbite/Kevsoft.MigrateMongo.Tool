@@ -4,7 +4,7 @@ using Kevsoft.MigrateMongo.Protocol;
 namespace Kevsoft.MigrateMongo.Cli;
 
 /// <summary>A parsed command line, shared by the tool and the standalone runner.</summary>
-public sealed class CliInvocation
+internal sealed class CliInvocation
 {
     public string Command { get; init; } = "";
 
@@ -46,7 +46,7 @@ public sealed class CliInvocation
 /// The command line definition. The tool and the standalone runner use the same definition so they accept the same
 /// commands and options.
 /// </summary>
-public static class MigrateMongoCli
+internal static class MigrateMongoCli
 {
     /// <summary>Commands that need the migrations (and run inside the runner).</summary>
     public static readonly IReadOnlySet<string> RunnerCommands = new HashSet<string>(StringComparer.Ordinal)

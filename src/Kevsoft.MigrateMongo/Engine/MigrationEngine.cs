@@ -7,7 +7,7 @@ namespace Kevsoft.MigrateMongo.Engine;
 /// Plans and executes migrations. Never touches the MongoDB driver directly; all database access goes through
 /// <see cref="IMigrationStore"/> and <see cref="IMigrationExecutor"/>.
 /// </summary>
-public sealed partial class MigrationEngine
+internal sealed partial class MigrationEngine
 {
     private const int DefaultHistoryLimit = 50;
     private const int DefaultShowHistoryLimit = 10;
@@ -1326,4 +1326,4 @@ public sealed partial class MigrationEngine
         message.EndsWith("..", StringComparison.Ordinal) && !message.EndsWith("...", StringComparison.Ordinal) ? message[..^1] : message;
 }
 
-public sealed class MigrationEngineException(string message) : Exception(message);
+internal sealed class MigrationEngineException(string message) : Exception(message);

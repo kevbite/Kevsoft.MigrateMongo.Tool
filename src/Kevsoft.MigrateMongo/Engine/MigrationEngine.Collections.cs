@@ -4,7 +4,7 @@ using Kevsoft.MigrateMongo.Protocol;
 namespace Kevsoft.MigrateMongo.Engine;
 
 /// <summary>Collection definitions: bringing each collection's indexes in line with its <c>[ManagedCollection]</c> class.</summary>
-public sealed partial class MigrationEngine
+internal sealed partial class MigrationEngine
 {
     /// <summary>
     /// Whether <c>up</c> brings collections in line after the migrations. They're skipped when <c>--to</c> leaves later
@@ -243,7 +243,7 @@ public sealed partial class MigrationEngine
         SearchPrune = _options.SearchIndexesPrune,
         SearchWaitForReady = _options.SearchIndexesWaitForReady,
         SearchWaitTimeout = _options.SearchIndexesWaitTimeout,
-        OnRebuild = _options.IndexesOnRebuild,
+        OnRebuild = _options.IndexesOnRebuild == IndexRebuild.Fail ? "fail" : "allow",
         DropHiddenAfter = _options.IndexesDropHiddenAfter,
         AllowRebuild = (arguments.AllowRebuild ?? [])
             .Where(a => a.StartsWith(collection.Name + ".", StringComparison.Ordinal))
@@ -255,7 +255,7 @@ public sealed partial class MigrationEngine
         OnUnchangeable = _options.CollectionsOnUnchangeable,
         SkipUnchangeable = arguments.SkipUnchangeable?.Contains(collection.Name, StringComparer.Ordinal) == true,
         ValidatorPrune = _options.ValidatorsPrune,
-        OnInvalidDocuments = _options.ValidatorsOnInvalidDocuments,
+        OnInvalidDocuments = _options.ValidatorsOnInvalidDocuments == InvalidDocuments.Fail ? "fail" : "warn",
         CountInvalidDocuments = _options.ValidatorsCountInvalidDocuments,
         AllowInvalidDocuments = arguments.AllowInvalidDocuments?.Contains(collection.Name, StringComparer.Ordinal) == true,
         Hidden = state?.Hidden ?? new Dictionary<string, DateTime>(StringComparer.Ordinal),

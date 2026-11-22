@@ -18,6 +18,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Runner" />
+    <InternalsVisibleTo Include="migrate-mongo" />
     <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
   </ItemGroup>
 
