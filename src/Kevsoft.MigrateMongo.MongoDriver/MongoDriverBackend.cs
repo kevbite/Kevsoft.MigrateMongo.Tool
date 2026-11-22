@@ -32,7 +32,16 @@ public sealed class MongoDriverBackend
 
     public static MongoDriverBackend Create(ResolvedConfig config, IServiceProvider services, ILoggerFactory loggerFactory)
     {
-        var settings = MongoClientSettings.FromConnectionString(config.MongoUrl);
+        MongoClientSettings settings;
+        try
+        {
+            settings = MongoClientSettings.FromConnectionString(config.MongoUrl);
+        }
+        catch (MongoConfigurationException)
+        {
+            throw new ConfigException("'mongodb.url' is not a valid MongoDB connection string.");
+        }
+
         settings.ApplicationName ??= "Kevsoft.MigrateMongo";
         return Create(new MongoClient(settings), config.DatabaseName, config.StateCollection, services, loggerFactory);
     }

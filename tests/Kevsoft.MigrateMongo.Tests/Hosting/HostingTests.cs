@@ -1,3 +1,4 @@
+using Kevsoft.MigrateMongo.Config;
 using Kevsoft.MigrateMongo.Hosting;
 using Kevsoft.MigrateMongo.Protocol;
 using Microsoft.Extensions.DependencyInjection;
@@ -118,6 +119,21 @@ public sealed class HostingTests
         var error = await Should.ThrowAsync<InvalidOperationException>(() => runner.UpAsync());
 
         error.Message.ShouldBe("Set MongoMigrationOptions.ConnectionString or register an IMongoClient in the service collection.");
+    }
+
+    [Fact]
+    public async Task Invalid_connection_string_error_does_not_include_credentials()
+    {
+        var runner = Runner(services => services.AddMongoMigrations(o =>
+        {
+            o.DatabaseName = "app";
+            o.ConnectionString = "mongodb://deploy:sensitive-password/path@db.internal:27017";
+        }).AddSource(new EmptySource()));
+
+        var error = await Should.ThrowAsync<ConfigException>(() => runner.UpAsync());
+
+        error.Message.ShouldBe("'mongodb.url' is not a valid MongoDB connection string.");
+        error.Message.ShouldNotContain("sensitive-password");
     }
 
     [Fact]

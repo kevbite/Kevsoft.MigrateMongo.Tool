@@ -121,6 +121,18 @@ public sealed class ConfigLoaderTests
         config.MongoUrl.ShouldBe("mongodb://fallback");
     }
 
+    [Fact]
+    public void Unterminated_environment_variable_expression_does_not_echo_the_config_value()
+    {
+        const string connectionString = "mongodb://deploy:sensitive-password${MONGODB_URL";
+
+        var error = Should.Throw<ConfigException>(() => ConfigLoader.Interpolate(connectionString, Env));
+
+        error.Message.ShouldBe("Unterminated environment variable expression in config value.");
+        error.Message.ShouldNotContain("sensitive-password");
+        error.Message.ShouldNotContain(connectionString);
+    }
+
     [Theory]
     [InlineData("unknownSetting: 1", "unknownSetting")]
     [InlineData("mongodb:\n  uri: x", "mongodb.uri")]
