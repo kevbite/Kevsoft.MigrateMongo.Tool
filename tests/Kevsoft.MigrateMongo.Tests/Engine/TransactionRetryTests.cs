@@ -9,14 +9,14 @@ public sealed class TransactionRetryTests
     private readonly FakeStore _store = new();
     private readonly RecordingSink _sink = new();
 
-    private MigrationEngine Engine(MigrationDescriptor migration, FakeExecutor executor, TimeSpan? retryTimeout = null) =>
+    private MigrationEngine Engine(MigrationDescriptor migration, FakeExecutor executor, TimeSpan? retryTimeout = null, TimeProvider? timeProvider = null) =>
         new(_store, executor, [migration], new EngineOptions
         {
             LockWaitTimeout = TimeSpan.Zero,
             TransactionRetryDelay = TimeSpan.Zero,
             TransactionRetryTimeout = retryTimeout ?? TimeSpan.FromSeconds(30),
             Provenance = new Provenance { Host = "test-host", User = "tester", Library = "1.0.0", Driver = "3.5.0", Runtime = "10.0.0" },
-        }, _sink);
+        }, _sink, timeProvider);
 
     private static MigrationDescriptor FailingFirst(int failures, Exception error, Action? onRun = null, TransactionMode transaction = TransactionMode.Auto)
     {
@@ -127,22 +127,36 @@ public sealed class TransactionRetryTests
     {
         var executor = new FakeExecutor();
         var runs = 0;
-        var migration = Migrations.Create("20260101000001", "always-transient", up: async () =>
+        var timeProvider = new AdvancingTimeProvider();
+        var migration = Migrations.Create("20260101000001", "always-transient", up: () =>
         {
-            runs++;
-            await Task.Delay(10);
-            throw new FakeTransactionException(TransactionErrorKind.Transient);
+            if (++runs == 2)
+            {
+                timeProvider.Advance(TimeSpan.FromMilliseconds(100));
+            }
+
+            return Task.FromException(new FakeTransactionException(TransactionErrorKind.Transient));
         });
-        var engine = Engine(migration, executor, retryTimeout: TimeSpan.FromMilliseconds(100));
+        var engine = Engine(migration, executor, retryTimeout: TimeSpan.FromMilliseconds(100), timeProvider: timeProvider);
 
         var result = await engine.UpAsync(null, CancellationToken.None);
 
         result.ExitCode.ShouldBe(1);
         result.Message!.ShouldContain("Fake Transient error.");
-        runs.ShouldBeGreaterThan(1);
-        runs.ShouldBeLessThan(50);
+        runs.ShouldBe(2);
         _store.States.ShouldBeEmpty();
         _store.History.Select(h => h.Event).ShouldBe(["failed"]);
+    }
+
+    private sealed class AdvancingTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+
+        public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public void Advance(TimeSpan amount) => Interlocked.Add(ref _timestamp, amount.Ticks);
     }
 
     [Fact]

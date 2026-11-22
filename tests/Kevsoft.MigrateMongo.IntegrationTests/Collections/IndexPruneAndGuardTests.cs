@@ -398,7 +398,7 @@ public sealed class IndexPruneAndGuardTests(IntegrationEnvironment environment)
         o.IndexesDropHiddenAfter = dropHiddenAfter ?? TimeSpan.FromDays(7);
     };
 
-    private static Action<Engine.EngineOptions> Rebuild(string onRebuild) => o => o.IndexesOnRebuild = onRebuild;
+    private static Action<Engine.EngineOptions> Rebuild(string onRebuild) => o => o.IndexesOnRebuild = onRebuild == "fail" ? IndexRebuild.Fail : IndexRebuild.Allow;
 
     private static CollectionDescriptor Define(Action<IndexesBuilder<BsonDocument>> indexes) => CollectionHarness.Define(indexes);
 

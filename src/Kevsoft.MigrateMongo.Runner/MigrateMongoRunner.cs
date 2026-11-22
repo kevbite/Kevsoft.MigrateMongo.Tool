@@ -260,6 +260,7 @@ public static class MigrateMongoRunner
         try
         {
             ConfigLoader.EnsureConnectable(config);
+            var engineOptions = CreateEngineOptions(config, tool);
             var (migrations, collections) = MigrationDiscovery.Discover(options, entryAssembly);
             if (migrations.Count == 0 && collections.Count == 0 && command is not ("unlock" or "history" or "show"))
             {
@@ -287,7 +288,7 @@ public static class MigrateMongoRunner
             backend = MongoDriverBackend.Create(config, provider, loggerFactory);
             try
             {
-                var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(config, tool), sink, collections: collections);
+                var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, engineOptions, sink, collections: collections);
                 return await engine.ExecuteAsync(command, arguments, cancellationToken);
             }
             finally
@@ -321,7 +322,12 @@ public static class MigrateMongoRunner
         CaptureStatements = config.ResultsCaptureStatements,
         ResultsMaxBytes = config.ResultsMaxBytes,
         IndexesPrune = config.IndexesPrune,
-        IndexesOnRebuild = config.IndexesOnRebuild,
+        IndexesOnRebuild = config.IndexesOnRebuild switch
+        {
+            "allow" => IndexRebuild.Allow,
+            "fail" => IndexRebuild.Fail,
+            _ => throw new ConfigException("Config setting 'indexes.onRebuild' must be allow or fail."),
+        },
         IndexesDropHiddenAfter = TimeSpan.FromSeconds(config.IndexesDropHiddenAfterSeconds),
         IndexesSupersededWindow = TimeSpan.FromSeconds(config.IndexesSupersededWindowSeconds),
         SearchIndexesPrune = config.SearchIndexesPrune,
@@ -332,7 +338,12 @@ public static class MigrateMongoRunner
         CollectionsPrune = config.CollectionsPrune,
         CollectionsIgnore = [.. config.CollectionsIgnore],
         ValidatorsPrune = config.ValidatorsPrune,
-        ValidatorsOnInvalidDocuments = config.ValidatorsOnInvalidDocuments,
+        ValidatorsOnInvalidDocuments = config.ValidatorsOnInvalidDocuments switch
+        {
+            "warn" => InvalidDocuments.Warn,
+            "fail" => InvalidDocuments.Fail,
+            _ => throw new ConfigException("Config setting 'validators.onInvalidDocuments' must be warn or fail."),
+        },
         ValidatorsCountInvalidDocuments = config.ValidatorsCountInvalidDocuments,
         Provenance = new Provenance
         {

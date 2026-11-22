@@ -73,6 +73,15 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
         var options = registration.CreateOptions(services);
         var loggerFactory = services.GetService<ILoggerFactory>() ?? NullLoggerFactory.Instance;
         var logger = loggerFactory.CreateLogger("Kevsoft.MigrateMongo");
+        var sink = new LoggerEventSink(logger);
+        var engineOptions = CreateEngineOptions(options);
+        if (engineOptions.InvalidPolicyMessage() is { } invalidPolicy)
+        {
+            var failure = new CommandResult { ExitCode = ExitCodes.Failure, Message = invalidPolicy };
+            sink.OnEvent(new RunnerEvent { Type = EventTypes.Result, Result = failure });
+            return failure;
+        }
+
         var (migrations, collections) = registration.Discover(logger);
 
         IMongoClient client;
@@ -118,8 +127,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             // A scope per run, so migrations can depend on scoped services.
             await using var scope = services.CreateAsyncScope();
             var backend = MongoDriverBackend.Create(client, options.DatabaseName, options.StateCollection, scope.ServiceProvider, loggerFactory);
-            var sink = new LoggerEventSink(logger);
-            var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(options), sink, collections: collections);
+            var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, engineOptions, sink, collections: collections);
             var result = await engine.ExecuteAsync(command, arguments, cancellationToken);
             // The outcome and its warnings (e.g. checksum warnings with OnChecksumMismatch.Warn) go to the log too.
             sink.OnEvent(new RunnerEvent { Type = EventTypes.Result, Result = result });
@@ -156,7 +164,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             CaptureStatements = options.CaptureStatements,
             ResultsMaxBytes = options.ResultsMaxBytes,
             IndexesPrune = options.IndexPrune.ToString().ToLowerInvariant(),
-            IndexesOnRebuild = options.IndexRebuild.ToString().ToLowerInvariant(),
+            IndexesOnRebuild = options.IndexRebuild,
             IndexesDropHiddenAfter = options.DropHiddenIndexesAfter,
             IndexesSupersededWindow = options.SupersededDefinitionWindow,
             SearchIndexesPrune = options.SearchIndexPrune.ToString().ToLowerInvariant(),
@@ -167,7 +175,7 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
             CollectionsPrune = options.CollectionPrune.ToString().ToLowerInvariant(),
             CollectionsIgnore = [.. options.CollectionIgnore],
             ValidatorsPrune = options.ValidatorPrune.ToString().ToLowerInvariant(),
-            ValidatorsOnInvalidDocuments = options.OnInvalidDocuments.ToString().ToLowerInvariant(),
+            ValidatorsOnInvalidDocuments = options.OnInvalidDocuments,
             ValidatorsCountInvalidDocuments = options.CountInvalidDocuments,
             Provenance = new Provenance
             {

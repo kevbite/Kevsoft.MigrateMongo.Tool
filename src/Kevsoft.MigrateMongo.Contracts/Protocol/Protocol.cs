@@ -4,7 +4,7 @@ using Kevsoft.MigrateMongo.Config;
 
 namespace Kevsoft.MigrateMongo.Protocol;
 
-public static class ExitCodes
+internal static class ExitCodes
 {
     public const int Success = 0;
     public const int Failure = 1;
@@ -15,7 +15,7 @@ public static class ExitCodes
     public const int BuildFailed = 6;
 }
 
-public static class ProtocolVersions
+internal static class ProtocolVersions
 {
     public const int Current = 1;
 
@@ -26,7 +26,7 @@ public static class ProtocolVersions
 }
 
 /// <summary>Printed (as one JSON line) by <c>runner --mm-handshake</c>.</summary>
-public sealed class HandshakeInfo
+internal sealed class HandshakeInfo
 {
     public int[] Protocol { get; set; } = [];
 
@@ -38,7 +38,7 @@ public sealed class HandshakeInfo
 }
 
 /// <summary>Sent by the tool as the first line of the runner's stdin.</summary>
-public sealed class RunnerRequest
+internal sealed class RunnerRequest
 {
     public int Protocol { get; set; } = ProtocolVersions.Current;
 
@@ -52,7 +52,7 @@ public sealed class RunnerRequest
 }
 
 /// <summary>Control messages sent by the tool on stdin after the request.</summary>
-public sealed class RunnerControl
+internal sealed class RunnerControl
 {
     public string Type { get; set; } = "";
 }
@@ -107,13 +107,13 @@ public sealed class CommandArguments
     public bool AllowSuperseded { get; set; }
 }
 
-public static class OnlyScopes
+internal static class OnlyScopes
 {
     public const string Migrations = "migrations";
     public const string Collections = "collections";
 }
 
-public static class EventTypes
+internal static class EventTypes
 {
     public const string Log = "log";
     public const string LockWaiting = "lockWaiting";
@@ -129,7 +129,7 @@ public static class EventTypes
 }
 
 /// <summary>One NDJSON line written by the runner.</summary>
-public sealed class RunnerEvent
+internal sealed class RunnerEvent
 {
     public string Type { get; set; } = "";
 
@@ -203,7 +203,7 @@ public sealed class CommandResult
     public CollectionInfo? ShowCollection { get; set; }
 }
 
-public static class CollectionStates
+internal static class CollectionStates
 {
     /// <summary>The indexes match the definition.</summary>
     public const string InSync = "inSync";
@@ -597,4 +597,4 @@ public sealed class LockInfo
 [JsonSerializable(typeof(RunnerRequest))]
 [JsonSerializable(typeof(RunnerControl))]
 [JsonSerializable(typeof(RunnerEvent))]
-public sealed partial class ProtocolJsonContext : JsonSerializerContext;
+internal sealed partial class ProtocolJsonContext : JsonSerializerContext;

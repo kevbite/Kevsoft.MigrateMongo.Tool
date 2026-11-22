@@ -8,6 +8,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Hosting" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.MongoDriver" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Runner" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.Tests" />
+    <InternalsVisibleTo Include="Kevsoft.MigrateMongo.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Abstractions\Kevsoft.MigrateMongo.Abstractions.csproj" />
     <ProjectReference Include="..\Kevsoft.MigrateMongo.Contracts\Kevsoft.MigrateMongo.Contracts.csproj" />
   </ItemGroup>

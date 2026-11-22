@@ -5,7 +5,7 @@ using Kevsoft.MigrateMongo.Protocol;
 namespace Kevsoft.MigrateMongo.Cli;
 
 /// <summary>Renders runner events and results as human readable text.</summary>
-public sealed class ConsoleRenderer(TextWriter output, bool color)
+internal sealed class ConsoleRenderer(TextWriter output, bool color)
 {
     private const string Reset = "\u001b[0m";
     private const string Red = "\u001b[31m";

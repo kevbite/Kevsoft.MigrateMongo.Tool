@@ -3,7 +3,7 @@ namespace Kevsoft.MigrateMongo.Config;
 /// <summary>
 /// Fully resolved settings for a single run (environment overlay and <c>${ENV}</c> interpolation applied).
 /// </summary>
-public sealed class ResolvedConfig
+internal sealed class ResolvedConfig
 {
     public string? Project { get; set; }
 
