@@ -32,6 +32,26 @@ builder.Services
 
 Without a `ConnectionString`, the `IMongoClient` registered in your app is used.
 
+Options use the standard `IOptionsFactory<MongoMigrationOptions>` pipeline, so `services.Configure<MongoMigrationOptions>(...)`
+and configuration binding can be used alongside `AddMongoMigrations`. Validation runs when the runner is invoked, and before
+the host starts when `RunOnStartup()` is enabled.
+
+To migrate more than one database from the same service provider, give each registration a name and resolve its keyed runner:
+
+```csharp
+builder.Services
+    .AddMongoMigrations("catalog", o => o.DatabaseName = "catalog")
+    .FromAssemblyContaining<CatalogMigrations>();
+builder.Services
+    .AddMongoMigrations("identity", o => o.DatabaseName = "identity")
+    .FromAssemblyContaining<IdentityMigrations>();
+
+var catalog = app.Services.GetRequiredKeyedService<IMongoMigrationRunner>("catalog");
+await catalog.UpAsync();
+```
+
+Named registrations can also call `RunOnStartup()` to apply each database during host startup.
+
 ## What happens at startup
 
 `RunOnStartup()` applies pending migrations before any hosted service starts, so ASP.NET Core doesn't serve requests

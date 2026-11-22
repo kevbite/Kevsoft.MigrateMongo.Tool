@@ -61,6 +61,23 @@ public sealed class HostingTests
     }
 
     [Fact]
+    public void Named_migrations_can_configure_distinct_databases_and_runners()
+    {
+        var services = new ServiceCollection();
+        var first = services.AddMongoMigrations("catalog", o => o.DatabaseName = "catalog-db");
+        var second = services.AddMongoMigrations("identity", o => o.DatabaseName = "identity-db");
+        first.AddSource(new EmptySource());
+        second.AddSource(new EmptySource());
+
+        using var provider = services.BuildServiceProvider();
+
+        first.Registration.CreateOptions(provider).DatabaseName.ShouldBe("catalog-db");
+        second.Registration.CreateOptions(provider).DatabaseName.ShouldBe("identity-db");
+        provider.GetRequiredKeyedService<IMongoMigrationRunner>("catalog").ShouldNotBeNull();
+        provider.GetRequiredKeyedService<IMongoMigrationRunner>("identity").ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task Missing_database_name_is_reported()
     {
         var runner = Runner(services => services.AddMongoMigrations(_ => { }).AddSource(new EmptySource()));
