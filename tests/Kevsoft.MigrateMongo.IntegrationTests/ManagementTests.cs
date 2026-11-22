@@ -1,5 +1,6 @@
 using Kevsoft.MigrateMongo.Engine;
 using Kevsoft.MigrateMongo.MongoDriver;
+using Kevsoft.MigrateMongo.Protocol;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Shouldly;
@@ -8,6 +9,42 @@ namespace Kevsoft.MigrateMongo.IntegrationTests;
 
 public sealed class ManagementTests(IntegrationEnvironment environment)
 {
+    [Fact]
+    public async Task State_reads_omit_recorded_operations_unless_requested()
+    {
+        var databaseName = "state_projection_" + Guid.NewGuid().ToString("N");
+        var database = environment.Client.GetDatabase(databaseName);
+        var store = new MongoMigrationStore(database, "_migrations");
+        try
+        {
+            await store.InitializeAsync(CancellationToken.None);
+            await store.SaveStateAsync(new StoredMigrationState
+            {
+                Id = "20260101000001",
+                Name = "large-output",
+                State = MigrationStates.Applied,
+                Batch = 1,
+                Output = new MigrationOutputInfo
+                {
+                    Committed = true,
+                    Operations = [new OperationRecord { Kind = "insertMany", Collection = "large", Label = "seed" }],
+                },
+            }, null, CancellationToken.None);
+
+            var statusState = (await store.GetStatesAsync(CancellationToken.None)).Single();
+            statusState.Output!.Committed.ShouldBe(true);
+            statusState.Output.Operations.ShouldBeNull();
+
+            var showState = (await store.GetStatesAsync(CancellationToken.None, includeOperations: true)).Single();
+            showState.Output!.Operations!.Select(o => (o.Kind, o.Collection, o.Label))
+                .ShouldBe([("insertMany", "large", "seed")]);
+        }
+        finally
+        {
+            await environment.Client.DropDatabaseAsync(databaseName);
+        }
+    }
+
     [Fact]
     public async Task Lock_held_by_another_run_times_out_and_can_be_forced_open()
     {

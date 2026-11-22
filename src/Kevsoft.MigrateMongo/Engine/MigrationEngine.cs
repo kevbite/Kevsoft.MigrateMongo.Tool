@@ -640,7 +640,7 @@ internal sealed partial class MigrationEngine
     /// <param name="cancellationToken">Cancels the read.</param>
     public async Task<CommandResult> ShowAsync(string id, int? historyLimit, bool noStatements, CancellationToken cancellationToken)
     {
-        var states = await _store.GetStatesAsync(cancellationToken);
+        var states = await _store.GetStatesAsync(cancellationToken, includeOperations: true);
         if (!_byId.ContainsKey(id) && states.All(s => s.Id != id) &&
             (_collectionsByName.ContainsKey(id) || (await GetCollectionStatesAsync(cancellationToken)).ContainsKey(id)))
         {

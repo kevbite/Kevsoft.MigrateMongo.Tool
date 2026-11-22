@@ -137,7 +137,7 @@ public interface IMigrationStore
 {
     Task InitializeAsync(CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken, bool includeOperations = false);
 
     Task<IReadOnlyList<StoredCollectionState>> GetCollectionStatesAsync(CancellationToken cancellationToken);
 

@@ -25,7 +25,7 @@ internal sealed class FakeStore(Func<DateTime>? clock = null) : IMigrationStore
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken) =>
+    public Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken, bool includeOperations = false) =>
         Task.FromResult<IReadOnlyList<StoredMigrationState>>(States.Values.Select(Clone).ToList());
 
     public Dictionary<string, StoredCollectionState> CollectionStates { get; } = new(StringComparer.Ordinal);
