@@ -1,8 +1,12 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Runtime.Loader;
 using Kevsoft.MigrateMongo.SourceGenerator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Diagnostics;
+using MongoDB.Bson;
+using MongoDB.Driver;
 using Shouldly;
 
 namespace Kevsoft.MigrateMongo.Tests.SourceGenerator;
@@ -129,6 +133,85 @@ public sealed class MigrationGeneratorTests
 
         diagnostics.Select(d => d.Id).ShouldBe([expectedId]);
         diagnostics.Single().Severity.ShouldBe(DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void MongoDB_operations_without_the_session_are_reported_for_transactional_migrations()
+    {
+        var diagnostics = Analyze($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            using MongoDB.Driver;
+            namespace App;
+            [Migration("20260101000001", "writes")]
+            public sealed class Writes : IMigration
+            {
+                private readonly IMongoCollection<BsonDocument> _collection = null!;
+                private readonly IMongoDatabase _database = null!;
+
+                public async Task UpAsync(MigrationContext context, CancellationToken cancellationToken)
+                {
+                    await _collection.InsertOneAsync(new BsonDocument("value", 1), cancellationToken: cancellationToken);
+                    await _database.RunCommandAsync<BsonDocument>(new BsonDocument("ping", 1), cancellationToken: cancellationToken);
+                    await _collection.InsertOneAsync(context.Session!, new BsonDocument("value", 2), cancellationToken: cancellationToken);
+                }
+
+                public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+            }
+            """);
+
+        diagnostics.Select(d => d.Id).ShouldBe(["MM0012", "MM0012"]);
+        diagnostics.Select(d => d.GetMessage()).ShouldBe([
+            "Pass the migration session to 'InsertOneAsync' so the operation participates in the transaction",
+            "Pass the migration session to 'RunCommandAsync' so the operation participates in the transaction",
+        ]);
+    }
+
+    [Theory]
+    [InlineData("TransactionMode.Never", 0)]
+    [InlineData("TransactionMode.Always", 1)]
+    public void Migration_transaction_mode_controls_session_diagnostics(string mode, int expectedCount)
+    {
+        var diagnostics = Analyze($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            using MongoDB.Driver;
+            namespace App;
+            [Migration("20260101000001", "writes", Transaction = {{mode}})]
+            public sealed class Writes : IMigration
+            {
+                private readonly IMongoCollection<BsonDocument> _collection = null!;
+                public Task UpAsync(MigrationContext context, CancellationToken cancellationToken) =>
+                    _collection.InsertOneAsync(new BsonDocument("value", 1), cancellationToken: cancellationToken);
+                public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+            }
+            """);
+
+        diagnostics.Length.ShouldBe(expectedCount);
+        if (expectedCount > 0)
+        {
+            diagnostics.Single().Id.ShouldBe("MM0012");
+        }
+    }
+
+    [Fact]
+    public void Operations_outside_migrations_are_not_reported()
+    {
+        var diagnostics = Analyze("""
+            using System.Threading;
+            using System.Threading.Tasks;
+            using MongoDB.Bson;
+            using MongoDB.Driver;
+            namespace App;
+            public sealed class DatabaseWork
+            {
+                private readonly IMongoCollection<BsonDocument> _collection = null!;
+                public Task RunAsync(CancellationToken cancellationToken) =>
+                    _collection.InsertOneAsync(new BsonDocument("value", 1), cancellationToken: cancellationToken);
+            }
+            """);
+
+        diagnostics.ShouldBeEmpty();
     }
 
     [Fact]
@@ -374,6 +457,8 @@ public sealed class MigrationGeneratorTests
             .Split(Path.PathSeparator)
             .Select(p => MetadataReference.CreateFromFile(p))
             .Append(MetadataReference.CreateFromFile(typeof(IMigration).Assembly.Location))
+            .Append(MetadataReference.CreateFromFile(typeof(IMongoDatabase).Assembly.Location))
+            .Append(MetadataReference.CreateFromFile(typeof(BsonDocument).Assembly.Location))
             .ToList();
 
         return CSharpCompilation.Create(
@@ -381,6 +466,16 @@ public sealed class MigrationGeneratorTests
             trees,
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+    }
+
+    private static ImmutableArray<Diagnostic> Analyze(string source)
+    {
+        var compilation = CreateCompilation(CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)));
+        return compilation
+            .WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(new MigrationSessionAnalyzer()))
+            .GetAnalyzerDiagnosticsAsync()
+            .GetAwaiter()
+            .GetResult();
     }
 
     private static (IReadOnlyList<Diagnostic> GeneratorDiagnostics, Assembly? Assembly) Run(string source)

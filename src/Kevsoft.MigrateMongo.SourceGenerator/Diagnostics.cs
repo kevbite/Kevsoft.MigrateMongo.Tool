@@ -93,4 +93,12 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor MissingMigrationSession = new(
+        "MM0012",
+        "MongoDB operation does not use the migration session",
+        "Pass the migration session to '{0}' so the operation participates in the transaction",
+        Category,
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
 }
