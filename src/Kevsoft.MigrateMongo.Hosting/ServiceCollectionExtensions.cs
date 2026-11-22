@@ -1,7 +1,7 @@
 using System.Reflection;
 using Kevsoft.MigrateMongo.Hosting;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -120,7 +120,6 @@ namespace Kevsoft.MigrateMongo.Hosting
         /// (<c>--allow-superseded</c>), e.g. when rolling back on purpose.
         /// </summary>
         public bool AllowSuperseded { get; set; }
-
     }
 
     internal sealed class MongoMigrationRegistration
