@@ -77,6 +77,11 @@ internal static class MongoUrlRewriter
         if (hostAndPort.StartsWith('['))
         {
             var close = hostAndPort.IndexOf(']');
+            if (close <= 1 || (close + 1 < hostAndPort.Length && hostAndPort[close + 1] != ':'))
+            {
+                throw new ConfigException("'mongodb.url' has an invalid IPv6 host.");
+            }
+
             host = hostAndPort[1..close];
             port = close + 1 < hostAndPort.Length && hostAndPort[close + 1] == ':' ? hostAndPort[(close + 2)..] : null;
         }

@@ -48,6 +48,9 @@ public sealed class MongoUrlRewriterTests
     [InlineData("postgres://db")]
     [InlineData("mongodb:///app")]
     [InlineData("mongodb://db:notaport")]
+    [InlineData("mongodb://[fd00::1")]
+    [InlineData("mongodb://[]:27017")]
+    [InlineData("mongodb://[fd00::1]extra")]
     public void Invalid_urls_are_reported(string url)
     {
         Should.Throw<ConfigException>(() => MongoUrlRewriter.ForLocal(url, 5000));

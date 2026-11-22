@@ -164,6 +164,15 @@ public sealed class ConfigLoaderTests
         Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message.ShouldContain(expected);
     }
 
+    [Theory]
+    [InlineData("? [a, b]\n: value")]
+    [InlineData("mongodb:\n  ? [a, b]\n  : value")]
+    public void Non_scalar_mapping_keys_are_configuration_errors(string yaml)
+    {
+        Should.Throw<ConfigException>(() => ConfigLoader.Load(yaml, null, Env)).Message
+            .ShouldBe("Config mapping keys must be scalars.");
+    }
+
     [Fact]
     public void Transaction_retry_timeout_defaults_to_120_seconds_and_can_be_overridden_per_environment()
     {

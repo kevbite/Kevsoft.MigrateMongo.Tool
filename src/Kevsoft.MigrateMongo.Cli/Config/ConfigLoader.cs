@@ -367,7 +367,7 @@ internal static class ConfigLoader
     private static object? Convert(YamlNode node) => node switch
     {
         YamlMappingNode mapping => mapping.Children.ToDictionary(
-            kv => ((YamlScalarNode)kv.Key).Value ?? "",
+            kv => kv.Key is YamlScalarNode scalar ? scalar.Value ?? "" : throw new ConfigException("Config mapping keys must be scalars."),
             kv => Convert(kv.Value),
             StringComparer.Ordinal),
         YamlSequenceNode sequence => sequence.Children.Select(Convert).ToList(),
