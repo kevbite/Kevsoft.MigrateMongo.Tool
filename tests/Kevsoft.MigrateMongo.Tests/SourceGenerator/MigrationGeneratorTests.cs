@@ -167,6 +167,116 @@ public sealed class MigrationGeneratorTests
         ]);
     }
 
+    [Fact]
+    public void MongoDB_extension_operations_without_the_session_are_reported()
+    {
+        var diagnostics = Analyze($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            using MongoDB.Driver;
+            namespace App;
+            [Migration("20260101000001", "reads")]
+            public sealed class Reads : IMigration
+            {
+                private readonly IMongoCollection<BsonDocument> _collection = null!;
+                public Task UpAsync(MigrationContext context, CancellationToken cancellationToken)
+                {
+                    _ = _collection.Find(new BsonDocument("value", 1));
+                    _ = _collection.Find(context.Session!, new BsonDocument("value", 1));
+                    return Task.CompletedTask;
+                }
+                public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+            }
+            """);
+
+        diagnostics.Select(d => d.Id).ShouldBe(["MM0012"]);
+        diagnostics.Single().GetMessage().ShouldBe("Pass the migration session to 'Find' so the operation participates in the transaction");
+    }
+
+    [Fact]
+    public void Only_operations_proven_to_run_without_the_migration_session_are_exempt()
+    {
+        var diagnostics = Analyze($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            using MongoDB.Driver;
+            namespace App;
+            [Migration("20260101000001", "writes")]
+            public sealed class Writes : IMigration
+            {
+                private readonly IMongoCollection<BsonDocument> _collection = null!;
+                public async Task UpAsync(MigrationContext context, CancellationToken cancellationToken)
+                {
+                    if (context.Session is null)
+                    {
+                        await _collection.InsertOneAsync(new BsonDocument("guarded", 1));
+                        _ = _collection.Find(new BsonDocument("guarded", 1));
+                    }
+                    else
+                        await _collection.InsertOneAsync(context.Session, new BsonDocument("session", 1));
+                    if (context.Session != null)
+                        await _collection.InsertOneAsync(context.Session, new BsonDocument("session", 2));
+                    else
+                        await _collection.InsertOneAsync(new BsonDocument("guarded", 2));
+                    if (context.Session is null && !cancellationToken.IsCancellationRequested)
+                        await _collection.InsertOneAsync(new BsonDocument("guarded", 3));
+                    if ((context.Session) is not null)
+                        await _collection.InsertOneAsync(context.Session, new BsonDocument("session", 3));
+                    else
+                        await _collection.InsertOneAsync(new BsonDocument("guarded", 4));
+                    if (context.Session is null || cancellationToken.IsCancellationRequested)
+                        await _collection.InsertOneAsync(new BsonDocument("not-proven", 1));
+                    if (context.Session is not null)
+                        await _collection.InsertOneAsync(new BsonDocument("not-proven", 2));
+                    await _collection.InsertOneAsync(new BsonDocument("unguarded", 1));
+                }
+                public Task DownAsync(MigrationContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+            }
+            """);
+
+        diagnostics.Select(d => d.Id).ShouldBe(["MM0012", "MM0012", "MM0012"]);
+        diagnostics.Select(d => d.Location.SourceTree!.GetText().ToString(d.Location.SourceSpan)).ShouldBe([
+            "_collection.InsertOneAsync(new BsonDocument(\"not-proven\", 1))",
+            "_collection.InsertOneAsync(new BsonDocument(\"not-proven\", 2))",
+            "_collection.InsertOneAsync(new BsonDocument(\"unguarded\", 1))",
+        ]);
+    }
+
+    [Fact]
+    public void A_different_or_reassigned_context_does_not_suppress_the_warning()
+    {
+        var diagnostics = Analyze($$"""
+            {{Usings}}
+            using MongoDB.Bson;
+            using MongoDB.Driver;
+            namespace App;
+            [Migration("20260101000001", "writes")]
+            public sealed class Writes : IMigration
+            {
+                private readonly IMongoCollection<BsonDocument> _collection = null!;
+                private readonly MigrationContext _other = null!;
+                public async Task UpAsync(MigrationContext context, CancellationToken cancellationToken)
+                {
+                    if (_other.Session is null)
+                        await _collection.InsertOneAsync(new BsonDocument("other", 1));
+                    if (context.Session is null)
+                    {
+                        context = _other;
+                        await _collection.InsertOneAsync(new BsonDocument("reassigned", 1));
+                    }
+                }
+                public async Task DownAsync(MigrationContext context, CancellationToken cancellationToken)
+                {
+                    context = _other;
+                    if (context.Session is null)
+                        await _collection.InsertOneAsync(new BsonDocument("reassigned-before-guard", 1));
+                }
+            }
+            """);
+
+        diagnostics.Select(d => d.Id).ShouldBe(["MM0012", "MM0012", "MM0012"]);
+    }
+
     [Theory]
     [InlineData("TransactionMode.Never", 0)]
     [InlineData("TransactionMode.Always", 1)]
