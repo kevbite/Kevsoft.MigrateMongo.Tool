@@ -119,6 +119,52 @@ public sealed class MigrationEngineTests
     }
 
     [Fact]
+    public async Task Transactional_migration_is_not_committed_after_lock_loss()
+    {
+        var migration = Migrations.Create("20260101000001", "stale", up: () =>
+        {
+            _store.Lock = new LockInfo
+            {
+                RunId = "new-owner",
+                AcquiredAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddMinutes(5),
+            };
+            return Task.CompletedTask;
+        });
+
+        var result = await Engine([migration]).UpAsync(null, CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        result.Message!.ShouldContain("The migration lock was lost");
+        _store.States.ShouldBeEmpty();
+        _store.History.Single().Event.ShouldBe("failed");
+        _store.Lock!.RunId.ShouldBe("new-owner");
+    }
+
+    [Fact]
+    public async Task Applying_a_migration_does_not_overwrite_state_created_by_another_run()
+    {
+        const string migrationId = "20260101000001";
+        var migration = Migrations.Create(migrationId, "race", up: () =>
+        {
+            _store.States[migrationId] = new StoredMigrationState
+            {
+                Id = migrationId,
+                State = MigrationStates.Applied,
+                RunId = "new-owner",
+                Batch = 7,
+            };
+            return Task.CompletedTask;
+        });
+
+        var result = await Engine([migration]).UpAsync(null, CancellationToken.None);
+
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        _store.States[migrationId].RunId.ShouldBe("new-owner");
+        _store.States[migrationId].Batch.ShouldBe(7);
+    }
+
+    [Fact]
     public async Task Non_transactional_migration_is_written_as_applying_before_it_runs()
     {
         string? stateDuringRun = null;

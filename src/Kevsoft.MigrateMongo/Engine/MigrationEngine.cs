@@ -921,10 +921,11 @@ public sealed partial class MigrationEngine
             {
                 output = null;
                 output = Committed(await _executor.ExecuteAsync(scope, migration, run, outputOptions, cancellationToken), true);
+                var record = RecordingToken(scope, cancellationToken);
+                await EnsureLockFenceAsync(scope, record);
                 var state = NewState(migration, MigrationStates.Applied, batch, transactional);
                 state.DurationMs = stopwatch.ElapsedMilliseconds;
                 state.Output = output;
-                var record = RecordingToken(scope, cancellationToken);
                 await _store.SaveStateAsync(state, scope, record);
                 await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.Applied, "up", batch, migration.Checksum, state.DurationMs, null, output), scope, record);
             }, cancellationToken);
@@ -986,6 +987,7 @@ public sealed partial class MigrationEngine
                 output = null;
                 output = Committed(await _executor.ExecuteAsync(scope, migration, run, outputOptions, cancellationToken), true);
                 var record = RecordingToken(scope, cancellationToken);
+                await EnsureLockFenceAsync(scope, record);
                 await _store.DeleteStateAsync(migration.Id, scope, record);
                 await _store.AppendHistoryAsync(History(migration.Id, migration.Name, HistoryEvents.RolledBack, "down", state.Batch, state.Checksum, stopwatch.ElapsedMilliseconds, null, output), scope, record);
             }, cancellationToken);
@@ -1010,6 +1012,14 @@ public sealed partial class MigrationEngine
 
         Emit(EventTypes.MigrationCompleted, migration, "down", transactional, stopwatch.ElapsedMilliseconds, null, output);
         return null;
+    }
+
+    private async Task EnsureLockFenceAsync(IExecutionScope scope, CancellationToken cancellationToken)
+    {
+        if (scope.Transactional && !await _store.FenceLockAsync(RunId, scope, cancellationToken))
+        {
+            throw new MigrationEngineException("The migration lock was lost; refusing to commit the transaction.");
+        }
     }
 
     private static MigrationOutputInfo? Committed(MigrationOutputInfo? output, bool? committed)

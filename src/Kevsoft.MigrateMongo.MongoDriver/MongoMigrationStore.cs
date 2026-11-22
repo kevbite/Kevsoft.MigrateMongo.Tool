@@ -75,11 +75,19 @@ public sealed class MongoMigrationStore : IMigrationStore
     public Task SaveStateAsync(StoredMigrationState state, IExecutionScope? scope, CancellationToken cancellationToken)
     {
         var filter = new BsonDocument("_id", state.Id);
-        var options = new ReplaceOptions { IsUpsert = true };
         var document = ToDocument(state);
-        return SessionOf(scope) is { } session
-            ? _states.ReplaceOneAsync(session, filter, document, options, cancellationToken)
-            : _states.ReplaceOneAsync(filter, document, options, cancellationToken);
+        if (scope?.Transactional == true)
+        {
+            var session = SessionOf(scope) ?? throw new InvalidOperationException("A transactional scope has no MongoDB session.");
+            return _states.InsertOneAsync(session, document, options: null, cancellationToken);
+        }
+
+        if (state.State == MigrationStates.Applying)
+        {
+            return _states.InsertOneAsync(document, options: null, cancellationToken);
+        }
+
+        return _states.ReplaceOneAsync(filter, document, new ReplaceOptions { IsUpsert = true }, cancellationToken);
     }
 
     public Task DeleteStateAsync(string id, IExecutionScope? scope, CancellationToken cancellationToken)
@@ -197,6 +205,25 @@ public sealed class MongoMigrationStore : IMigrationStore
 
     public Task ReleaseLockAsync(string runId, CancellationToken cancellationToken) =>
         _lock.DeleteOneAsync(new BsonDocument { { "_id", LockId }, { "runId", runId } }, cancellationToken);
+
+    public async Task<bool> FenceLockAsync(string runId, IExecutionScope scope, CancellationToken cancellationToken)
+    {
+        if (!scope.Transactional)
+        {
+            throw new ArgumentException("Lock fencing requires a transactional execution scope.", nameof(scope));
+        }
+
+        var session = SessionOf(scope) ?? throw new InvalidOperationException("A transactional scope has no MongoDB session.");
+        var filter = new BsonDocument
+        {
+            { "_id", LockId },
+            { "runId", runId },
+            { "$expr", new BsonDocument("$gte", new BsonArray { "$expiresAt", "$$NOW" }) },
+        };
+        var update = Pipeline(new BsonDocument("$set", new BsonDocument("fencedAt", "$$NOW")));
+        var result = await _lock.UpdateOneAsync(session, filter, update, options: null, cancellationToken);
+        return result.MatchedCount == 1;
+    }
 
     public async Task<LockInfo?> GetLockAsync(CancellationToken cancellationToken)
     {

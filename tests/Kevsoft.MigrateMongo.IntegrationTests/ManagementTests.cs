@@ -1,3 +1,5 @@
+using Kevsoft.MigrateMongo.Engine;
+using Kevsoft.MigrateMongo.MongoDriver;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Shouldly;
@@ -31,6 +33,150 @@ public sealed class ManagementTests(IntegrationEnvironment environment)
         workspace.Find("_migrations.lock").ShouldBeEmpty();
 
         (await workspace.RunAsync("up", "--no-build")).ExitCode.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Transactional_lock_fence_rejects_a_stale_owner()
+    {
+        var databaseName = "lock_fence_" + Guid.NewGuid().ToString("N");
+        var database = environment.Client.GetDatabase(databaseName);
+        var store = new MongoMigrationStore(database, "_migrations");
+        try
+        {
+            await store.InitializeAsync(CancellationToken.None);
+            (await store.TryAcquireLockAsync("stale-owner", null, TimeSpan.FromMinutes(1), CancellationToken.None)).ShouldNotBeNull();
+            (await store.DeleteLockAsync(onlyIfExpired: false, CancellationToken.None)).ShouldBeTrue();
+            (await store.TryAcquireLockAsync("current-owner", null, TimeSpan.FromMinutes(1), CancellationToken.None)).ShouldNotBeNull();
+
+            var session = await environment.Client.StartSessionAsync();
+            session.StartTransaction();
+            await using var scope = new MongoExecutionScope(session);
+
+            (await store.FenceLockAsync("stale-owner", scope, CancellationToken.None)).ShouldBeFalse();
+        }
+        finally
+        {
+            await environment.Client.DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Transactional_lock_fence_rejects_an_expired_owner()
+    {
+        var databaseName = "expired_lock_fence_" + Guid.NewGuid().ToString("N");
+        var database = environment.Client.GetDatabase(databaseName);
+        var store = new MongoMigrationStore(database, "_migrations");
+        try
+        {
+            await store.InitializeAsync(CancellationToken.None);
+            (await store.TryAcquireLockAsync("expired-owner", null, TimeSpan.FromMinutes(1), CancellationToken.None)).ShouldNotBeNull();
+            await database.GetCollection<BsonDocument>("_migrations.lock").UpdateOneAsync(
+                new BsonDocument("runId", "expired-owner"),
+                new BsonDocument("$set", new BsonDocument("expiresAt", DateTime.UtcNow.AddMinutes(-1))));
+
+            var session = await environment.Client.StartSessionAsync();
+            session.StartTransaction();
+            await using var scope = new MongoExecutionScope(session);
+
+            (await store.FenceLockAsync("expired-owner", scope, CancellationToken.None)).ShouldBeFalse();
+        }
+        finally
+        {
+            await environment.Client.DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Transactional_fence_and_state_insert_commit_together()
+    {
+        var databaseName = "transactional_fence_" + Guid.NewGuid().ToString("N");
+        var database = environment.Client.GetDatabase(databaseName);
+        var store = new MongoMigrationStore(database, "_migrations");
+        try
+        {
+            await store.InitializeAsync(CancellationToken.None);
+            (await store.TryAcquireLockAsync("current-owner", null, TimeSpan.FromMinutes(1), CancellationToken.None)).ShouldNotBeNull();
+
+            var session = await environment.Client.StartSessionAsync();
+            session.StartTransaction();
+            await using (var scope = new MongoExecutionScope(session))
+            {
+                (await store.FenceLockAsync("current-owner", scope, CancellationToken.None)).ShouldBeTrue();
+                await store.SaveStateAsync(new StoredMigrationState
+                {
+                    Id = "20260101000001",
+                    State = MigrationStates.Applied,
+                    RunId = "current-owner",
+                    Batch = 1,
+                }, scope, CancellationToken.None);
+                await scope.CommitAsync(CancellationToken.None);
+            }
+
+            var saved = await database.GetCollection<BsonDocument>("_migrations")
+                .Find(new BsonDocument("_id", "20260101000001"))
+                .SingleAsync();
+            saved["runId"].AsString.ShouldBe("current-owner");
+            (await database.GetCollection<BsonDocument>("_migrations.lock").Find(new BsonDocument("_id", "lock")).SingleAsync())
+                .Contains("fencedAt").ShouldBeTrue();
+        }
+        finally
+        {
+            await environment.Client.DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Pending_state_insert_does_not_replace_an_existing_state()
+    {
+        var databaseName = "state_insert_" + Guid.NewGuid().ToString("N");
+        var database = environment.Client.GetDatabase(databaseName);
+        var store = new MongoMigrationStore(database, "_migrations");
+        try
+        {
+            await store.InitializeAsync(CancellationToken.None);
+            var original = new StoredMigrationState
+            {
+                Id = "20260101000001",
+                State = MigrationStates.Applying,
+                RunId = "first-run",
+                Batch = 1,
+            };
+            await store.SaveStateAsync(original, null, CancellationToken.None);
+
+            var conflict = new StoredMigrationState
+            {
+                Id = original.Id,
+                State = MigrationStates.Applying,
+                RunId = "second-run",
+                Batch = 2,
+            };
+
+            await Should.ThrowAsync<MongoWriteException>(() => store.SaveStateAsync(conflict, null, CancellationToken.None));
+
+            var saved = await database.GetCollection<BsonDocument>("_migrations")
+                .Find(new BsonDocument("_id", original.Id))
+                .SingleAsync();
+            saved["runId"].AsString.ShouldBe("first-run");
+            saved["batch"].AsInt32.ShouldBe(1);
+
+            var session = await environment.Client.StartSessionAsync();
+            session.StartTransaction();
+            await using var scope = new MongoExecutionScope(session);
+            var transactionalConflict = new StoredMigrationState
+            {
+                Id = original.Id,
+                State = MigrationStates.Applied,
+                RunId = "transactional-run",
+                Batch = 3,
+            };
+
+            await Should.ThrowAsync<MongoWriteException>(() =>
+                store.SaveStateAsync(transactionalConflict, scope, CancellationToken.None));
+        }
+        finally
+        {
+            await environment.Client.DropDatabaseAsync(databaseName);
+        }
     }
 
     [Fact]
