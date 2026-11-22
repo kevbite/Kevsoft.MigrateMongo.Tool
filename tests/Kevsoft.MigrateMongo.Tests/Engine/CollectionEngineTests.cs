@@ -20,6 +20,43 @@ public sealed class CollectionEngineTests
             Provenance = new Provenance { Host = "test-host", User = "tester", Library = "1.0.0", Driver = "3.5.0", Runtime = "10.0.0" },
         }, _sink, collections: collections.Select(Collections.Create));
 
+    [Theory]
+    [InlineData("status", 2, 0, "Invalid migration configuration: indexes.onRebuild must be allow or fail.")]
+    [InlineData("up", 0, -1, "Invalid migration configuration: validators.onInvalidDocuments must be warn or fail.")]
+    public async Task Invalid_policies_return_failure_before_work(string command, int rebuild, int invalidDocuments, string message)
+    {
+        var engine = new MigrationEngine(_store, _executor, [Migrations.Create("20260101000001", "seed")],
+            new EngineOptions { IndexesOnRebuild = (IndexRebuild)rebuild, ValidatorsOnInvalidDocuments = (InvalidDocuments)invalidDocuments },
+            _sink, collections: [Collections.Create("users")]);
+
+        var result = await engine.ExecuteAsync(command, new CommandArguments(), CancellationToken.None);
+
+        result.ExitCode.ShouldBe(1);
+        result.Message.ShouldBe(message);
+        _executor.RefreshCount.ShouldBe(0);
+        _executor.Calls.ShouldBeEmpty();
+        _executor.Policies.ShouldBeEmpty();
+        _store.States.ShouldBeEmpty();
+        _store.History.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData(IndexRebuild.Allow, InvalidDocuments.Warn, "allow", "warn")]
+    [InlineData(IndexRebuild.Fail, InvalidDocuments.Fail, "fail", "fail")]
+    public async Task Valid_policies_reach_the_collection_planner(IndexRebuild rebuild, InvalidDocuments invalidDocuments, string expectedRebuild, string expectedInvalidDocuments)
+    {
+        var engine = new MigrationEngine(_store, _executor, [],
+            new EngineOptions { IndexesOnRebuild = rebuild, ValidatorsOnInvalidDocuments = invalidDocuments },
+            _sink, collections: [Collections.Create("users")]);
+
+        var result = await engine.ExecuteAsync("status", new CommandArguments(), CancellationToken.None);
+
+        result.ExitCode.ShouldBe(0);
+        var policy = _executor.Policies.ShouldHaveSingleItem();
+        policy.OnRebuild.ShouldBe(expectedRebuild);
+        policy.OnInvalidDocuments.ShouldBe(expectedInvalidDocuments);
+    }
+
     [Fact]
     public async Task Up_applies_migrations_then_brings_collections_in_line()
     {

@@ -260,6 +260,7 @@ public static class MigrateMongoRunner
         try
         {
             ConfigLoader.EnsureConnectable(config);
+            var engineOptions = CreateEngineOptions(config, tool);
             var (migrations, collections) = MigrationDiscovery.Discover(options, entryAssembly);
             if (migrations.Count == 0 && collections.Count == 0 && command is not ("unlock" or "history" or "show"))
             {
@@ -287,7 +288,7 @@ public static class MigrateMongoRunner
             backend = MongoDriverBackend.Create(config, provider, loggerFactory);
             try
             {
-                var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, CreateEngineOptions(config, tool), sink, collections: collections);
+                var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, engineOptions, sink, collections: collections);
                 return await engine.ExecuteAsync(command, arguments, cancellationToken);
             }
             finally

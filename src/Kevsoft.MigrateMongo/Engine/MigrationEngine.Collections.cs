@@ -243,7 +243,12 @@ internal sealed partial class MigrationEngine
         SearchPrune = _options.SearchIndexesPrune,
         SearchWaitForReady = _options.SearchIndexesWaitForReady,
         SearchWaitTimeout = _options.SearchIndexesWaitTimeout,
-        OnRebuild = _options.IndexesOnRebuild == IndexRebuild.Fail ? "fail" : "allow",
+        OnRebuild = _options.IndexesOnRebuild switch
+        {
+            IndexRebuild.Allow => "allow",
+            IndexRebuild.Fail => "fail",
+            _ => throw new MigrationEngineException("indexes.onRebuild must be allow or fail."),
+        },
         DropHiddenAfter = _options.IndexesDropHiddenAfter,
         AllowRebuild = (arguments.AllowRebuild ?? [])
             .Where(a => a.StartsWith(collection.Name + ".", StringComparison.Ordinal))
@@ -255,7 +260,12 @@ internal sealed partial class MigrationEngine
         OnUnchangeable = _options.CollectionsOnUnchangeable,
         SkipUnchangeable = arguments.SkipUnchangeable?.Contains(collection.Name, StringComparer.Ordinal) == true,
         ValidatorPrune = _options.ValidatorsPrune,
-        OnInvalidDocuments = _options.ValidatorsOnInvalidDocuments == InvalidDocuments.Fail ? "fail" : "warn",
+        OnInvalidDocuments = _options.ValidatorsOnInvalidDocuments switch
+        {
+            InvalidDocuments.Warn => "warn",
+            InvalidDocuments.Fail => "fail",
+            _ => throw new MigrationEngineException("validators.onInvalidDocuments must be warn or fail."),
+        },
         CountInvalidDocuments = _options.ValidatorsCountInvalidDocuments,
         AllowInvalidDocuments = arguments.AllowInvalidDocuments?.Contains(collection.Name, StringComparer.Ordinal) == true,
         Hidden = state?.Hidden ?? new Dictionary<string, DateTime>(StringComparer.Ordinal),

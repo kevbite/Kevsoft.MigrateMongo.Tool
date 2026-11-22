@@ -85,6 +85,43 @@ public sealed class HostingTests
         error.Message.ShouldBe("Invalid Kevsoft.MigrateMongo options: LockTtl must be positive. LockWaitTimeout can't be negative. TransactionRetryTimeout can't be negative. ResultsMaxBytes must be positive.");
     }
 
+    [Theory]
+    [InlineData(2, 0, "Invalid migration configuration: indexes.onRebuild must be allow or fail.")]
+    [InlineData(0, -1, "Invalid migration configuration: validators.onInvalidDocuments must be warn or fail.")]
+    [InlineData(2, 2, "Invalid migration configuration: indexes.onRebuild must be allow or fail. validators.onInvalidDocuments must be warn or fail.")]
+    public async Task Invalid_collection_policies_return_failure_before_connecting(int rebuild, int invalidDocuments, string message)
+    {
+        var runner = Runner(services => services.AddMongoMigrations(o =>
+        {
+            o.DatabaseName = "app";
+            o.IndexRebuild = (IndexRebuild)rebuild;
+            o.OnInvalidDocuments = (InvalidDocuments)invalidDocuments;
+        }).AddSource(new EmptySource()));
+
+        var result = await runner.UpAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        result.ExitCode.ShouldBe(1);
+        result.Message.ShouldBe(message);
+    }
+
+    [Fact]
+    public async Task Invalid_collection_policy_stops_startup_with_the_failure_result()
+    {
+        var services = new ServiceCollection();
+        services.AddMongoMigrations(o =>
+        {
+            o.DatabaseName = "app";
+            o.IndexRebuild = (IndexRebuild)2;
+        }).AddSource(new EmptySource()).RunOnStartup();
+        using var provider = services.BuildServiceProvider();
+        var service = (IHostedLifecycleService)provider.GetServices<IHostedService>().Single();
+
+        var error = await Should.ThrowAsync<MongoMigrationException>(() => service.StartingAsync(TestContext.Current.CancellationToken));
+
+        error.Result.ExitCode.ShouldBe(1);
+        error.Result.Message.ShouldBe("Invalid migration configuration: indexes.onRebuild must be allow or fail.");
+    }
+
     [Fact]
     public async Task A_tunnel_needs_a_connection_string_and_a_provider()
     {

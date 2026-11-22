@@ -65,6 +65,11 @@ internal sealed partial class MigrationEngine
 
     public Task<CommandResult> ExecuteAsync(string command, CommandArguments arguments, CancellationToken cancellationToken)
     {
+        if (_options.InvalidPolicyMessage() is { } invalidPolicy)
+        {
+            return Task.FromResult(new CommandResult { ExitCode = ExitCodes.Failure, Message = invalidPolicy });
+        }
+
         // A reused engine may hold a namespace listing cached by an earlier command; drop it so each command reads the
         // database as it is now, not as it was when a previous command ran.
         _executor.RefreshCollectionCache();

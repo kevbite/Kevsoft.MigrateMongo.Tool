@@ -420,6 +420,22 @@ internal interface IMigrationEventSink
 
 internal sealed class EngineOptions
 {
+    public string? InvalidPolicyMessage()
+    {
+        var errors = new List<string>();
+        if (IndexesOnRebuild is not (IndexRebuild.Allow or IndexRebuild.Fail))
+        {
+            errors.Add("indexes.onRebuild must be allow or fail.");
+        }
+
+        if (ValidatorsOnInvalidDocuments is not (InvalidDocuments.Warn or InvalidDocuments.Fail))
+        {
+            errors.Add("validators.onInvalidDocuments must be warn or fail.");
+        }
+
+        return errors.Count == 0 ? null : "Invalid migration configuration: " + string.Join(" ", errors);
+    }
+
     public TimeSpan LockTtl { get; set; } = TimeSpan.FromMinutes(5);
 
     public TimeSpan LockWaitTimeout { get; set; } = TimeSpan.FromMinutes(1);
