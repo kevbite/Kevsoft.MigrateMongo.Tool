@@ -1,6 +1,8 @@
 using Kevsoft.MigrateMongo.Aws;
 using Kevsoft.MigrateMongo.Config;
 using Kevsoft.MigrateMongo.MongoDriver;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using MongoDB.Driver;
 using MongoDB.Driver.Authentication.AWS;
 using Shouldly;
@@ -20,6 +22,21 @@ public class MongoAuthenticationTests
     public void An_unregistered_mechanism_is_reported_as_such()
     {
         MongoAuthentication.IsRegistered("KEVSOFT-NEVER-REGISTERED").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Invalid_connection_string_error_does_not_include_credentials()
+    {
+        const string connectionString = "mongodb://deploy:sensitive-password/path@db.internal:27017";
+        var services = new ServiceCollection().BuildServiceProvider();
+        var config = new ResolvedConfig { MongoUrl = connectionString, DatabaseName = "app" };
+
+        var error = Should.Throw<ConfigException>(() =>
+            MongoDriverBackend.Create(config, services, NullLoggerFactory.Instance));
+
+        error.Message.ShouldBe("'mongodb.url' is not a valid MongoDB connection string.");
+        error.Message.ShouldNotContain("sensitive-password");
+        error.Message.ShouldNotContain(connectionString);
     }
 
     [Fact]

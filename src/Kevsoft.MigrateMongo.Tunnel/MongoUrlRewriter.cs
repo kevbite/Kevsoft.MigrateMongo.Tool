@@ -94,7 +94,7 @@ internal static class MongoUrlRewriter
 
         return int.TryParse(port, out var number) && number is > 0 and <= 65535
             ? (host, number)
-            : throw new ConfigException($"'mongodb.url' has an invalid port in '{hostAndPort}'.");
+            : throw new ConfigException("'mongodb.url' has an invalid port.");
     }
 
     private static string[] Options(string query) => query.Split('&', StringSplitOptions.RemoveEmptyEntries);

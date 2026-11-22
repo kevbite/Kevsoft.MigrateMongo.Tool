@@ -1,5 +1,7 @@
+using Kevsoft.MigrateMongo.Config;
 using Kevsoft.MigrateMongo.Hosting;
 using Kevsoft.MigrateMongo.Protocol;
+using Kevsoft.MigrateMongo.Tunnel;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -118,6 +120,39 @@ public sealed class HostingTests
         var error = await Should.ThrowAsync<InvalidOperationException>(() => runner.UpAsync());
 
         error.Message.ShouldBe("Set MongoMigrationOptions.ConnectionString or register an IMongoClient in the service collection.");
+    }
+
+    [Fact]
+    public async Task Invalid_connection_string_error_does_not_include_credentials()
+    {
+        var runner = Runner(services => services.AddMongoMigrations(o =>
+        {
+            o.DatabaseName = "app";
+            o.ConnectionString = "mongodb://deploy:sensitive-password/path@db.internal:27017";
+        }).AddSource(new EmptySource()));
+
+        var error = await Should.ThrowAsync<ConfigException>(() => runner.UpAsync());
+
+        error.Message.ShouldBe("'mongodb.url' is not a valid MongoDB connection string.");
+        error.Message.ShouldNotContain("sensitive-password");
+    }
+
+    [Fact]
+    public async Task Invalid_connection_string_error_from_a_local_tunnel_does_not_include_credentials()
+    {
+        var runner = Runner(services => services.AddMongoMigrations(o =>
+        {
+            o.DatabaseName = "app";
+            o.ConnectionString = "mongodb://deploy:sensitive-password/path@db.internal:27017";
+            o.Tunnel = new TunnelConfig { Host = "bastion", User = "user", Mode = TunnelConfig.LocalMode };
+            o.TunnelProvider = new InvalidPortTunnelProvider();
+        }).AddSource(new EmptySource()));
+
+        var error = await Should.ThrowAsync<ConfigException>(() => runner.UpAsync());
+
+        error.Message.ShouldBe("'mongodb.url' has an invalid port.");
+        error.Message.ShouldNotContain("sensitive-password");
+        error.Message.ShouldNotContain("deploy");
     }
 
     [Fact]
@@ -314,6 +349,15 @@ public sealed class HostingTests
     private sealed class EmptySource : IMigrationSource
     {
         public IReadOnlyCollection<MigrationDescriptor> GetMigrations() => [];
+    }
+
+    private sealed class InvalidPortTunnelProvider : IMongoTunnelProvider
+    {
+        public Task<IMongoTunnel> OpenAsync(TunnelConfig config, string mongoUrl, MongoTunnelOptions options, CancellationToken cancellationToken)
+        {
+            MongoUrlRewriter.ForLocal(mongoUrl, 5000);
+            throw new InvalidOperationException("The test connection string should have an invalid port.");
+        }
     }
 
     private sealed class FakeRunner(CommandResult result) : IMongoMigrationRunner

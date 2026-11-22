@@ -322,7 +322,7 @@ public static class ConfigLoader
             var end = value.IndexOf('}', start + 2);
             if (end < 0)
             {
-                throw new ConfigException($"Unterminated '${{' in config value '{value}'.");
+                throw new ConfigException("Unterminated environment variable expression in config value.");
             }
 
             builder.Append(value, index, start - index);

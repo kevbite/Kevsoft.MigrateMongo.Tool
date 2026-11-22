@@ -91,7 +91,16 @@ internal sealed class MongoMigrationRunner(IServiceProvider services, MongoMigra
 
         if ((tunnel?.MongoUrl ?? options.ConnectionString) is { } connectionString)
         {
-            var settings = MongoClientSettings.FromConnectionString(connectionString);
+            MongoClientSettings settings;
+            try
+            {
+                settings = MongoClientSettings.FromConnectionString(connectionString);
+            }
+            catch (MongoConfigurationException)
+            {
+                throw new ConfigException("'mongodb.url' is not a valid MongoDB connection string.");
+            }
+
             settings.ApplicationName ??= "Kevsoft.MigrateMongo";
             var created = new MongoClient(settings);
             client = created;
