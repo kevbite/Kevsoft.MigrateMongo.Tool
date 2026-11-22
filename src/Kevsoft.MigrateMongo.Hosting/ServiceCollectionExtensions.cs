@@ -237,6 +237,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
         private static MongoMigrationsBuilder DefaultRegistration(IServiceCollection services)
         {
+            services.AddOptions<MongoMigrationOptions>();
             var registration = services.FirstOrDefault(d =>
                 d.ServiceType == typeof(MongoMigrationRegistration) && d.ServiceKey is null)?.ImplementationInstance as MongoMigrationRegistration;
             if (registration is null)

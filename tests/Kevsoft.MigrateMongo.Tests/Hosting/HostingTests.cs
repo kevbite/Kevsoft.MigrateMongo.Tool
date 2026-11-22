@@ -78,6 +78,19 @@ public sealed class HostingTests
     }
 
     [Fact]
+    public void Service_provider_options_work_without_the_action_only_overload()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new AppSettings("configured-from-service"));
+        var builder = services.AddMongoMigrations((provider, options) =>
+            options.DatabaseName = provider.GetRequiredService<AppSettings>().DatabaseName);
+
+        using var provider = services.BuildServiceProvider();
+
+        builder.Registration.CreateOptions(provider).DatabaseName.ShouldBe("configured-from-service");
+    }
+
+    [Fact]
     public async Task Missing_database_name_is_reported()
     {
         var runner = Runner(services => services.AddMongoMigrations(_ => { }).AddSource(new EmptySource()));
