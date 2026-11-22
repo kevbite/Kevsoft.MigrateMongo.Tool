@@ -14,19 +14,23 @@ namespace Kevsoft.MigrateMongo.MongoDriver;
 public sealed class MongoMigrationStore : IMigrationStore
 {
     private const string LockId = "lock";
+    private const string FenceId = "fence";
     private const int DuplicateKeyCode = 11000;
 
+    private readonly IMongoDatabase _database;
     private readonly IMongoCollection<BsonDocument> _states;
     private readonly IMongoCollection<BsonDocument> _history;
     private readonly IMongoCollection<BsonDocument> _lock;
     private readonly IMongoCollection<BsonDocument> _collections;
     private bool _initialized;
+    private bool? _supportsTransactions;
 
     public MongoMigrationStore(IMongoDatabase database, string stateCollection)
     {
         // Always the primary with majority read and write concerns, whatever the connection string (or an application's
         // IMongoClient) says: a secondary can be missing the latest state or lock, and a write that only one node has
         // can be rolled back by a failover. Writes inside a transaction use the transaction's concerns instead.
+        _database = database;
         database = database
             .WithReadPreference(ReadPreference.Primary)
             .WithReadConcern(ReadConcern.Majority)
@@ -162,6 +166,27 @@ public sealed class MongoMigrationStore : IMigrationStore
 
     public async Task<LockInfo?> TryAcquireLockAsync(string runId, string? host, TimeSpan ttl, CancellationToken cancellationToken)
     {
+        try
+        {
+            if (await SupportsTransactionsAsync(cancellationToken))
+            {
+                // Lease and fence ownership change in the same commit; heartbeats only update the lease.
+                return await InLockTransactionAsync(
+                    (session, ct) => TryAcquireLockCoreAsync(runId, host, ttl, session, ct), cancellationToken);
+            }
+
+            return await TryAcquireLockCoreAsync(runId, host, ttl, null, cancellationToken);
+        }
+        catch (MongoCommandException e) when (e.Code == DuplicateKeyCode)
+        {
+            // Another run created the lock at the same moment and the server didn't retry the upsert; that run has it.
+            return null;
+        }
+    }
+
+    private async Task<LockInfo?> TryAcquireLockCoreAsync(
+        string runId, string? host, TimeSpan ttl, IClientSessionHandle? session, CancellationToken cancellationToken)
+    {
         // One atomic upsert: take the lock if there isn't one or it has expired (a missing expiresAt sorts before any
         // date), otherwise leave it as it is. The document it returns says who holds the lock.
         static BsonDocument IfTaken(BsonValue taken, string field) => new("$cond", new BsonArray { "$_take", taken, "$" + field });
@@ -177,20 +202,19 @@ public sealed class MongoMigrationStore : IMigrationStore
             }),
             new BsonDocument("$unset", "_take"));
 
-        try
+        var filter = new BsonDocument("_id", LockId);
+        var options = new FindOneAndUpdateOptions<BsonDocument> { IsUpsert = true, ReturnDocument = ReturnDocument.After };
+        var document = session is null
+            ? await _lock.FindOneAndUpdateAsync(filter, update, options, cancellationToken)
+            : await _lock.FindOneAndUpdateAsync(session, filter, update, options, cancellationToken);
+        if (session is not null && GetString(document, "runId") == runId)
         {
-            var document = await _lock.FindOneAndUpdateAsync(
-                new BsonDocument("_id", LockId),
-                update,
-                new FindOneAndUpdateOptions<BsonDocument> { IsUpsert = true, ReturnDocument = ReturnDocument.After },
-                cancellationToken);
-            return GetString(document, "runId") == runId ? ToLock(document) : null;
+            await _lock.ReplaceOneAsync(session, new BsonDocument("_id", FenceId),
+                new BsonDocument { { "_id", FenceId }, { "runId", runId } },
+                new ReplaceOptions { IsUpsert = true }, cancellationToken);
         }
-        catch (MongoCommandException e) when (e.Code == DuplicateKeyCode)
-        {
-            // Another run created the lock at the same moment and the server didn't retry the upsert; that run has it.
-            return null;
-        }
+
+        return GetString(document, "runId") == runId ? ToLock(document) : null;
     }
 
     public async Task<bool> RenewLockAsync(string runId, TimeSpan ttl, CancellationToken cancellationToken)
@@ -203,8 +227,26 @@ public sealed class MongoMigrationStore : IMigrationStore
         return result.MatchedCount == 1;
     }
 
-    public Task ReleaseLockAsync(string runId, CancellationToken cancellationToken) =>
-        _lock.DeleteOneAsync(new BsonDocument { { "_id", LockId }, { "runId", runId } }, cancellationToken);
+    public async Task ReleaseLockAsync(string runId, CancellationToken cancellationToken)
+    {
+        var filter = new BsonDocument { { "_id", LockId }, { "runId", runId } };
+        if (!await SupportsTransactionsAsync(cancellationToken))
+        {
+            await _lock.DeleteOneAsync(filter, cancellationToken);
+            return;
+        }
+
+        await InLockTransactionAsync(async (session, ct) =>
+        {
+            var result = await _lock.DeleteOneAsync(session, filter, cancellationToken: ct);
+            if (result.DeletedCount == 1)
+            {
+                await _lock.DeleteOneAsync(session, new BsonDocument { { "_id", FenceId }, { "runId", runId } }, cancellationToken: ct);
+            }
+
+            return true;
+        }, cancellationToken);
+    }
 
     public async Task<bool> FenceLockAsync(string runId, IExecutionScope scope, CancellationToken cancellationToken)
     {
@@ -214,12 +256,21 @@ public sealed class MongoMigrationStore : IMigrationStore
         }
 
         var session = SessionOf(scope) ?? throw new InvalidOperationException("A transactional scope has no MongoDB session.");
-        var filter = new BsonDocument
+        // A transaction's snapshot can predate heartbeats, so check the live lease outside the session. A takeover
+        // or unlock also changes the fence document atomically, making the following write conflict if ownership changed.
+        var leaseFilter = new BsonDocument
         {
             { "_id", LockId },
             { "runId", runId },
             { "$expr", new BsonDocument("$gte", new BsonArray { "$expiresAt", "$$NOW" }) },
         };
+        var lease = await _lock.Find(leaseFilter).FirstOrDefaultAsync(cancellationToken);
+        if (lease is null)
+        {
+            return false;
+        }
+
+        var filter = new BsonDocument { { "_id", FenceId }, { "runId", runId } };
         var update = Pipeline(new BsonDocument("$set", new BsonDocument("fencedAt", "$$NOW")));
         var result = await _lock.UpdateOneAsync(session, filter, update, options: null, cancellationToken);
         return result.MatchedCount == 1;
@@ -243,8 +294,51 @@ public sealed class MongoMigrationStore : IMigrationStore
             filter.Add("$expr", Expired);
         }
 
-        var result = await _lock.DeleteOneAsync(filter, cancellationToken);
-        return result.DeletedCount == 1;
+        if (!await SupportsTransactionsAsync(cancellationToken))
+        {
+            var result = await _lock.DeleteOneAsync(filter, cancellationToken);
+            return result.DeletedCount == 1;
+        }
+
+        return await InLockTransactionAsync(async (session, ct) =>
+        {
+            var removed = await _lock.FindOneAndDeleteAsync(session, filter, cancellationToken: ct);
+            if (removed is null)
+            {
+                return false;
+            }
+
+            var fenceFilter = new BsonDocument("_id", FenceId);
+            if (GetString(removed, "runId") is { } runId)
+            {
+                fenceFilter.Add("runId", runId);
+            }
+
+            await _lock.DeleteOneAsync(session, fenceFilter, cancellationToken: ct);
+            return true;
+        }, cancellationToken);
+    }
+
+    private async Task<bool> SupportsTransactionsAsync(CancellationToken cancellationToken)
+    {
+        if (_supportsTransactions is { } supported)
+        {
+            return supported;
+        }
+
+        var hello = await _database.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1), cancellationToken: cancellationToken);
+        var result = hello.Contains("setName") || hello.TryGetValue("msg", out var msg) && msg.IsString && msg.AsString == "isdbgrid";
+        _supportsTransactions = result;
+        return result;
+    }
+
+    private async Task<T> InLockTransactionAsync<T>(
+        Func<IClientSessionHandle, CancellationToken, Task<T>> operation, CancellationToken cancellationToken)
+    {
+        using var session = await _database.Client.StartSessionAsync(cancellationToken: cancellationToken);
+        return await session.WithTransactionAsync(operation,
+            new TransactionOptions(readConcern: ReadConcern.Snapshot, readPreference: ReadPreference.Primary, writeConcern: WriteConcern.WMajority),
+            cancellationToken);
     }
 
     /// <summary>Whether the lock document's <c>expiresAt</c> is before the server's current time.</summary>
