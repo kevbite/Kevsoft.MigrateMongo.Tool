@@ -284,8 +284,18 @@ internal sealed partial class MigrationEngine
         return holder;
     }
 
-    public Task<CommandResult> UpAsync(string? to, CancellationToken cancellationToken) =>
-        UpAsync(to, OutputOptionsFor(null), new CommandArguments(), cancellationToken);
+    public async Task<CommandResult> UpAsync(string? to, CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return await UpAsync(to, OutputOptionsFor(null), new CommandArguments(), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new CommandResult { ExitCode = ExitCodes.Failure, Message = "Cancelled." };
+        }
+    }
 
     private async Task<CommandResult> UpAsync(string? to, OutputOptions outputOptions, CommandArguments arguments, CancellationToken cancellationToken)
     {
