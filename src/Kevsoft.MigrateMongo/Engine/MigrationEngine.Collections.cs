@@ -340,7 +340,7 @@ internal sealed partial class MigrationEngine
         CollectionApplyResult applied;
         try
         {
-            applied = await _executor.ApplyCollectionAsync(collection, PolicyFor(collection, state, arguments), run, outputOptions, cancellationToken);
+            applied = await _executor.ApplyCollectionAsync(collection, PolicyFor(collection, state, arguments), run, outputOptions, _time, cancellationToken);
         }
         catch (Exception e)
         {

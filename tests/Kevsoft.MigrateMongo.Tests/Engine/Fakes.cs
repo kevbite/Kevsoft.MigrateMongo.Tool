@@ -299,14 +299,17 @@ internal sealed class FakeExecutor(bool supportsTransactions = true) : IMigratio
 
     public List<CollectionPolicy> Policies { get; } = [];
 
+    public TimeProvider? CollectionTimeProvider { get; private set; }
+
     public Task<CollectionPlan> PlanCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, CancellationToken cancellationToken)
     {
         Policies.Add(policy);
         return Task.FromResult(CollectionPlans?.Invoke(collection, policy) ?? new CollectionPlan { Declaration = "sha256:in-sync" });
     }
 
-    public Task<CollectionApplyResult> ApplyCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken)
+    public Task<CollectionApplyResult> ApplyCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, MigrationRunInfo run, OutputOptions options, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
+        CollectionTimeProvider = timeProvider;
         Calls.Add($"Apply:{collection.Name}");
         var plan = CollectionPlans?.Invoke(collection, policy) ?? new CollectionPlan { Declaration = "sha256:in-sync" };
         if (plan.Invalid || plan.Problems.Count > 0)

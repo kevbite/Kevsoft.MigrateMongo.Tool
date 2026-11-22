@@ -232,7 +232,7 @@ public interface IMigrationExecutor
     /// false and nothing changes). If a change fails, throws a <see cref="MigrationExecutionException"/> carrying what was
     /// recorded before it failed.
     /// </summary>
-    Task<CollectionApplyResult> ApplyCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, MigrationRunInfo run, OutputOptions options, CancellationToken cancellationToken);
+    Task<CollectionApplyResult> ApplyCollectionAsync(CollectionDescriptor collection, CollectionPolicy policy, MigrationRunInfo run, OutputOptions options, TimeProvider timeProvider, CancellationToken cancellationToken);
 
     /// <summary>
     /// Lists the collections and views in the database that aren't declared and what <see cref="UndeclaredPolicy.Prune"/>
