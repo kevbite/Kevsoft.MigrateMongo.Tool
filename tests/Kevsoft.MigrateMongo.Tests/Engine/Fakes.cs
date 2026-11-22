@@ -45,7 +45,16 @@ internal sealed class FakeStore(Func<DateTime>? clock = null) : IMigrationStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         var copy = Clone(state);
-        Write(scope, () => States[copy.Id] = copy);
+        var insert = scope?.Transactional == true || copy.State == MigrationStates.Applying;
+        Write(scope, () =>
+        {
+            if (insert && States.ContainsKey(copy.Id))
+            {
+                throw new InvalidOperationException($"Migration state '{copy.Id}' already exists.");
+            }
+
+            States[copy.Id] = copy;
+        });
         return Task.CompletedTask;
     }
 
@@ -98,6 +107,17 @@ internal sealed class FakeStore(Func<DateTime>? clock = null) : IMigrationStore
 
         Lock.ExpiresAt = _clock() + ttl;
         return Task.FromResult(true);
+    }
+
+    public Task<bool> FenceLockAsync(string runId, IExecutionScope scope, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!scope.Transactional)
+        {
+            throw new ArgumentException("Lock fencing requires a transactional execution scope.", nameof(scope));
+        }
+
+        return Task.FromResult(Lock?.RunId == runId && Lock.ExpiresAt >= _clock());
     }
 
     public Task ReleaseLockAsync(string runId, CancellationToken cancellationToken)

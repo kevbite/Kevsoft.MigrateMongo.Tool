@@ -5,7 +5,7 @@ after [`stateCollection`](./Configuration.md#migrations) (`_migrations` by defau
 |---|---|
 | `_migrations` | One document per migration, keyed by id, with its state, batch, checksum, timings and who applied it. |
 | `_migrations.history` | An append-only log of every apply, rollback, failure and `mark`, and every collection change (`kind: "collection"`). |
-| `_migrations.lock` | The lock document while a run is in progress, with its owner, expiry and heartbeat. |
+| `_migrations.lock` | The lease document with its owner, expiry and heartbeat; on deployments supporting transactions, an ownership-fence document is stored alongside it. |
 | `_migrations.collections` | One document per [collection definition](../guides/Managing-Collections.md), keyed by collection name: the declaration last applied, the one it replaced and when, the indexes it hid, and the last run's operations. |
 
 ## A migration's state

@@ -147,6 +147,9 @@ public interface IMigrationStore
     /// <summary>Inserts or replaces a state document. When <paramref name="scope"/> is transactional the write is part of it.</summary>
     Task SaveStateAsync(StoredMigrationState state, IExecutionScope? scope, CancellationToken cancellationToken);
 
+    /// <summary>Checks the lease and writes to the ownership fence within the transaction to prevent a stale owner from committing.</summary>
+    Task<bool> FenceLockAsync(string runId, IExecutionScope scope, CancellationToken cancellationToken);
+
     Task DeleteStateAsync(string id, IExecutionScope? scope, CancellationToken cancellationToken);
 
     Task AppendHistoryAsync(HistoryRecord record, IExecutionScope? scope, CancellationToken cancellationToken);

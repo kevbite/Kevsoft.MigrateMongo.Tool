@@ -20,6 +20,10 @@ hold it.
 
 Many app instances starting at once is safe: one applies the migrations, the others wait and then find nothing to do.
 
+On replica sets and sharded clusters, transactional migrations also fence their commit against a separate ownership
+document. A takeover or unlock changes that document atomically with the lease, without conflicting with routine
+heartbeats.
+
 ## Checksums
 
 Each migration's checksum is taken from its source code, ignoring whitespace and comments, and stored when it's
