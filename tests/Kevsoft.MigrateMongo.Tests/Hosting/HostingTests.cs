@@ -20,7 +20,8 @@ public sealed class HostingTests
 
         using var provider = services.BuildServiceProvider();
         provider.GetService<IMongoMigrationRunner>().ShouldNotBeNull();
-        provider.GetServices<IHostedService>().ShouldBeEmpty();
+        provider.GetServices<IHostedService>().OfType<MongoMigrationStartupService>().ShouldBeEmpty();
+        provider.GetServices<IHostedService>().OfType<IHostedLifecycleService>().ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -32,7 +33,8 @@ public sealed class HostingTests
         services.AddMongoMigrations(o => o.LockTtl = TimeSpan.FromMinutes(1)).RunOnStartup();
 
         using var provider = services.BuildServiceProvider();
-        provider.GetServices<IHostedService>().ShouldHaveSingleItem().ShouldBeAssignableTo<IHostedLifecycleService>();
+        provider.GetServices<IHostedService>().OfType<MongoMigrationStartupService>().ShouldHaveSingleItem();
+        provider.GetServices<IHostedService>().OfType<IHostedLifecycleService>().Count().ShouldBe(2);
         services.Count(d => d.ServiceType == typeof(IMongoMigrationRunner)).ShouldBe(1);
     }
 
@@ -91,6 +93,19 @@ public sealed class HostingTests
     }
 
     [Fact]
+    public async Task Options_are_validated_at_host_start_without_running_migrations()
+    {
+        var services = new ServiceCollection();
+        services.AddMongoMigrations(_ => { });
+        using var provider = services.BuildServiceProvider();
+        var validator = provider.GetServices<IHostedService>().OfType<IHostedLifecycleService>().Single();
+
+        var error = Should.Throw<InvalidOperationException>(() => validator.StartingAsync(CancellationToken.None));
+
+        error.Message.ShouldBe("Invalid Kevsoft.MigrateMongo options: DatabaseName is required.");
+    }
+
+    [Fact]
     public async Task Missing_database_name_is_reported()
     {
         var runner = Runner(services => services.AddMongoMigrations(_ => { }).AddSource(new EmptySource()));
@@ -146,7 +161,7 @@ public sealed class HostingTests
             o.IndexRebuild = (IndexRebuild)2;
         }).AddSource(new EmptySource()).RunOnStartup();
         using var provider = services.BuildServiceProvider();
-        var service = (IHostedLifecycleService)provider.GetServices<IHostedService>().Single();
+        var service = provider.GetServices<IHostedService>().OfType<MongoMigrationStartupService>().Single();
 
         var error = await Should.ThrowAsync<MongoMigrationException>(() => service.StartingAsync(TestContext.Current.CancellationToken));
 
@@ -403,12 +418,12 @@ public sealed class HostingTests
         return services.BuildServiceProvider().GetRequiredService<IMongoMigrationRunner>();
     }
 
-    private static IHostedLifecycleService StartupService(IMongoMigrationRunner runner, Action<MongoMigrationStartupOptions>? configure = null)
+    private static MongoMigrationStartupService StartupService(IMongoMigrationRunner runner, Action<MongoMigrationStartupOptions>? configure = null)
     {
         var services = new ServiceCollection();
         services.AddMongoMigrations(o => o.DatabaseName = "app").RunOnStartup(configure);
         services.AddSingleton(runner);
-        return (IHostedLifecycleService)services.BuildServiceProvider().GetServices<IHostedService>().Single();
+        return services.BuildServiceProvider().GetServices<IHostedService>().OfType<MongoMigrationStartupService>().Single();
     }
 
     private sealed record AppSettings(string DatabaseName);

@@ -33,8 +33,8 @@ builder.Services
 Without a `ConnectionString`, the `IMongoClient` registered in your app is used.
 
 Options use the standard `IOptionsFactory<MongoMigrationOptions>` pipeline, so `services.Configure<MongoMigrationOptions>(...)`
-and configuration binding can be used alongside `AddMongoMigrations`. Validation runs when the runner is invoked, and before
-the host starts when `RunOnStartup()` is enabled.
+and configuration binding can be used alongside `AddMongoMigrations`. Options are validated when the host starts and whenever
+the runner is invoked.
 
 To migrate more than one database from the same service provider, give each registration a name and resolve its keyed runner:
 

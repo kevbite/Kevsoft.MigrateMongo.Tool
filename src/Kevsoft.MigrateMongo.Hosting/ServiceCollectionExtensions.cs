@@ -130,6 +130,8 @@ namespace Kevsoft.MigrateMongo.Hosting
 
         public bool StartupServiceAdded { get; set; }
 
+        public bool OptionsValidationServiceAdded { get; set; }
+
         public List<Action<IServiceProvider, MongoMigrationOptions>> Configure { get; } = [];
 
         public List<Assembly> Assemblies { get; } = [];
@@ -141,9 +143,13 @@ namespace Kevsoft.MigrateMongo.Hosting
         public MongoMigrationOptions CreateOptions(IServiceProvider services)
         {
             var options = services.GetRequiredService<IOptionsFactory<MongoMigrationOptions>>().Create(OptionsName);
-            foreach (var configure in Configure)
+            if (Configure.Count > 0)
             {
-                configure(services, options);
+                using var scope = services.CreateScope();
+                foreach (var configure in Configure)
+                {
+                    configure(scope.ServiceProvider, options);
+                }
             }
 
             options.Validate();
@@ -246,6 +252,12 @@ namespace Microsoft.Extensions.DependencyInjection
                 services.TryAddSingleton<IMongoMigrationRunner, MongoMigrationRunner>();
             }
 
+            if (!registration.OptionsValidationServiceAdded)
+            {
+                services.AddSingleton<IHostedService>(provider => new MongoMigrationOptionsValidationService(provider, registration));
+                registration.OptionsValidationServiceAdded = true;
+            }
+
             return new MongoMigrationsBuilder(services, registration);
         }
 
@@ -261,7 +273,35 @@ namespace Microsoft.Extensions.DependencyInjection
                     new MongoMigrationRunner(provider, provider.GetRequiredKeyedService<MongoMigrationRegistration>(key)));
             }
 
+            if (!registration.OptionsValidationServiceAdded)
+            {
+                services.AddSingleton<IHostedService>(provider => new MongoMigrationOptionsValidationService(provider, registration));
+                registration.OptionsValidationServiceAdded = true;
+            }
+
             return new MongoMigrationsBuilder(services, registration);
         }
+    }
+
+    internal sealed class MongoMigrationOptionsValidationService(
+        IServiceProvider services,
+        MongoMigrationRegistration registration) : IHostedLifecycleService
+    {
+        public Task StartingAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            registration.CreateOptions(services);
+            return Task.CompletedTask;
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }
