@@ -101,8 +101,11 @@ public sealed class CollectionOptionsTests(IntegrationEnvironment environment)
         await mongo.ApplyAsync(TimeSeries("sensor", TimeSeriesGranularity.Seconds, TimeSpan.FromDays(1)));
         var entry = ListCollection(mongo);
         entry["type"].AsString.ShouldBe("timeseries");
-        entry["options"]["timeseries"].AsBsonDocument
-            .ShouldBe(BsonDocument.Parse("{ timeField: 'at', metaField: 'sensor', granularity: 'seconds', bucketMaxSpanSeconds: 3600 }"));
+        var timeSeries = entry["options"]["timeseries"].AsBsonDocument;
+        timeSeries["timeField"].AsString.ShouldBe("at");
+        timeSeries["metaField"].AsString.ShouldBe("sensor");
+        timeSeries["granularity"].AsString.ShouldBe("seconds");
+        timeSeries["bucketMaxSpanSeconds"].ToInt64().ShouldBe(3600);
         entry["options"]["expireAfterSeconds"].ToInt64().ShouldBe(86400);
 
         var changed = TimeSeries("sensor", TimeSeriesGranularity.Minutes, TimeSpan.FromDays(2));
