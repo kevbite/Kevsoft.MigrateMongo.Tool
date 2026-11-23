@@ -19,7 +19,9 @@ public sealed class TemplateTests
     {
         var template = RenderAuth(Read("project", "MigrateMongo.Migrations.csproj"), aws);
 
-        var rendered = template.Replace("net10.0", framework).Replace("KEVSOFT_MIGRATEMONGO_VERSION", "1.2.3");
+        var rendered = template.Replace("net10.0", framework)
+            .Replace("KEVSOFT_MIGRATEMONGO_VERSION", "1.2.3")
+            .Replace("MONGODRIVER_VERSION", ToolInfo.DefaultDriverVersion);
 
         rendered.ShouldBe(Normalize(Scaffolding.ProjectFile(framework, "1.2.3", ToolInfo.DefaultDriverVersion, aws)));
     }

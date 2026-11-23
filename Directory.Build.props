@@ -31,5 +31,6 @@
 
     <!-- Lowest supported MongoDB.Driver; CI overrides this to test the compat matrix. -->
     <MongoDriverVersion Condition="'$(MongoDriverVersion)' == ''">3.9.0</MongoDriverVersion>
+    <DefaultMongoDriverVersion>3.13.0</DefaultMongoDriverVersion>
   </PropertyGroup>
 </Project>

@@ -70,9 +70,12 @@ public sealed class MongoMigrationStore : IMigrationStore
         _initialized = true;
     }
 
-    public async Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<StoredMigrationState>> GetStatesAsync(CancellationToken cancellationToken, bool includeOperations = false)
     {
-        var documents = await _states.Find(FilterDefinition<BsonDocument>.Empty).ToListAsync(cancellationToken);
+        var find = _states.Find(FilterDefinition<BsonDocument>.Empty);
+        var documents = includeOperations
+            ? await find.ToListAsync(cancellationToken)
+            : await find.Project<BsonDocument>(new BsonDocument("operations", 0)).ToListAsync(cancellationToken);
         return documents.Select(ToState).ToList();
     }
 

@@ -20,6 +20,21 @@ public sealed class CollectionEngineTests
             Provenance = new Provenance { Host = "test-host", User = "tester", Library = "1.0.0", Driver = "3.5.0", Runtime = "10.0.0" },
         }, _sink, collections: collections.Select(Collections.Create));
 
+    [Fact]
+    public async Task Collection_application_receives_the_engine_time_provider()
+    {
+        var timeProvider = new FixedTime(DateTime.UtcNow);
+        var engine = new MigrationEngine(_store, _executor, [], new EngineOptions
+        {
+            LockWaitTimeout = TimeSpan.Zero,
+            Provenance = new Provenance { Host = "test-host", User = "tester", Library = "1.0.0", Driver = "3.5.0", Runtime = "10.0.0" },
+        }, _sink, timeProvider, [Collections.Create("users")]);
+
+        await engine.UpAsync(null, CancellationToken.None);
+
+        _executor.CollectionTimeProvider.ShouldBeSameAs(timeProvider);
+    }
+
     [Theory]
     [InlineData("status", 2, 0, "Invalid migration configuration: indexes.onRebuild must be allow or fail.")]
     [InlineData("up", 0, -1, "Invalid migration configuration: validators.onInvalidDocuments must be warn or fail.")]

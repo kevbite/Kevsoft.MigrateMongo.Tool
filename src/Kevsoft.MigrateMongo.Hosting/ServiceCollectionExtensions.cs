@@ -1,8 +1,10 @@
 using System.Reflection;
 using Kevsoft.MigrateMongo.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Kevsoft.MigrateMongo.Hosting
 {
@@ -54,7 +56,23 @@ namespace Kevsoft.MigrateMongo.Hosting
         public MongoMigrationsBuilder RunOnStartup(Action<MongoMigrationStartupOptions>? configure = null)
         {
             configure?.Invoke(Registration.Startup);
-            Services.TryAddEnumerable(Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Singleton<IHostedService, MongoMigrationStartupService>());
+            if (!Registration.StartupServiceAdded)
+            {
+                if (Registration.OptionsName.Length == 0)
+                {
+                    Services.TryAddEnumerable(Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Singleton<IHostedService, MongoMigrationStartupService>());
+                }
+                else
+                {
+                    Services.AddSingleton<IHostedService>(services =>
+                        new MongoMigrationStartupService(
+                            services.GetRequiredKeyedService<IMongoMigrationRunner>(Registration.OptionsName),
+                            Registration));
+                }
+
+                Registration.StartupServiceAdded = true;
+            }
+
             return this;
         }
     }
@@ -106,6 +124,14 @@ namespace Kevsoft.MigrateMongo.Hosting
 
     internal sealed class MongoMigrationRegistration
     {
+        public MongoMigrationRegistration(string optionsName) => OptionsName = optionsName;
+
+        public string OptionsName { get; }
+
+        public bool StartupServiceAdded { get; set; }
+
+        public bool OptionsValidationServiceAdded { get; set; }
+
         public List<Action<IServiceProvider, MongoMigrationOptions>> Configure { get; } = [];
 
         public List<Assembly> Assemblies { get; } = [];
@@ -116,10 +142,14 @@ namespace Kevsoft.MigrateMongo.Hosting
 
         public MongoMigrationOptions CreateOptions(IServiceProvider services)
         {
-            var options = new MongoMigrationOptions();
-            foreach (var configure in Configure)
+            var options = services.GetRequiredService<IOptionsFactory<MongoMigrationOptions>>().Create(OptionsName);
+            if (Configure.Count > 0)
             {
-                configure(services, options);
+                using var scope = services.CreateScope();
+                foreach (var configure in Configure)
+                {
+                    configure(scope.ServiceProvider, options);
+                }
             }
 
             options.Validate();
@@ -164,8 +194,11 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         public static MongoMigrationsBuilder AddMongoMigrations(this IServiceCollection services, Action<MongoMigrationOptions> configure)
         {
+            ArgumentNullException.ThrowIfNull(services);
             ArgumentNullException.ThrowIfNull(configure);
-            return services.AddMongoMigrations((_, options) => configure(options));
+            services.AddOptions<MongoMigrationOptions>();
+            services.Configure(configure);
+            return DefaultRegistration(services);
         }
 
         /// <inheritdoc cref="AddMongoMigrations(IServiceCollection, Action{MongoMigrationOptions})"/>
@@ -174,16 +207,101 @@ namespace Microsoft.Extensions.DependencyInjection
             ArgumentNullException.ThrowIfNull(services);
             ArgumentNullException.ThrowIfNull(configure);
 
-            var registration = services.FirstOrDefault(d => d.ServiceType == typeof(MongoMigrationRegistration))?.ImplementationInstance as MongoMigrationRegistration;
+            var registration = DefaultRegistration(services).Registration;
+            registration.Configure.Add(configure);
+            return new MongoMigrationsBuilder(services, registration);
+        }
+
+        /// <summary>
+        /// Registers a separately keyed runner, allowing multiple migration databases in one service provider.
+        /// Resolve it with <c>GetRequiredKeyedService&lt;IMongoMigrationRunner&gt;(name)</c>.
+        /// </summary>
+        public static MongoMigrationsBuilder AddMongoMigrations(this IServiceCollection services, string name, Action<MongoMigrationOptions> configure)
+        {
+            ArgumentNullException.ThrowIfNull(services);
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+            ArgumentNullException.ThrowIfNull(configure);
+
+            services.AddOptions<MongoMigrationOptions>();
+            services.Configure(name, configure);
+            return NamedRegistration(services, name);
+        }
+
+        /// <summary>Registers a separately keyed runner with options configured from application services.</summary>
+        public static MongoMigrationsBuilder AddMongoMigrations(this IServiceCollection services, string name, Action<IServiceProvider, MongoMigrationOptions> configure)
+        {
+            ArgumentNullException.ThrowIfNull(services);
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+            ArgumentNullException.ThrowIfNull(configure);
+
+            services.AddOptions<MongoMigrationOptions>();
+            var registration = NamedRegistration(services, name).Registration;
+            registration.Configure.Add(configure);
+            return new MongoMigrationsBuilder(services, registration);
+        }
+
+        private static MongoMigrationsBuilder DefaultRegistration(IServiceCollection services)
+        {
+            services.AddOptions<MongoMigrationOptions>();
+            var registration = services.FirstOrDefault(d =>
+                d.ServiceType == typeof(MongoMigrationRegistration) && d.ServiceKey is null)?.ImplementationInstance as MongoMigrationRegistration;
             if (registration is null)
             {
-                registration = new MongoMigrationRegistration();
+                registration = new MongoMigrationRegistration(string.Empty);
                 services.AddSingleton(registration);
                 services.TryAddSingleton<IMongoMigrationRunner, MongoMigrationRunner>();
             }
 
-            registration.Configure.Add(configure);
+            if (!registration.OptionsValidationServiceAdded)
+            {
+                services.AddSingleton<IHostedService>(provider => new MongoMigrationOptionsValidationService(provider, registration));
+                registration.OptionsValidationServiceAdded = true;
+            }
+
             return new MongoMigrationsBuilder(services, registration);
         }
+
+        private static MongoMigrationsBuilder NamedRegistration(IServiceCollection services, string name)
+        {
+            var registration = services.FirstOrDefault(d =>
+                d.ServiceType == typeof(MongoMigrationRegistration) && Equals(d.ServiceKey, name))?.ImplementationInstance as MongoMigrationRegistration;
+            if (registration is null)
+            {
+                registration = new MongoMigrationRegistration(name);
+                services.AddKeyedSingleton(name, registration);
+                services.AddKeyedSingleton<IMongoMigrationRunner>(name, (provider, key) =>
+                    new MongoMigrationRunner(provider, provider.GetRequiredKeyedService<MongoMigrationRegistration>(key)));
+            }
+
+            if (!registration.OptionsValidationServiceAdded)
+            {
+                services.AddSingleton<IHostedService>(provider => new MongoMigrationOptionsValidationService(provider, registration));
+                registration.OptionsValidationServiceAdded = true;
+            }
+
+            return new MongoMigrationsBuilder(services, registration);
+        }
+    }
+
+    internal sealed class MongoMigrationOptionsValidationService(
+        IServiceProvider services,
+        MongoMigrationRegistration registration) : IHostedLifecycleService
+    {
+        public Task StartingAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            registration.CreateOptions(services);
+            return Task.CompletedTask;
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

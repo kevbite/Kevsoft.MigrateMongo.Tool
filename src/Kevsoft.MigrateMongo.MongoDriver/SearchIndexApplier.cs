@@ -19,6 +19,7 @@ internal static class SearchIndexApplier
         SearchIndexPlan plan,
         bool waitForReady,
         TimeSpan waitTimeout,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         if (plan.Changes.All(c => c.Commands.Count == 0) && (!waitForReady || plan.Pending.Count == 0))
@@ -42,13 +43,13 @@ internal static class SearchIndexApplier
                 // waiting is on, so does any other drop, so the run doesn't return with the index still listed.
                 if (Drops(command) && (change.WaitForDropName is not null || waitForReady))
                 {
-                    await WaitForGoneAsync(collection, collectionName, command["name"].AsString, waitTimeout, cancellationToken);
+                    await WaitForGoneAsync(collection, collectionName, command["name"].AsString, waitTimeout, timeProvider, cancellationToken);
                 }
             }
 
             if (waitForReady && change.WaitForName is { } name)
             {
-                await WaitForReadyAsync(collection, collectionName, name, change.WaitForDefinition, waitTimeout, cancellationToken);
+                await WaitForReadyAsync(collection, collectionName, name, change.WaitForDefinition, waitTimeout, timeProvider, cancellationToken);
             }
         }
 
@@ -56,7 +57,7 @@ internal static class SearchIndexApplier
         {
             foreach (var name in plan.Pending)
             {
-                await WaitForReadyAsync(collection, collectionName, name, null, waitTimeout, cancellationToken);
+                await WaitForReadyAsync(collection, collectionName, name, null, waitTimeout, timeProvider, cancellationToken);
             }
         }
     }
@@ -69,18 +70,19 @@ internal static class SearchIndexApplier
         string collectionName,
         string name,
         TimeSpan waitTimeout,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow + waitTimeout;
+        var started = timeProvider.GetTimestamp();
         while (await LatestAsync(collection, name, cancellationToken) is not null)
         {
-            if (DateTime.UtcNow >= deadline)
+            if (timeProvider.GetElapsedTime(started) >= waitTimeout)
             {
                 throw new TimeoutException(
                     $"Search index {collectionName}.{name} wasn't dropped within {waitTimeout.TotalSeconds:0} seconds.");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(1), timeProvider, cancellationToken);
         }
     }
 
@@ -90,9 +92,10 @@ internal static class SearchIndexApplier
         string name,
         BsonDocument? expectedDefinition,
         TimeSpan waitTimeout,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow + waitTimeout;
+        var started = timeProvider.GetTimestamp();
         while (true)
         {
             var index = await LatestAsync(collection, name, cancellationToken);
@@ -114,13 +117,13 @@ internal static class SearchIndexApplier
                 return;
             }
 
-            if (DateTime.UtcNow >= deadline)
+            if (timeProvider.GetElapsedTime(started) >= waitTimeout)
             {
                 throw new TimeoutException(
                     $"Search index {collectionName}.{name} wasn't ready within {waitTimeout.TotalSeconds:0} seconds (status {status ?? "unknown"}).");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(1), timeProvider, cancellationToken);
         }
     }
 

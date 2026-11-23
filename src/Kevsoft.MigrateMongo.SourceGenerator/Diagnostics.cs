@@ -101,4 +101,12 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor GenericMigration = new(
+        "MM0013",
+        "Migration cannot be generic",
+        "'{0}' cannot be a generic migration or be nested in a generic type",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

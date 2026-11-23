@@ -11,9 +11,9 @@
     <PackageReference Include="Kevsoft.MigrateMongo.Runner" Version="KEVSOFT_MIGRATEMONGO_VERSION" />
 <!--#if (Auth == "aws") -->
     <PackageReference Include="Kevsoft.MigrateMongo.Aws" Version="KEVSOFT_MIGRATEMONGO_VERSION" />
-    <PackageReference Include="MongoDB.Driver.Authentication.AWS" Version="3.13.0" />
+    <PackageReference Include="MongoDB.Driver.Authentication.AWS" Version="MONGODRIVER_VERSION" />
 <!--#endif -->
-    <PackageReference Include="MongoDB.Driver" Version="3.13.0" />
+    <PackageReference Include="MongoDB.Driver" Version="MONGODRIVER_VERSION" />
   </ItemGroup>
 
 </Project>

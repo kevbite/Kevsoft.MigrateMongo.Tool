@@ -283,9 +283,10 @@ public static class MigrateMongoRunner
             services.AddSingleton<IMongoClient>(_ => backend!.Client);
             services.AddSingleton<IMongoDatabase>(_ => backend!.Database);
             options.ConfigureServices?.Invoke(services);
-            await using var provider = services.BuildServiceProvider();
+            await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
 
-            backend = MongoDriverBackend.Create(config, provider, loggerFactory);
+            await using var scope = provider.CreateAsyncScope();
+            backend = MongoDriverBackend.Create(config, scope.ServiceProvider, loggerFactory);
             try
             {
                 var engine = new MigrationEngine(backend.Store, backend.Executor, migrations, engineOptions, sink, collections: collections);

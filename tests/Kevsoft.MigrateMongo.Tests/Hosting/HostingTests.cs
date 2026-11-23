@@ -20,7 +20,8 @@ public sealed class HostingTests
 
         using var provider = services.BuildServiceProvider();
         provider.GetService<IMongoMigrationRunner>().ShouldNotBeNull();
-        provider.GetServices<IHostedService>().ShouldBeEmpty();
+        provider.GetServices<IHostedService>().OfType<MongoMigrationStartupService>().ShouldBeEmpty();
+        provider.GetServices<IHostedService>().OfType<IHostedLifecycleService>().ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -32,7 +33,8 @@ public sealed class HostingTests
         services.AddMongoMigrations(o => o.LockTtl = TimeSpan.FromMinutes(1)).RunOnStartup();
 
         using var provider = services.BuildServiceProvider();
-        provider.GetServices<IHostedService>().ShouldHaveSingleItem().ShouldBeAssignableTo<IHostedLifecycleService>();
+        provider.GetServices<IHostedService>().OfType<MongoMigrationStartupService>().ShouldHaveSingleItem();
+        provider.GetServices<IHostedService>().OfType<IHostedLifecycleService>().Count().ShouldBe(2);
         services.Count(d => d.ServiceType == typeof(IMongoMigrationRunner)).ShouldBe(1);
     }
 
@@ -58,6 +60,49 @@ public sealed class HostingTests
         options.TransactionRetryTimeout.ShouldBe(TimeSpan.FromSeconds(120));
         options.OnChecksumMismatch.ShouldBe(ChecksumMismatchBehavior.Fail);
         options.Transaction.ShouldBe(TransactionMode.Auto);
+    }
+
+    [Fact]
+    public void Named_migrations_can_configure_distinct_databases_and_runners()
+    {
+        var services = new ServiceCollection();
+        var first = services.AddMongoMigrations("catalog", o => o.DatabaseName = "catalog-db");
+        var second = services.AddMongoMigrations("identity", o => o.DatabaseName = "identity-db");
+        first.AddSource(new EmptySource());
+        second.AddSource(new EmptySource());
+
+        using var provider = services.BuildServiceProvider();
+
+        first.Registration.CreateOptions(provider).DatabaseName.ShouldBe("catalog-db");
+        second.Registration.CreateOptions(provider).DatabaseName.ShouldBe("identity-db");
+        provider.GetRequiredKeyedService<IMongoMigrationRunner>("catalog").ShouldNotBeNull();
+        provider.GetRequiredKeyedService<IMongoMigrationRunner>("identity").ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void Service_provider_options_work_without_the_action_only_overload()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new AppSettings("configured-from-service"));
+        var builder = services.AddMongoMigrations((provider, options) =>
+            options.DatabaseName = provider.GetRequiredService<AppSettings>().DatabaseName);
+
+        using var provider = services.BuildServiceProvider();
+
+        builder.Registration.CreateOptions(provider).DatabaseName.ShouldBe("configured-from-service");
+    }
+
+    [Fact]
+    public async Task Options_are_validated_at_host_start_without_running_migrations()
+    {
+        var services = new ServiceCollection();
+        services.AddMongoMigrations(_ => { });
+        using var provider = services.BuildServiceProvider();
+        var validator = provider.GetServices<IHostedService>().OfType<IHostedLifecycleService>().Single();
+
+        var error = Should.Throw<InvalidOperationException>(() => validator.StartingAsync(CancellationToken.None));
+
+        error.Message.ShouldBe("Invalid Kevsoft.MigrateMongo options: DatabaseName is required.");
     }
 
     [Fact]
@@ -116,7 +161,7 @@ public sealed class HostingTests
             o.IndexRebuild = (IndexRebuild)2;
         }).AddSource(new EmptySource()).RunOnStartup();
         using var provider = services.BuildServiceProvider();
-        var service = (IHostedLifecycleService)provider.GetServices<IHostedService>().Single();
+        var service = provider.GetServices<IHostedService>().OfType<MongoMigrationStartupService>().Single();
 
         var error = await Should.ThrowAsync<MongoMigrationException>(() => service.StartingAsync(TestContext.Current.CancellationToken));
 
@@ -373,12 +418,12 @@ public sealed class HostingTests
         return services.BuildServiceProvider().GetRequiredService<IMongoMigrationRunner>();
     }
 
-    private static IHostedLifecycleService StartupService(IMongoMigrationRunner runner, Action<MongoMigrationStartupOptions>? configure = null)
+    private static MongoMigrationStartupService StartupService(IMongoMigrationRunner runner, Action<MongoMigrationStartupOptions>? configure = null)
     {
         var services = new ServiceCollection();
         services.AddMongoMigrations(o => o.DatabaseName = "app").RunOnStartup(configure);
         services.AddSingleton(runner);
-        return (IHostedLifecycleService)services.BuildServiceProvider().GetServices<IHostedService>().Single();
+        return services.BuildServiceProvider().GetServices<IHostedService>().OfType<MongoMigrationStartupService>().Single();
     }
 
     private sealed record AppSettings(string DatabaseName);

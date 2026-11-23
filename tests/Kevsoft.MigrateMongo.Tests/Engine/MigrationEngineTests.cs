@@ -334,8 +334,10 @@ public sealed class MigrationEngineTests
             ],
             configure: o => o.LockTtl = TimeSpan.FromMilliseconds(300));
 
-        await Should.ThrowAsync<OperationCanceledException>(() => engine.UpAsync(null, cancellation.Token));
+        var result = await engine.UpAsync(null, cancellation.Token);
 
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        result.Message.ShouldBe("Cancelled.");
         // The lock was renewed while the migration carried on, and released once the run stopped.
         renewals.ShouldBeGreaterThan(renewalsWhenCancelled + 3);
         _store.ReleaseCount.ShouldBe(1);
@@ -350,11 +352,24 @@ public sealed class MigrationEngineTests
         using var cancellation = new CancellationTokenSource();
         var engine = Engine([Migrations.Create("20260101000001", "tx", up: () => cancellation.CancelAsync())]);
 
-        await engine.UpAsync(null, cancellation.Token);
+        var result = await engine.UpAsync(null, cancellation.Token);
 
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
         _store.States.ShouldBeEmpty();
         _store.History.Select(h => (h.MigrationId, h.Event, h.Error)).ShouldBe([("20260101000001", "failed", "The operation was cancelled.")]);
         _store.ReleaseCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Up_returns_a_failure_result_when_cancelled_before_initialization()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        var result = await Engine([]).UpAsync(null, cancellation.Token);
+
+        result.ExitCode.ShouldBe(ExitCodes.Failure);
+        result.Message.ShouldBe("Cancelled.");
     }
 
     [Fact]

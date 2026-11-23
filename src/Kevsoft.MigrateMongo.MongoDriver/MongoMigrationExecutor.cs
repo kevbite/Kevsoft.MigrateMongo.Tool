@@ -208,6 +208,7 @@ public sealed class MongoMigrationExecutor(
         CollectionPolicy policy,
         MigrationRunInfo run,
         OutputOptions options,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var (collectionOptions, index, search) = await PlanAllAsync(collection, policy, cancellationToken);
@@ -245,7 +246,7 @@ public sealed class MongoMigrationExecutor(
             await IndexApplier.ApplyAsync(context, collection.Name, index, cancellationToken);
             if (search is not null)
             {
-                await SearchIndexApplier.ApplyAsync(context, collection.Name, search, policy.SearchWaitForReady, policy.SearchWaitTimeout, cancellationToken);
+                await SearchIndexApplier.ApplyAsync(context, collection.Name, search, policy.SearchWaitForReady, policy.SearchWaitTimeout, timeProvider, cancellationToken);
             }
         }
         catch (Exception e)
