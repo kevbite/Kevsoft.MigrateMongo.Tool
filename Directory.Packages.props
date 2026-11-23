@@ -29,6 +29,6 @@
     <!-- Tests -->
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
-    <PackageVersion Include="Testcontainers" Version="4.16.0" />
+    <PackageVersion Include="Testcontainers" Version="4.17.0" />
   </ItemGroup>
 </Project>
