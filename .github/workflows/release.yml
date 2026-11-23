@@ -110,6 +110,9 @@ jobs:
       attestations: write
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/migrate-mongo
+      IMAGE_DESCRIPTION: >-
+        Docker images for Kevsoft.MigrateMongo. The default SDK image builds and runs a migrations project; the -bundle
+        image runs a prebuilt bundle without installing .NET on the host.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -166,6 +169,8 @@ jobs:
           push: true
           tags: ${{ steps.tool.outputs.tags }}
           labels: ${{ steps.tool.outputs.labels }}
+          outputs: >-
+            type=image,name=${{ env.IMAGE }},annotation-index.org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
 
       - name: Push bundle image
         id: push-bundle
@@ -177,6 +182,8 @@ jobs:
           push: true
           tags: ${{ steps.bundle.outputs.tags }}
           labels: ${{ steps.bundle.outputs.labels }}
+          outputs: >-
+            type=image,name=${{ env.IMAGE }},annotation-index.org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
 
       - name: Attest build provenance
         if: ${{ !github.event.repository.private }}

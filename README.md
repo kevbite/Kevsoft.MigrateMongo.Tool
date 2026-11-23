@@ -4,6 +4,9 @@ Database migrations for [MongoDB](https://www.mongodb.com/) in .NET. Write migra
 [MongoDB C# driver](https://github.com/mongodb/mongo-csharp-driver), then apply and roll them back from the command
 line, your build server or your application.
 
+**Using Docker?** The [Docker image usage guide](docker/README.md) covers the SDK and bundle images, `docker run`
+examples and MongoDB networking.
+
 **📖 [Read the documentation](https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/wiki)** for guides to every
 scenario and a full reference.
 
@@ -41,8 +44,8 @@ dotnet new tool-manifest
 dotnet tool install Kevsoft.MigrateMongo.Tool
 ```
 
-On Windows, Linux and macOS (x64 and arm64) you get a Native AOT build that doesn't need a .NET runtime. To install without .NET,
-use the install script or the Docker image:
+On Windows, Linux and macOS (x64 and arm64) you get a Native AOT build that doesn't need a .NET runtime. To install the
+native executable without .NET, use one of the install scripts below.
 
 ```bash
 curl -fsSL https://github.com/kevbite/Kevsoft.MigrateMongo.Tool/releases/latest/download/install.sh | sh
